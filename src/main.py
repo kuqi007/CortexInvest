@@ -23,6 +23,7 @@ from src.agents.researcher_bull import researcher_bull_agent
 from src.agents.researcher_bear import researcher_bear_agent
 from src.agents.debate_room import debate_room_agent
 from src.agents.macro_analyst import macro_analyst_agent
+from src.agents.macro_news_agent import macro_news_agent
 
 # --- Logging and Backend Imports ---
 from src.utils.output_logger import OutputLogger
@@ -152,8 +153,7 @@ def run_hedge_fund(run_id: str, ticker: str, start_date: str, end_date: str, por
 # --- Define the Workflow Graph ---
 workflow = StateGraph(AgentState)
 
-# Add nodes - Remove explicit log_agent_execution calls
-# The @agent_endpoint decorator now handles logging to BaseLogStorage
+# Add nodes - including the new macro_news_agent
 workflow.add_node("market_data_agent", market_data_agent)
 workflow.add_node("technical_analyst_agent", technical_analyst_agent)
 workflow.add_node("fundamentals_agent", fundamentals_agent)
@@ -165,17 +165,48 @@ workflow.add_node("debate_room_agent", debate_room_agent)
 workflow.add_node("risk_management_agent", risk_management_agent)
 workflow.add_node("macro_analyst_agent", macro_analyst_agent)
 workflow.add_node("portfolio_management_agent", portfolio_management_agent)
+workflow.add_node("macro_news_agent", macro_news_agent)
 
-# Define the workflow edges (remain unchanged)
-workflow.set_entry_point("market_data_agent")
+# Define a router to enable parallel execution from the start
+# This router will decide which initial agents to trigger.
+# For simplicity, we'll assume it always triggers both market_data_agent and macro_news_agent.
+# In a more complex scenario, this router could make decisions based on the initial state.
 
-# Market Data to Analysts
+
+def entry_router(state: AgentState):
+    print("--- Entry Router: Triggering initial parallel agents ---")
+    # This is a conceptual split. LangGraph needs explicit paths.
+    # We will return a list of next nodes to invoke if the framework supports it,
+    # or define paths from this node.
+    # For LangGraph, usually a conditional edge targets ONE next node based on logic.
+    # To achieve parallelism, the "start" conceptually fans out.
+    # Let's define two distinct paths originating after this conceptual router.
+    # The router itself doesn't execute them in parallel but directs the flow.
+    # For true parallel execution from the get-go, we need to ensure the invoke mechanism
+    # or graph structure supports it. LangGraph merges states from multiple incoming edges.
+
+    # This router logic is more for conceptual clarity if we were to make it conditional.
+    # For unconditional parallel start, we'll directly connect from a dummy start or set multiple entry points if supported.
+    # Given StateGraph.set_entry_point is singular, we use a dummy start node.
+    # This return signature is usually for conditional_edges's target resolver
+    return ["market_data_agent", "macro_news_agent"]
+
+
+# Create a dummy start node that will lead to parallel branches
+# This node does nothing but act as a branching point
+workflow.add_node("start_node", lambda state: state)
+workflow.set_entry_point("start_node")
+
+# Edges from the dummy start node to initiate parallel paths
+workflow.add_edge("start_node", "market_data_agent")
+workflow.add_edge("start_node", "macro_news_agent")
+
+# Market Data Path (remains largely the same)
 workflow.add_edge("market_data_agent", "technical_analyst_agent")
 workflow.add_edge("market_data_agent", "fundamentals_agent")
 workflow.add_edge("market_data_agent", "sentiment_agent")
 workflow.add_edge("market_data_agent", "valuation_agent")
 
-# Analysts to Researchers
 workflow.add_edge("technical_analyst_agent", "researcher_bull_agent")
 workflow.add_edge("fundamentals_agent", "researcher_bull_agent")
 workflow.add_edge("sentiment_agent", "researcher_bull_agent")
@@ -186,18 +217,20 @@ workflow.add_edge("fundamentals_agent", "researcher_bear_agent")
 workflow.add_edge("sentiment_agent", "researcher_bear_agent")
 workflow.add_edge("valuation_agent", "researcher_bear_agent")
 
-# Researchers to Debate Room
 workflow.add_edge("researcher_bull_agent", "debate_room_agent")
 workflow.add_edge("researcher_bear_agent", "debate_room_agent")
 
-# Debate Room to Risk Management
 workflow.add_edge("debate_room_agent", "risk_management_agent")
-
-# Risk Management to Macro Analyst
 workflow.add_edge("risk_management_agent", "macro_analyst_agent")
-
-# Macro Analyst to Portfolio Management
 workflow.add_edge("macro_analyst_agent", "portfolio_management_agent")
+
+# Macro News Path (independent and parallel)
+# Its output needs to be available to portfolio_management_agent.
+# LangGraph handles state merging when multiple edges point to the same node.
+# So, portfolio_management_agent will receive the combined state.
+workflow.add_edge("macro_news_agent", "portfolio_management_agent")
+
+# Final汇聚点 and End
 workflow.add_edge("portfolio_management_agent", END)
 
 # Compile the workflow graph
@@ -284,44 +317,44 @@ if __name__ == "__main__":
 # --- Historical Data Function (remains the same) ---
 
 
-def get_historical_data(symbol: str) -> pd.DataFrame:
-    # ... (keep existing function implementation) ...
-    current_date = datetime.now()
-    yesterday = current_date - timedelta(days=1)
-    end_date = yesterday
-    target_start_date = yesterday - timedelta(days=365)
+# def get_historical_data(symbol: str) -> pd.DataFrame:
+#     # ... (keep existing function implementation) ...
+#     current_date = datetime.now()
+#     yesterday = current_date - timedelta(days=1)
+#     end_date = yesterday
+#     target_start_date = yesterday - timedelta(days=365)
 
-    print(f"\n正在获取 {symbol} 的历史行情数据...")
-    print(f"目标开始日期：{target_start_date.strftime('%Y-%m-%d')}")
-    print(f"结束日期：{end_date.strftime('%Y-%m-%d')}")
+#     print(f"\n正在获取 {symbol} 的历史行情数据...")
+#     print(f"目标开始日期：{target_start_date.strftime('%Y-%m-%d')}")
+#     print(f"结束日期：{end_date.strftime('%Y-%m-%d')}")
 
-    try:
-        df = ak.stock_zh_a_hist(symbol=symbol,
-                                period="daily",
-                                start_date=target_start_date.strftime(
-                                    "%Y%m%d"),
-                                end_date=end_date.strftime("%Y%m%d"),
-                                adjust="qfq")
+#     try:
+#         df = ak.stock_zh_a_hist(symbol=symbol,
+#                                 period="daily",
+#                                 start_date=target_start_date.strftime(
+#                                     "%Y%m%d"),
+#                                 end_date=end_date.strftime("%Y%m%d"),
+#                                 adjust="qfq")
 
-        actual_days = len(df)
-        target_days = 365
+#         actual_days = len(df)
+#         target_days = 365
 
-        if actual_days < target_days:
-            print(f"提示：实际获取到的数据天数({actual_days}天)少于目标天数({target_days}天)")
-            print(f"将使用可获取到的所有数据进行分析")
+#         if actual_days < target_days:
+#             print(f"提示：实际获取到的数据天数({actual_days}天)少于目标天数({target_days}天)")
+#             print(f"将使用可获取到的所有数据进行分析")
 
-        print(f"成功获取历史行情数据，共 {actual_days} 条记录\n")
-        return df
+#         print(f"成功获取历史行情数据，共 {actual_days} 条记录\n")
+#         return df
 
-    except Exception as e:
-        print(f"获取历史数据时发生错误: {str(e)}")
-        print("将尝试获取最近可用的数据...")
+#     except Exception as e:
+#         print(f"获取历史数据时发生错误: {str(e)}")
+#         print("将尝试获取最近可用的数据...")
 
-        try:
-            df = ak.stock_zh_a_hist(
-                symbol=symbol, period="daily", adjust="qfq")
-            print(f"成功获取历史行情数据，共 {len(df)} 条记录\n")
-            return df
-        except Exception as e:
-            print(f"获取历史数据失败: {str(e)}")
-            return pd.DataFrame()
+#         try:
+#             df = ak.stock_zh_a_hist(
+#                 symbol=symbol, period="daily", adjust="qfq")
+#             print(f"成功获取历史行情数据，共 {len(df)} 条记录\n")
+#             return df
+#         except Exception as e:
+#             print(f"获取历史数据失败: {str(e)}")
+#             return pd.DataFrame()
