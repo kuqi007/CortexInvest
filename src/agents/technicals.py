@@ -1,5 +1,6 @@
 import math
 from typing import Dict
+import logging
 
 from langchain_core.messages import HumanMessage
 
@@ -11,6 +12,9 @@ import pandas as pd
 import numpy as np
 
 from src.tools.api import prices_to_df
+
+# 初始化 logger
+logger = logging.getLogger(__name__)
 
 
 ##### Technical Analyst #####
@@ -24,6 +28,7 @@ def technical_analyst_agent(state: AgentState):
     4. Volatility Analysis
     5. Statistical Arbitrage Signals
     """
+    logger.info("\n--- DEBUG: technical_analyst_agent START ---")
     show_workflow_status("Technical Analyst")
     show_reasoning = state["metadata"]["show_reasoning"]
     data = state["data"]
@@ -219,8 +224,13 @@ def technical_analyst_agent(state: AgentState):
         state["metadata"]["agent_reasoning"] = analysis_report
 
     show_workflow_status("Technical Analyst", "completed")
+
+    # 添加调试信息，打印将要返回的消息名称
+    logger.info(
+        f"--- DEBUG: technical_analyst_agent RETURN messages: {[msg.name for msg in (state['messages'] + [message])]} ---")
+
     return {
-        "messages": [message],
+        "messages": state["messages"] + [message],
         "data": data,
         "metadata": state["metadata"],
     }

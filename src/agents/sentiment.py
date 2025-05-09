@@ -63,7 +63,7 @@ def sentiment_agent(state: AgentState):
 
     show_workflow_status("Sentiment Analyst", "completed")
     return {
-        "messages": [message],
+        "messages": state["messages"] + [message],
         "data": {
             **data,
             "sentiment_analysis": sentiment_score

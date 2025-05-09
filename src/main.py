@@ -173,25 +173,6 @@ workflow.add_node("macro_news_agent", macro_news_agent)
 # In a more complex scenario, this router could make decisions based on the initial state.
 
 
-def entry_router(state: AgentState):
-    print("--- Entry Router: Triggering initial parallel agents ---")
-    # This is a conceptual split. LangGraph needs explicit paths.
-    # We will return a list of next nodes to invoke if the framework supports it,
-    # or define paths from this node.
-    # For LangGraph, usually a conditional edge targets ONE next node based on logic.
-    # To achieve parallelism, the "start" conceptually fans out.
-    # Let's define two distinct paths originating after this conceptual router.
-    # The router itself doesn't execute them in parallel but directs the flow.
-    # For true parallel execution from the get-go, we need to ensure the invoke mechanism
-    # or graph structure supports it. LangGraph merges states from multiple incoming edges.
-
-    # This router logic is more for conceptual clarity if we were to make it conditional.
-    # For unconditional parallel start, we'll directly connect from a dummy start or set multiple entry points if supported.
-    # Given StateGraph.set_entry_point is singular, we use a dummy start node.
-    # This return signature is usually for conditional_edges's target resolver
-    return ["market_data_agent", "macro_news_agent"]
-
-
 # Create a dummy start node that will lead to parallel branches
 # This node does nothing but act as a branching point
 workflow.add_node("start_node", lambda state: state)

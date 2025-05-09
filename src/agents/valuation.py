@@ -82,7 +82,7 @@ def valuation_agent(state: AgentState):
 
     show_workflow_status("Valuation Agent", "completed")
     return {
-        "messages": [message],
+        "messages": state["messages"] + [message],
         "data": {
             **data,
             "valuation_analysis": message_content

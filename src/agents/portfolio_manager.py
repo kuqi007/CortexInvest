@@ -1,17 +1,29 @@
 from langchain_core.messages import HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
 import json
+import logging
 
 from src.agents.state import AgentState, show_agent_reasoning, show_workflow_status
 from src.tools.openrouter_config import get_chat_completion
 from src.utils.api_utils import agent_endpoint, log_llm_interaction
 
+# 初始化 logger
+logger = logging.getLogger(__name__)
 
 ##### Portfolio Management Agent #####
+
+
 @agent_endpoint("portfolio_management", "负责投资组合管理和最终交易决策")
 def portfolio_management_agent(state: AgentState):
     """Responsible for portfolio management"""
     agent_name = "portfolio_management_agent"
+    logger.info(f"\n--- DEBUG: {agent_name} START ---")
+    logger.info(
+        f"--- DEBUG: {agent_name} INCOMING messages: {[msg.name for msg in state['messages']]} ---")
+    for i, msg in enumerate(state['messages']):
+        logger.info(
+            f"  DEBUG MSG {i}: name='{msg.name}', content_preview='{str(msg.content)[:100]}...'")
+
     show_workflow_status(f"{agent_name}: --- Executing Portfolio Manager ---")
     show_reasoning_flag = state["metadata"]["show_reasoning"]
     portfolio = state["data"]["portfolio"]

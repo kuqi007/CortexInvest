@@ -27,7 +27,7 @@ LLM_PROMPT_MACRO_ANALYSIS = """你是一名资深的A股市场宏观分析师。
 """
 
 
-@agent_endpoint  # Applied decorator
+@agent_endpoint("macro_news_agent", "获取沪深300全量新闻并进行宏观分析，为投资决策提供市场层面的宏观环境评估")
 def macro_news_agent(state: AgentState) -> Dict[str, Any]:
     """
     获取沪深300全量新闻，调用LLM进行宏观分析，并保存结果。
@@ -48,14 +48,14 @@ def macro_news_agent(state: AgentState) -> Dict[str, Any]:
             message = f"未获取到 {symbol} 的新闻数据。"
             show_workflow_status(f"{agent_name}: {message}")
             show_agent_reasoning(
-                agent_name, reason=f"No news found for {symbol}. Proceeding with no data summary.")
+                f"No news found for {symbol}. Proceeding with no data summary.", agent_name)
             summary = "今日未获取到相关宏观新闻数据。"
         else:
             retrieved_news_count = len(news_df)
             message = f"成功获取到 {symbol} 的 {retrieved_news_count} 条新闻数据。"
             show_workflow_status(f"{agent_name}: {message}")
             show_agent_reasoning(
-                agent_name, reason=f"Successfully fetched {retrieved_news_count} news items for {symbol}. Preparing for LLM analysis.")
+                f"Successfully fetched {retrieved_news_count} news items for {symbol}. Preparing for LLM analysis.", agent_name)
             for _, row in news_df.iterrows():
                 news_item = {
                     "title": str(row.get("新闻标题", "")).strip(),
@@ -71,19 +71,18 @@ def macro_news_agent(state: AgentState) -> Dict[str, Any]:
 
             show_workflow_status(f"{agent_name}: Calling LLM for analysis.")
             llm_response = get_chat_completion(
-                messages=[{"role": "user", "content": prompt_filled}],
-                timeout=120
+                messages=[{"role": "user", "content": prompt_filled}]
             )
             summary = llm_response.strip() if llm_response else "LLM分析未能返回有效结果。"
             show_workflow_status(f"{agent_name}: LLM宏观分析结果获取成功.")
             show_agent_reasoning(
-                agent_name, reason=f"LLM analysis complete. Summary (first 100 chars): {summary[:100]}...")
+                f"LLM analysis complete. Summary (first 100 chars): {summary[:100]}...", agent_name)
 
     except Exception as e:
         error_message = f"{agent_name}: 执行出错: {e}"
         show_workflow_status(error_message)
         show_agent_reasoning(
-            agent_name, reason=f"Exception during execution: {str(e)}")
+            f"Exception during execution: {str(e)}", agent_name)
         summary = f"宏观新闻分析过程中发生错误: {str(e)}"
 
     # 保存总结到JSON文件
@@ -99,7 +98,7 @@ def macro_news_agent(state: AgentState) -> Dict[str, Any]:
         except json.JSONDecodeError:
             all_summaries = {}
             show_agent_reasoning(
-                agent_name, reason=f"JSONDecodeError for {output_file_path}. Initializing with empty summary dict.")
+                f"JSONDecodeError for {output_file_path}. Initializing with empty summary dict.", agent_name)
     else:
         all_summaries = {}
         os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
@@ -119,7 +118,7 @@ def macro_news_agent(state: AgentState) -> Dict[str, Any]:
     except Exception as e:
         show_workflow_status(f"{agent_name}: 保存宏观新闻总结文件失败: {e}")
         show_agent_reasoning(
-            agent_name, reason=f"Failed to save summary to {output_file_path}: {str(e)}")
+            f"Failed to save summary to {output_file_path}: {str(e)}", agent_name)
 
     show_workflow_status(f"{agent_name}: Execution finished.")
 

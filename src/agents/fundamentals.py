@@ -170,7 +170,7 @@ def fundamentals_agent(state: AgentState):
 
     show_workflow_status("Fundamentals Analyst", "completed")
     return {
-        "messages": [message],
+        "messages": state["messages"] + [message],
         "data": {
             **data,
             "fundamental_analysis": message_content
