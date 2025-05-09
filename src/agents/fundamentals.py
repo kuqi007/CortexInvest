@@ -1,9 +1,13 @@
 from langchain_core.messages import HumanMessage
+from src.utils.logging_config import setup_logger
 
 from src.agents.state import AgentState, show_agent_reasoning, show_workflow_status
 from src.utils.api_utils import agent_endpoint, log_llm_interaction
 
 import json
+
+# 初始化 logger
+logger = setup_logger('fundamentals_agent')
 
 ##### Fundamental Agent #####
 
@@ -169,8 +173,9 @@ def fundamentals_agent(state: AgentState):
         state["metadata"]["agent_reasoning"] = message_content
 
     show_workflow_status("Fundamentals Analyst", "completed")
+    logger.info(f"--- DEBUG: fundamentals_agent RETURN messages: {[msg.name for msg in [message]]} ---")
     return {
-        "messages": state["messages"] + [message],
+        "messages": [message],
         "data": {
             **data,
             "fundamental_analysis": message_content

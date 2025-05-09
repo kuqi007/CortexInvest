@@ -12,45 +12,82 @@ logger = setup_logger('portfolio_management_agent')
 
 ##### Portfolio Management Agent #####
 
+# Helper function to get the latest message by agent name
+
+
+def get_latest_message_by_name(messages: list, name: str):
+    for msg in reversed(messages):
+        if msg.name == name:
+            return msg
+    logger.warning(
+        f"Message from agent '{name}' not found in portfolio_management_agent.")
+    # Return a dummy message object or raise an error, depending on desired handling
+    # For now, returning a dummy message to avoid crashing, but content will be None.
+    return HumanMessage(content=json.dumps({"signal": "error", "details": f"Message from {name} not found"}), name=name)
+
 
 @agent_endpoint("portfolio_management", "负责投资组合管理和最终交易决策")
 def portfolio_management_agent(state: AgentState):
     """Responsible for portfolio management"""
     agent_name = "portfolio_management_agent"
     logger.info(f"\n--- DEBUG: {agent_name} START ---")
+
+    # Log raw incoming messages
     logger.info(
-        f"--- DEBUG: {agent_name} INCOMING messages: {[msg.name for msg in state['messages']]} ---")
-    for i, msg in enumerate(state['messages']):
-        logger.info(
-            f"  DEBUG MSG {i}: name='{msg.name}', content_preview='{str(msg.content)[:100]}...'")
+        f"--- DEBUG: {agent_name} RAW INCOMING messages: {[msg.name for msg in state['messages']]} ---")
+    # for i, msg in enumerate(state['messages']):
+    #     logger.info(
+    #         f"  DEBUG RAW MSG {i}: name='{msg.name}', content_preview='{str(msg.content)[:100]}...'")
+
+    # Clean and unique messages by agent name, taking the latest if duplicates exist
+    # This is crucial because this agent is a sink for multiple paths.
+    unique_incoming_messages = {}
+    for msg in state["messages"]:
+        # Keep overriding with later messages to get the latest by name
+        unique_incoming_messages[msg.name] = msg
+
+    cleaned_messages_for_processing = list(unique_incoming_messages.values())
+    logger.info(
+        f"--- DEBUG: {agent_name} CLEANED messages for processing: {[msg.name for msg in cleaned_messages_for_processing]} ---")
 
     show_workflow_status(f"{agent_name}: --- Executing Portfolio Manager ---")
     show_reasoning_flag = state["metadata"]["show_reasoning"]
     portfolio = state["data"]["portfolio"]
 
-    # Get messages from other agents
-    technical_message = next(
-        msg for msg in state["messages"] if msg.name == "technical_analyst_agent")
-    fundamentals_message = next(
-        msg for msg in state["messages"] if msg.name == "fundamentals_agent")
-    sentiment_message = next(
-        msg for msg in state["messages"] if msg.name == "sentiment_agent")
-    valuation_message = next(
-        msg for msg in state["messages"] if msg.name == "valuation_agent")
-    risk_message = next(
-        msg for msg in state["messages"] if msg.name == "risk_management_agent")
+    # Get messages from other agents using the cleaned list
+    technical_message = get_latest_message_by_name(
+        cleaned_messages_for_processing, "technical_analyst_agent")
+    fundamentals_message = get_latest_message_by_name(
+        cleaned_messages_for_processing, "fundamentals_agent")
+    sentiment_message = get_latest_message_by_name(
+        cleaned_messages_for_processing, "sentiment_agent")
+    valuation_message = get_latest_message_by_name(
+        cleaned_messages_for_processing, "valuation_agent")
+    risk_message = get_latest_message_by_name(
+        cleaned_messages_for_processing, "risk_management_agent")
+    tool_based_macro_message = get_latest_message_by_name(
+        cleaned_messages_for_processing, "macro_analyst_agent")  # This is the main analysis path output
 
-    # Existing macro analysis from macro_analyst_agent (tool-based general macro)
-    tool_based_macro_message = next(
-        msg for msg in state["messages"] if msg.name == "macro_analyst_agent")
-    # Assuming content is JSON string
-    tool_based_macro_content = tool_based_macro_message.content
+    # Extract content, handling potential None if message not found by get_latest_message_by_name
+    technical_content = technical_message.content if technical_message else json.dumps(
+        {"signal": "error", "details": "Technical message missing"})
+    fundamentals_content = fundamentals_message.content if fundamentals_message else json.dumps(
+        {"signal": "error", "details": "Fundamentals message missing"})
+    sentiment_content = sentiment_message.content if sentiment_message else json.dumps(
+        {"signal": "error", "details": "Sentiment message missing"})
+    valuation_content = valuation_message.content if valuation_message else json.dumps(
+        {"signal": "error", "details": "Valuation message missing"})
+    risk_content = risk_message.content if risk_message else json.dumps(
+        {"signal": "error", "details": "Risk message missing"})
+    tool_based_macro_content = tool_based_macro_message.content if tool_based_macro_message else json.dumps(
+        {"signal": "error", "details": "Tool-based Macro message missing"})
 
-    # NEW: Market-wide news summary from macro_news_agent
+    # Market-wide news summary from macro_news_agent (already correctly fetched from state["data"])
     market_wide_news_summary_content = state["data"].get(
         "macro_news_analysis_result", "大盘宏观新闻分析不可用或未提供。")
-    show_agent_reasoning(
-        agent_name, f"Retrieved market_wide_news_summary_content: {market_wide_news_summary_content[:100]}...")
+    # Optional: also try to get the message object for consistency in agent_signals, though data field is primary source
+    macro_news_agent_message_obj = get_latest_message_by_name(
+        cleaned_messages_for_processing, "macro_news_agent")
 
     system_message_content = """You are a portfolio manager making final trading decisions.
             Your job is to make a trading decision based on the team's analysis while strictly adhering
@@ -107,11 +144,11 @@ def portfolio_management_agent(state: AgentState):
 
     user_message_content = f"""Based on the team's analysis below, make your trading decision.
 
-            Technical Analysis Signal: {technical_message.content}
-            Fundamental Analysis Signal: {fundamentals_message.content}
-            Sentiment Analysis Signal: {sentiment_message.content}
-            Valuation Analysis Signal: {valuation_message.content}
-            Risk Management Signal: {risk_message.content}
+            Technical Analysis Signal: {technical_content}
+            Fundamental Analysis Signal: {fundamentals_content}
+            Sentiment Analysis Signal: {sentiment_content}
+            Valuation Analysis Signal: {valuation_content}
+            Risk Management Signal: {risk_content}
             General Macro Analysis (from Macro Analyst Agent): {tool_based_macro_content}
             Daily Market-Wide News Summary (from Macro News Agent):
             {market_wide_news_summary_content}
@@ -142,6 +179,7 @@ def portfolio_management_agent(state: AgentState):
     if llm_response_content is None:
         show_agent_reasoning(
             agent_name, "LLM call failed. Using default conservative decision.")
+        # Ensure the dummy response matches the expected structure for agent_signals
         llm_response_content = json.dumps({
             "action": "hold",
             "quantity": 0,
@@ -150,11 +188,11 @@ def portfolio_management_agent(state: AgentState):
                 {"agent_name": "technical_analysis",
                     "signal": "neutral", "confidence": 0.0},
                 {"agent_name": "fundamental_analysis",
-                    "signal": "bullish", "confidence": 1.0},
+                    "signal": "neutral", "confidence": 0.0},
                 {"agent_name": "sentiment_analysis",
-                    "signal": "bullish", "confidence": 0.6},
+                    "signal": "neutral", "confidence": 0.0},
                 {"agent_name": "valuation_analysis",
-                    "signal": "bearish", "confidence": 0.67},
+                    "signal": "neutral", "confidence": 0.0},
                 {"agent_name": "risk_management",
                     "signal": "hold", "confidence": 1.0},
                 {"agent_name": "general_macro_analysis",
@@ -174,7 +212,6 @@ def portfolio_management_agent(state: AgentState):
         show_agent_reasoning(
             agent_name, f"Final LLM decision JSON: {llm_response_content}")
 
-    # Prepare the specific decision details for metadata
     agent_decision_details_value = {}
     try:
         decision_json = json.loads(llm_response_content)
@@ -192,15 +229,31 @@ def portfolio_management_agent(state: AgentState):
 
     show_workflow_status(f"{agent_name}: --- Portfolio Manager Completed ---")
 
+    # The portfolio_management_agent is a terminal or near-terminal node in terms of new message generation for the main state.
+    # It should return its own decision, and an updated state["messages"] that includes its decision.
+    # As it's a汇聚点, it should ideally start with a cleaned list of messages from its inputs.
+    # The cleaned_messages_for_processing already did this. We append its new message to this cleaned list.
+
+    # If we strictly want to follow the pattern of `state["messages"] + [new_message]` for all non-leaf nodes,
+    # then the `cleaned_messages_for_processing` should become the new `state["messages"]` for this node's context.
+    # However, for simplicity and robustness, let's assume its output `messages` should just be its own message added to the cleaned input it processed.
+
+    final_messages_output = cleaned_messages_for_processing + \
+        [final_decision_message]
+    # Alternative if we want to be super strict about adding to the raw incoming state["messages"]:
+    # final_messages_output = state["messages"] + [final_decision_message]
+    # But this ^ is prone to the duplication we are trying to solve if not careful.
+    # The most robust is that portfolio_manager provides its clear output, and the graph handles accumulation if needed for further steps (none in this case as it's END).
+
+    logger.info(
+        f"--- DEBUG: {agent_name} RETURN messages: {[msg.name for msg in final_messages_output]} ---")
+
     return {
-        "messages": state["messages"] + [final_decision_message],
-        # Data is passed through as portfolio changes are not made by this agent directly
+        "messages": final_messages_output,
         "data": state["data"],
         "metadata": {
-            # This includes current_agent_name which was set by aliasing and modifying state["metadata"]
             **state["metadata"],
             f"{agent_name}_decision_details": agent_decision_details_value,
-            # Storing the full LLM response as reasoning for this agent
             "agent_reasoning": llm_response_content
         }
     }

@@ -136,9 +136,9 @@ def macro_news_agent(state: AgentState) -> Dict[str, Any]:
     }
     logger.info(f"--- DEBUG: macro_news_agent COMPLETED ---")
     logger.info(
-        f"--- DEBUG: macro_news_agent RETURN messages: {[msg.name for msg in (state['messages'] + [new_message])]} ---")
+        f"--- DEBUG: macro_news_agent RETURN messages: {[msg.name for msg in [new_message]]} ---")
     return {
-        "messages": state["messages"] + [new_message],
+        "messages": [new_message],
         "data": {**state["data"], "macro_news_analysis_result": summary},
         "metadata": {
             **state["metadata"],

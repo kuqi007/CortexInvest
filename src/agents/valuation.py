@@ -1,7 +1,11 @@
 from langchain_core.messages import HumanMessage
+from src.utils.logging_config import setup_logger
 from src.agents.state import AgentState, show_agent_reasoning, show_workflow_status
 from src.utils.api_utils import agent_endpoint, log_llm_interaction
 import json
+
+# 初始化 logger
+logger = setup_logger('valuation_agent')
 
 
 @agent_endpoint("valuation", "估值分析师，使用DCF和所有者收益法评估公司内在价值")
@@ -81,8 +85,10 @@ def valuation_agent(state: AgentState):
         state["metadata"]["agent_reasoning"] = message_content
 
     show_workflow_status("Valuation Agent", "completed")
+    logger.info(
+        f"--- DEBUG: valuation_agent RETURN messages: {[msg.name for msg in [message]]} ---")
     return {
-        "messages": state["messages"] + [message],
+        "messages": [message],
         "data": {
             **data,
             "valuation_analysis": message_content

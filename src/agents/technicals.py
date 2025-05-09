@@ -227,10 +227,10 @@ def technical_analyst_agent(state: AgentState):
 
     # 添加调试信息，打印将要返回的消息名称
     logger.info(
-        f"--- DEBUG: technical_analyst_agent RETURN messages: {[msg.name for msg in (state['messages'] + [message])]} ---")
+        f"--- DEBUG: technical_analyst_agent RETURN messages: {[msg.name for msg in [message]]} ---")
 
     return {
-        "messages": state["messages"] + [message],
+        "messages": [message],
         "data": data,
         "metadata": state["metadata"],
     }
