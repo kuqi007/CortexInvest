@@ -33,8 +33,8 @@ def portfolio_management_agent(state: AgentState):
     logger.info(f"\n--- DEBUG: {agent_name} START ---")
 
     # Log raw incoming messages
-    logger.info(
-        f"--- DEBUG: {agent_name} RAW INCOMING messages: {[msg.name for msg in state['messages']]} ---")
+    # logger.info(
+    # f"--- DEBUG: {agent_name} RAW INCOMING messages: {[msg.name for msg in state['messages']]} ---")
     # for i, msg in enumerate(state['messages']):
     #     logger.info(
     #         f"  DEBUG RAW MSG {i}: name='{msg.name}', content_preview='{str(msg.content)[:100]}...'")
@@ -47,8 +47,8 @@ def portfolio_management_agent(state: AgentState):
         unique_incoming_messages[msg.name] = msg
 
     cleaned_messages_for_processing = list(unique_incoming_messages.values())
-    logger.info(
-        f"--- DEBUG: {agent_name} CLEANED messages for processing: {[msg.name for msg in cleaned_messages_for_processing]} ---")
+    # logger.info(
+    # f"--- DEBUG: {agent_name} CLEANED messages for processing: {[msg.name for msg in cleaned_messages_for_processing]} ---")
 
     show_workflow_status(f"{agent_name}: --- Executing Portfolio Manager ---")
     show_reasoning_flag = state["metadata"]["show_reasoning"]
@@ -238,15 +238,14 @@ def portfolio_management_agent(state: AgentState):
     # then the `cleaned_messages_for_processing` should become the new `state["messages"]` for this node's context.
     # However, for simplicity and robustness, let's assume its output `messages` should just be its own message added to the cleaned input it processed.
 
-    final_messages_output = cleaned_messages_for_processing + \
-        [final_decision_message]
+    final_messages_output = cleaned_messages_for_processing + [final_decision_message]
     # Alternative if we want to be super strict about adding to the raw incoming state["messages"]:
     # final_messages_output = state["messages"] + [final_decision_message]
     # But this ^ is prone to the duplication we are trying to solve if not careful.
     # The most robust is that portfolio_manager provides its clear output, and the graph handles accumulation if needed for further steps (none in this case as it's END).
 
-    logger.info(
-        f"--- DEBUG: {agent_name} RETURN messages: {[msg.name for msg in final_messages_output]} ---")
+    # logger.info(
+    # f"--- DEBUG: {agent_name} RETURN messages: {[msg.name for msg in final_messages_output]} ---")
 
     return {
         "messages": final_messages_output,
@@ -328,19 +327,24 @@ def format_decision(action: str, quantity: int, confidence: float, agent_signals
    a) 常规宏观分析 (来自 Macro Analyst Agent):
       信号: {signal_to_chinese(general_macro_signal)}
       置信度: {general_macro_signal['confidence']*100:.0f if general_macro_signal else 0}%
-      宏观环境: {general_macro_signal.get('macro_environment', '无数据') if general_macro_signal else '无数据'}
-      对股票影响: {general_macro_signal.get('impact_on_stock', '无数据') if general_macro_signal else '无数据'}
-      关键因素: {', '.join(general_macro_signal.get('key_factors', ['无数据']) if general_macro_signal else ['无数据'])}
+      宏观环境: {general_macro_signal.get(
+          'macro_environment', '无数据') if general_macro_signal else '无数据'}
+      对股票影响: {general_macro_signal.get(
+          'impact_on_stock', '无数据') if general_macro_signal else '无数据'}
+      关键因素: {', '.join(general_macro_signal.get(
+          'key_factors', ['无数据']) if general_macro_signal else ['无数据'])}
 
    b) 大盘宏观新闻分析 (来自 Macro News Agent):
-      信号: {signal_to_chinese(market_wide_news_signal)} 
+      信号: {signal_to_chinese(market_wide_news_signal)}
       置信度: {market_wide_news_signal['confidence']*100:.0f if market_wide_news_signal else 0}%
-      摘要或结论: {market_wide_news_signal.get('reasoning', market_wide_news_summary) if market_wide_news_signal else market_wide_news_summary}
+      摘要或结论: {market_wide_news_signal.get(
+          'reasoning', market_wide_news_summary) if market_wide_news_signal else market_wide_news_summary}
 
 5. 情绪分析 (权重10%):
    信号: {signal_to_chinese(sentiment_signal)}
    置信度: {sentiment_signal['confidence']*100:.0f if sentiment_signal else 0}%
-   分析: {sentiment_signal.get('reasoning', '无详细分析') if sentiment_signal else '无详细分析'}
+   分析: {sentiment_signal.get('reasoning', '无详细分析')
+                             if sentiment_signal else '无详细分析'}
 
 二、风险评估
 风险评分: {risk_signal.get('risk_score', '无数据') if risk_signal else '无数据'}/10

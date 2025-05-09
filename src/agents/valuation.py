@@ -85,8 +85,8 @@ def valuation_agent(state: AgentState):
         state["metadata"]["agent_reasoning"] = message_content
 
     show_workflow_status("Valuation Agent", "completed")
-    logger.info(
-        f"--- DEBUG: valuation_agent RETURN messages: {[msg.name for msg in [message]]} ---")
+    # logger.info(
+    # f"--- DEBUG: valuation_agent RETURN messages: {[msg.name for msg in [message]]} ---")
     return {
         "messages": [message],
         "data": {
@@ -106,6 +106,8 @@ def calculate_owner_earnings_value(
     required_return: float = 0.15,
     margin_of_safety: float = 0.25,
     num_years: int = 5
+
+
 ) -> float:
     """
     使用改进的所有者收益法计算公司价值。

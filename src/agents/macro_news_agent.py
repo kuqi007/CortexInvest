@@ -168,8 +168,8 @@ def macro_news_agent(state: AgentState) -> Dict[str, Any]:
         "loaded_from_cache": from_cache
     }
     # logger.info(f"--- DEBUG: macro_news_agent COMPLETED ---")
-    logger.info(
-        f"--- DEBUG: macro_news_agent RETURN messages: {[msg.name for msg in [new_message]]} ---")
+    # logger.info(
+    # f"--- DEBUG: macro_news_agent RETURN messages: {[msg.name for msg in [new_message]]} ---")
     return {
         "messages": [new_message],
         "data": {**state["data"], "macro_news_analysis_result": summary},

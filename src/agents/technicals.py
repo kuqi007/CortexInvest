@@ -226,8 +226,8 @@ def technical_analyst_agent(state: AgentState):
     show_workflow_status("Technical Analyst", "completed")
 
     # 添加调试信息，打印将要返回的消息名称
-    logger.info(
-        f"--- DEBUG: technical_analyst_agent RETURN messages: {[msg.name for msg in [message]]} ---")
+    # logger.info(
+    # f"--- DEBUG: technical_analyst_agent RETURN messages: {[msg.name for msg in [message]]} ---")
 
     return {
         "messages": [message],
