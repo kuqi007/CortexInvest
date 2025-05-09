@@ -48,16 +48,17 @@ STATUS_ICONS = {
 
 # Agent图标和名称映射
 AGENT_MAP = {
-    "market_data_agent": {"icon": "📊", "name": "市场数据分析"},
-    "technical_analyst_agent": {"icon": "📈", "name": "技术分析"},
-    "fundamentals_agent": {"icon": "📝", "name": "基本面分析"},
-    "sentiment_agent": {"icon": "🔍", "name": "情感分析"},
-    "valuation_agent": {"icon": "💰", "name": "估值分析"},
+    "market_data_agent": {"icon": "📊", "name": "市场数据"},
+    "technical_analyst_agent": {"icon": "📈", "name": "技术"},
+    "fundamentals_agent": {"icon": "📝", "name": "基本面"},
+    "sentiment_agent": {"icon": "🔍", "name": "情感"},
+    "valuation_agent": {"icon": "💰", "name": "估值"},
     "researcher_bull_agent": {"icon": "🐂", "name": "多方研究"},
     "researcher_bear_agent": {"icon": "🐻", "name": "空方研究"},
-    "debate_room_agent": {"icon": "🗣️", "name": "辩论室分析"},
+    "debate_room_agent": {"icon": "🗣️", "name": "辩论室"},
     "risk_management_agent": {"icon": "⚠️", "name": "风险管理"},
-    "macro_analyst_agent": {"icon": "🌍", "name": "宏观分析"},
+    "macro_analyst_agent": {"icon": "🌍", "name": "针对所选股宏观"},
+    "macro_news_agent": {"icon": "📰", "name": "宏观新闻"},
     "portfolio_management_agent": {"icon": "📂", "name": "投资组合管理"}
 }
 
@@ -73,6 +74,7 @@ AGENT_ORDER = [
     "debate_room_agent",
     "risk_management_agent",
     "macro_analyst_agent",
+    "macro_news_agent",
     "portfolio_management_agent"
 ]
 

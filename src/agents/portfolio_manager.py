@@ -127,8 +127,8 @@ def portfolio_management_agent(state: AgentState):
                 - "sentiment_analysis"
                 - "valuation_analysis"
                 - "risk_management"
-                - "general_macro_analysis" (representing the tool-based macro input)
-                - "market_wide_news_summary" (representing the daily news summary input - provide a brief signal like bullish/bearish/neutral for the news summary itself, or state if it was primarily factored into overall reasoning with confidence reflecting its impact)
+                - "selected_stock_macro_analysis" (representing the tool-based macro input from macro_analyst_agent)
+                - "market_wide_news_summary(沪深300指数)" (representing the daily news summary input from macro_news_agent - provide a brief signal like bullish/bearish/neutral for the news summary itself, or state if it was primarily factored into overall reasoning with confidence reflecting its impact)
             - "reasoning": <concise explanation of the decision including how you weighted ALL signals, including both macro inputs>
 
             Trading Rules:
@@ -195,9 +195,9 @@ def portfolio_management_agent(state: AgentState):
                     "signal": "neutral", "confidence": 0.0},
                 {"agent_name": "risk_management",
                     "signal": "hold", "confidence": 1.0},
-                {"agent_name": "general_macro_analysis",
+                {"agent_name": "macro_analyst_agent",
                     "signal": "neutral", "confidence": 0.0},
-                {"agent_name": "market_wide_news_summary",
+                {"agent_name": "macro_news_agent",
                     "signal": "unavailable_or_llm_error", "confidence": 0.0}
             ],
             "reasoning": "LLM API error. Defaulting to conservative hold based on risk management."
@@ -275,10 +275,10 @@ def format_decision(action: str, quantity: int, confidence: float, agent_signals
         (s for s in agent_signals if s["agent_name"] == "risk_management"), None)
     # Existing macro signal from macro_analyst_agent (tool-based)
     general_macro_signal = next(
-        (s for s in agent_signals if s["agent_name"] == "general_macro_analysis"), None)
+        (s for s in agent_signals if s["agent_name"] == "macro_analyst_agent"), None)
     # New market-wide news summary signal from macro_news_agent
     market_wide_news_signal = next(
-        (s for s in agent_signals if s["agent_name"] == "market_wide_news_summary"), None)
+        (s for s in agent_signals if s["agent_name"] == "macro_news_agent"), None)
 
     def signal_to_chinese(signal_data):
         if not signal_data:

@@ -57,7 +57,7 @@ def macro_analyst_agent(state: AgentState):
     )
 
     show_workflow_status("Macro Analyst", "completed")
-    logger.info(f"--- DEBUG: macro_analyst_agent COMPLETED ---")
+    # logger.info(f"--- DEBUG: macro_analyst_agent COMPLETED ---")
     logger.info(
         f"--- DEBUG: macro_analyst_agent RETURN messages: {[msg.name for msg in (state['messages'] + [message])]} ---")
     return {
