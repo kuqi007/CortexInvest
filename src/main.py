@@ -87,6 +87,7 @@ def run_hedge_fund(run_id: str, ticker: str, start_date: str, end_date: str, por
         "messages": [
             HumanMessage(
                 content="Make a trading decision based on the provided data.",
+                name="initial_human_message"
             )
         ],
         "data": {
@@ -178,9 +179,9 @@ workflow.add_node("macro_news_agent", macro_news_agent)
 workflow.add_node("start_node", lambda state: state)
 workflow.set_entry_point("start_node")
 
-# Edges from the dummy start node to initiate parallel paths
+# Edges from the dummy start_node to initiate the main market data path
 workflow.add_edge("start_node", "market_data_agent")
-workflow.add_edge("start_node", "macro_news_agent")
+# workflow.add_edge("start_node", "macro_news_agent") # Temporarily disable parallel start for macro_news_agent
 
 # Market Data Path (remains largely the same)
 workflow.add_edge("market_data_agent", "technical_analyst_agent")
@@ -203,13 +204,14 @@ workflow.add_edge("researcher_bear_agent", "debate_room_agent")
 
 workflow.add_edge("debate_room_agent", "risk_management_agent")
 workflow.add_edge("risk_management_agent", "macro_analyst_agent")
-workflow.add_edge("macro_analyst_agent", "portfolio_management_agent")
 
-# Macro News Path (independent and parallel)
-# Its output needs to be available to portfolio_management_agent.
-# LangGraph handles state merging when multiple edges point to the same node.
-# So, portfolio_management_agent will receive the combined state.
+# Make macro_news_agent run after macro_analyst_agent
+workflow.add_edge("macro_analyst_agent", "macro_news_agent")
+# And then portfolio_management_agent runs after macro_news_agent
 workflow.add_edge("macro_news_agent", "portfolio_management_agent")
+
+# workflow.add_edge("macro_analyst_agent", "portfolio_management_agent") # Temporarily disable direct link
+# workflow.add_edge("macro_news_agent", "portfolio_management_agent") # This is now the only entry to portfolio_management_agent
 
 # Final汇聚点 and End
 workflow.add_edge("portfolio_management_agent", END)

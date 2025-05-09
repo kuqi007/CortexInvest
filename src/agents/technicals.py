@@ -1,6 +1,6 @@
 import math
 from typing import Dict
-import logging
+from src.utils.logging_config import setup_logger
 
 from langchain_core.messages import HumanMessage
 
@@ -14,7 +14,7 @@ import numpy as np
 from src.tools.api import prices_to_df
 
 # 初始化 logger
-logger = logging.getLogger(__name__)
+logger = setup_logger('technical_analyst_agent')
 
 
 ##### Technical Analyst #####

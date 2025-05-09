@@ -2,6 +2,7 @@ import os
 import json
 from datetime import datetime
 import akshare as ak
+from src.utils.logging_config import setup_logger
 # from langgraph.graph import AgentState # Changed import
 # Added for alignment
 from src.agents.state import AgentState, show_agent_reasoning, show_workflow_status
@@ -25,6 +26,9 @@ LLM_PROMPT_MACRO_ANALYSIS = """你是一名资深的A股市场宏观分析师。
 **当日新闻数据如下：**
 {news_data_json_string}
 """
+
+# 初始化 logger
+logger = setup_logger('macro_news_agent')
 
 
 @agent_endpoint("macro_news_agent", "获取沪深300全量新闻并进行宏观分析，为投资决策提供市场层面的宏观环境评估")
@@ -130,7 +134,9 @@ def macro_news_agent(state: AgentState) -> Dict[str, Any]:
         "news_count_for_summary": retrieved_news_count,
         "llm_summary_preview": summary[:150] + "..." if len(summary) > 150 else summary
     }
-
+    logger.info(f"--- DEBUG: macro_news_agent COMPLETED ---")
+    logger.info(
+        f"--- DEBUG: macro_news_agent RETURN messages: {[msg.name for msg in (state['messages'] + [new_message])]} ---")
     return {
         "messages": state["messages"] + [new_message],
         "data": {**state["data"], "macro_news_analysis_result": summary},

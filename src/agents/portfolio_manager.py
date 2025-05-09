@@ -1,14 +1,14 @@
 from langchain_core.messages import HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
 import json
-import logging
+from src.utils.logging_config import setup_logger
 
 from src.agents.state import AgentState, show_agent_reasoning, show_workflow_status
 from src.tools.openrouter_config import get_chat_completion
 from src.utils.api_utils import agent_endpoint, log_llm_interaction
 
 # 初始化 logger
-logger = logging.getLogger(__name__)
+logger = setup_logger('portfolio_management_agent')
 
 ##### Portfolio Management Agent #####
 
