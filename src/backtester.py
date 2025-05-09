@@ -112,7 +112,8 @@ class Backtester:
                     start_date=lookback_start,
                     end_date=current_date,
                     portfolio=portfolio,
-                    num_of_news=self.num_of_news
+                    num_of_news=self.num_of_news,
+                    run_id=f"backtest_{self.ticker}_{current_date.replace('-', '')}"
                 )
 
                 try:
