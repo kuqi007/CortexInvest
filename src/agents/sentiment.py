@@ -62,6 +62,8 @@ def sentiment_agent(state: AgentState):
     )
 
     show_workflow_status("Sentiment Analyst", "completed")
+    # logger.info(
+    # f"--- DEBUG: sentiment_agent RETURN messages: {[msg.name for msg in [message]]} ---")
     return {
         "messages": [message],
         "data": {

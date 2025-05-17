@@ -73,3 +73,9 @@ cache/
 
 # temp
 temp/
+
+
+# macro analysis
+src/data/macro_analysis_cache.json
+
+test/

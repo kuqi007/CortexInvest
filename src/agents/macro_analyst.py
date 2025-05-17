@@ -19,17 +19,17 @@ def macro_analyst_agent(state: AgentState):
     data = state["data"]
     symbol = data["ticker"]
     logger.info(f"正在进行宏观分析: {symbol}")
-    
+
     # 获取大量新闻数据（最多100条）
     news_list = get_stock_news(symbol, max_news=100)  # 尝试获取100条新闻
-    
+
     # 过滤七天前的新闻
     cutoff_date = datetime.now() - timedelta(days=7)
     recent_news = [news for news in news_list
-                  if datetime.strptime(news['publish_time'], '%Y-%m-%d %H:%M:%S') > cutoff_date]
-    
+                   if datetime.strptime(news['publish_time'], '%Y-%m-%d %H:%M:%S') > cutoff_date]
+
     logger.info(f"获取到 {len(recent_news)} 条七天内的新闻")
-    
+
     # 如果没有获取到新闻，返回默认结果
     if not recent_news:
         logger.warning(f"未获取到 {symbol} 的最近新闻，无法进行宏观分析")
@@ -43,22 +43,25 @@ def macro_analyst_agent(state: AgentState):
         # 获取宏观分析结果
         macro_analysis = get_macro_news_analysis(recent_news)
         message_content = macro_analysis
-    
+
     # 如果需要显示推理过程
     if show_reasoning:
         show_agent_reasoning(message_content, "Macro Analysis Agent")
         # 保存推理信息到metadata供API使用
         state["metadata"]["agent_reasoning"] = message_content
-    
+
     # 创建消息
     message = HumanMessage(
         content=json.dumps(message_content),
         name="macro_analyst_agent",
     )
-    
+
     show_workflow_status("Macro Analyst", "completed")
+    # logger.info(f"--- DEBUG: macro_analyst_agent COMPLETED ---")
+    # logger.info(
+    # f"--- DEBUG: macro_analyst_agent RETURN messages: {[msg.name for msg in (state['messages'] + [message])]} ---")
     return {
-        "messages": [message],
+        "messages": state["messages"] + [message],
         "data": {
             **data,
             "macro_analysis": message_content
@@ -69,10 +72,10 @@ def macro_analyst_agent(state: AgentState):
 
 def get_macro_news_analysis(news_list: list) -> dict:
     """分析宏观经济新闻对股票的影响
-    
+
     Args:
         news_list (list): 新闻列表
-        
+
     Returns:
         dict: 宏观分析结果，包含环境评估、对股票的影响、关键因素和详细推理
     """
@@ -83,18 +86,18 @@ def get_macro_news_analysis(news_list: list) -> dict:
             "key_factors": [],
             "reasoning": "没有足够的新闻数据进行宏观分析"
         }
-    
+
     # 检查缓存
     import os
     cache_file = "src/data/macro_analysis_cache.json"
     os.makedirs(os.path.dirname(cache_file), exist_ok=True)
-    
+
     # 生成新闻内容的唯一标识
     news_key = "|".join([
         f"{news['title']}|{news['publish_time']}"
         for news in news_list[:20]  # 使用前20条新闻作为标识
     ])
-    
+
     # 检查缓存
     if os.path.exists(cache_file):
         try:
@@ -109,7 +112,7 @@ def get_macro_news_analysis(news_list: list) -> dict:
     else:
         logger.info("未找到宏观分析缓存文件，将创建新文件")
         cache = {}
-    
+
     # 准备系统消息
     system_message = {
         "role": "system",
@@ -135,21 +138,22 @@ def get_macro_news_analysis(news_list: list) -> dict:
         3. 关注中长期影响，而非短期波动
         4. 提供具体、可操作的见解"""
     }
-    
+
     # 准备新闻内容
     news_content = "\n\n".join([
         f"标题：{news['title']}\n"
         f"来源：{news['source']}\n"
         f"时间：{news['publish_time']}\n"
         f"内容：{news['content']}"
-        for news in news_list[:50]  # 使用前50条新闻进行分析，注意这里不是100，因为可能超过上下文限制，可根据自己的LLM来自行设置
+        # 使用前50条新闻进行分析，注意这里不是100，因为可能超过上下文限制，可根据自己的LLM来自行设置
+        for news in news_list[:50]
     ])
-    
+
     user_message = {
         "role": "user",
         "content": f"请分析以下新闻，评估当前宏观经济环境及其对相关A股上市公司的影响：\n\n{news_content}\n\n请以JSON格式返回结果，包含以下字段：macro_environment（宏观环境：positive/neutral/negative）、impact_on_stock（对股票影响：positive/neutral/negative）、key_factors（关键因素数组）、reasoning（详细推理）。"
     }
-    
+
     try:
         # 获取LLM分析结果
         logger.info("正在调用LLM进行宏观分析...")
@@ -162,7 +166,7 @@ def get_macro_news_analysis(news_list: list) -> dict:
                 "key_factors": [],
                 "reasoning": "LLM分析失败，无法获取宏观分析结果"
             }
-        
+
         # 解析JSON结果
         try:
             # 尝试直接解析
@@ -194,7 +198,7 @@ def get_macro_news_analysis(news_list: list) -> dict:
                     "key_factors": [],
                     "reasoning": "LLM未返回有效的JSON格式结果"
                 }
-        
+
         # 缓存结果
         cache[news_key] = analysis_result
         try:
@@ -203,9 +207,9 @@ def get_macro_news_analysis(news_list: list) -> dict:
             logger.info("宏观分析结果已缓存")
         except Exception as e:
             logger.error(f"写入宏观分析缓存出错: {e}")
-        
+
         return analysis_result
-    
+
     except Exception as e:
         logger.error(f"宏观分析出错: {e}")
         return {
