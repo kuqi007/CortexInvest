@@ -21,8 +21,11 @@ def sentiment_agent(state: AgentState):
     # 从命令行参数获取新闻数量，默认为5条
     num_of_news = data.get("num_of_news", 5)
 
-    # 获取新闻数据并分析情感
-    news_list = get_stock_news(symbol, max_news=num_of_news)  # 确保获取足够的新闻
+    # 获取 end_date 并传递给 get_stock_news
+    end_date = data.get("end_date")  # 从 run_hedge_fund 传递来的 end_date
+
+    # 获取新闻数据并分析情感，添加 date 参数
+    news_list = get_stock_news(symbol, max_news=num_of_news, date=end_date)
 
     # 过滤7天内的新闻
     cutoff_date = datetime.now() - timedelta(days=7)

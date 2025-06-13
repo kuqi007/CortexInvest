@@ -1,73 +1,115 @@
 import os
 import sys
 import json
-from datetime import datetime
-import akshare as ak
-import requests
-from bs4 import BeautifulSoup
-from src.tools.openrouter_config import get_chat_completion, logger as api_logger
+from datetime import datetime, timedelta
 import time
 import pandas as pd
+from urllib.parse import urlparse
+from src.tools.openrouter_config import get_chat_completion, logger as api_logger
+
+# 导入新的搜索模块
+try:
+    from src.crawler.search import google_search_sync, SearchOptions
+except ImportError:
+    print("警告: 无法导入新的搜索模块，将回退到 akshare")
+    google_search_sync = None
+    SearchOptions = None
+
+# 保留 akshare 作为备用
+try:
+    import akshare as ak
+    import requests
+    from bs4 import BeautifulSoup
+except ImportError:
+    print("警告: akshare 不可用")
+    ak = None
 
 
-def get_stock_news(symbol: str, max_news: int = 10) -> list:
-    """获取并处理个股新闻
+def build_search_query(symbol: str, date: str = None) -> str:
+    """
+    构建针对股票新闻的 Google 搜索查询
 
     Args:
-        symbol (str): 股票代码，如 "300059"
-        max_news (int, optional): 获取的新闻条数，默认为10条。最大支持100条。
+        symbol: 股票代码，如 "300059"
+        date: 截止日期，格式 "YYYY-MM-DD"
 
     Returns:
-        list: 新闻列表，每条新闻包含标题、内容、发布时间等信息
+        构建好的搜索查询字符串
     """
+    # 基础查询：股票代码 + 新闻关键词
+    base_query = f"{symbol} 股票 新闻 财经"
 
-    # 设置pandas显示选项，确保显示完整内容
-    pd.set_option('display.max_columns', None)
-    pd.set_option('display.max_rows', None)
-    pd.set_option('display.max_colwidth', None)
-    pd.set_option('display.width', None)
-
-    # 限制最大新闻条数
-    max_news = min(max_news, 100)
-
-    # 获取当前日期
-    today = datetime.now().strftime("%Y-%m-%d")
-
-    # 构建新闻文件路径
-    # project_root = os.path.dirname(os.path.dirname(
-    #     os.path.dirname(os.path.abspath(__file__))))
-    news_dir = os.path.join("src", "data", "stock_news")
-    print(f"新闻保存目录: {news_dir}")
-
-    # 确保目录存在
-    try:
-        os.makedirs(news_dir, exist_ok=True)
-        print(f"成功创建或确认目录存在: {news_dir}")
-    except Exception as e:
-        print(f"创建目录失败: {e}")
-        return []
-
-    news_file = os.path.join(news_dir, f"{symbol}_news.json")
-    print(f"新闻文件路径: {news_file}")
-
-    # 检查是否需要更新新闻
-    need_update = True
-    if os.path.exists(news_file):
+    # 添加时间限制（搜索指定日期之前的新闻）
+    if date:
         try:
-            with open(news_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                if data.get("date") == today:
-                    cached_news = data.get("news", [])
-                    if len(cached_news) >= max_news:
-                        print(f"使用缓存的新闻数据: {news_file}")
-                        return cached_news[:max_news]
-                    else:
-                        print(
-                            f"缓存的新闻数量({len(cached_news)})不足，需要获取更多新闻({max_news}条)")
-        except Exception as e:
-            print(f"读取缓存文件失败: {e}")
+            # 解析日期并计算一周前的日期作为开始时间
+            end_date = datetime.strptime(date, "%Y-%m-%d")
+            start_date = end_date - timedelta(days=7)  # 搜索过去一周的新闻
 
-    print(f'开始获取{symbol}的新闻数据...')
+            # Google 搜索时间语法：after:YYYY-MM-DD before:YYYY-MM-DD
+            base_query += f" after:{start_date.strftime('%Y-%m-%d')} before:{date}"
+        except ValueError:
+            print(f"日期格式错误: {date}，忽略时间限制")
+
+    # 限制新闻网站 - 只选择主要的财经网站
+    news_sites = [
+        "site:sina.com.cn",
+        "site:163.com",
+        "site:eastmoney.com",
+        "site:cnstock.com",
+        "site:hexun.com"
+    ]
+
+    # 添加网站限制
+    query = f"{base_query} ({' OR '.join(news_sites)})"
+
+    return query
+
+
+def extract_domain(url: str) -> str:
+    """从 URL 提取域名作为新闻来源"""
+    try:
+        parsed = urlparse(url)
+        return parsed.netloc
+    except:
+        return "未知来源"
+
+
+def convert_search_results_to_news_format(search_results, symbol: str) -> list:
+    """
+    将搜索结果转换为现有新闻格式
+
+    Args:
+        search_results: Google 搜索结果
+        symbol: 股票代码
+
+    Returns:
+        符合现有格式的新闻列表
+    """
+    news_list = []
+
+    for result in search_results:
+        # 过滤掉明显不相关的结果
+        if any(keyword in result.title.lower() for keyword in ['招聘', '求职', '广告', '登录', '注册']):
+            continue
+
+        news_item = {
+            "title": result.title,
+            "content": result.snippet or result.title,  # 使用摘要作为内容，如果没有摘要则使用标题
+            "publish_time": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),  # 默认当前时间
+            "source": extract_domain(result.link),
+            "url": result.link,
+            "keyword": symbol
+        }
+        news_list.append(news_item)
+
+    return news_list
+
+
+def get_stock_news_via_akshare(symbol: str, max_news: int = 10) -> list:
+    """使用 akshare 获取股票新闻的原始方法"""
+    if ak is None:
+        return []
 
     try:
         # 获取新闻列表
@@ -123,12 +165,124 @@ def get_stock_news(symbol: str, max_news: int = 10) -> list:
         news_list.sort(key=lambda x: x["publish_time"], reverse=True)
 
         # 只保留指定条数的有效新闻
-        news_list = news_list[:max_news]
+        return news_list[:max_news]
 
+    except Exception as e:
+        print(f"akshare 获取新闻数据时出错: {e}")
+        return []
+
+
+def get_stock_news(symbol: str, max_news: int = 10, date: str = None) -> list:
+    """获取并处理个股新闻
+
+    Args:
+        symbol (str): 股票代码，如 "300059"
+        max_news (int, optional): 获取的新闻条数，默认为10条。最大支持100条。
+        date (str, optional): 截止日期，格式 "YYYY-MM-DD"，对应 run_hedge_fund 的 end_date
+
+    Returns:
+        list: 新闻列表，每条新闻包含标题、内容、发布时间等信息
+    """
+
+    # 限制最大新闻条数
+    max_news = min(max_news, 100)
+
+    # 获取当前日期或使用指定日期
+    cache_date = date if date else datetime.now().strftime("%Y-%m-%d")
+
+    # 构建新闻文件路径
+    news_dir = os.path.join("src", "data", "stock_news")
+    print(f"新闻保存目录: {news_dir}")
+
+    # 确保目录存在
+    try:
+        os.makedirs(news_dir, exist_ok=True)
+        print(f"成功创建或确认目录存在: {news_dir}")
+    except Exception as e:
+        print(f"创建目录失败: {e}")
+        return []
+
+    # 缓存文件名包含日期信息
+    cache_suffix = f"_{cache_date}" if date else ""
+    news_file = os.path.join(news_dir, f"{symbol}_news{cache_suffix}.json")
+    print(f"新闻文件路径: {news_file}")
+
+    # 检查是否需要更新新闻
+    if os.path.exists(news_file):
+        try:
+            with open(news_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                cached_news = data.get("news", [])
+                if len(cached_news) >= max_news:
+                    print(f"使用缓存的新闻数据: {news_file}")
+                    return cached_news[:max_news]
+                else:
+                    print(
+                        f"缓存的新闻数量({len(cached_news)})不足，需要获取更多新闻({max_news}条)")
+        except Exception as e:
+            print(f"读取缓存文件失败: {e}")
+
+    print(f'开始获取{symbol}的新闻数据...')
+
+    # 优先尝试使用新的 Google 搜索方法
+    if google_search_sync and SearchOptions:
+        try:
+            print("使用 Google 搜索获取新闻...")
+
+            # 构建搜索查询
+            search_query = build_search_query(symbol, date)
+            print(f"搜索查询: {search_query}")
+
+            # 执行搜索
+            search_options = SearchOptions(
+                limit=max_news * 2,  # 获取更多结果以便过滤
+                timeout=30000,
+                locale="zh-CN"
+            )
+
+            search_response = google_search_sync(search_query, search_options)
+
+            if search_response.results:
+                # 转换搜索结果为新闻格式
+                news_list = convert_search_results_to_news_format(
+                    search_response.results, symbol)
+
+                # 只保留指定条数的新闻
+                news_list = news_list[:max_news]
+
+                print(f"通过 Google 搜索成功获取到{len(news_list)}条新闻")
+
+                # 保存到文件
+                try:
+                    save_data = {
+                        "date": cache_date,
+                        "method": "google_search",
+                        "query": search_query,
+                        "news": news_list
+                    }
+                    with open(news_file, 'w', encoding='utf-8') as f:
+                        json.dump(save_data, f, ensure_ascii=False, indent=2)
+                    print(f"成功保存{len(news_list)}条新闻到文件: {news_file}")
+                except Exception as e:
+                    print(f"保存新闻数据到文件时出错: {e}")
+
+                return news_list
+            else:
+                print("Google 搜索未返回有效结果，尝试回退到 akshare")
+
+        except Exception as e:
+            print(f"Google 搜索获取新闻时出错: {e}，回退到 akshare")
+
+    # 回退到原有的 akshare 方法
+    print("使用 akshare 获取新闻...")
+    news_list = get_stock_news_via_akshare(symbol, max_news)
+
+    if news_list:
         # 保存到文件
         try:
             save_data = {
-                "date": today,
+                "date": cache_date,
+                "method": "akshare",
                 "news": news_list
             }
             with open(news_file, 'w', encoding='utf-8') as f:
@@ -137,11 +291,7 @@ def get_stock_news(symbol: str, max_news: int = 10) -> list:
         except Exception as e:
             print(f"保存新闻数据到文件时出错: {e}")
 
-        return news_list
-
-    except Exception as e:
-        print(f"获取新闻数据时出错: {e}")
-        return []
+    return news_list
 
 
 def get_news_sentiment(news_list: list, num_of_news: int = 5) -> float:
