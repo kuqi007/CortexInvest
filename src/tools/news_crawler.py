@@ -203,28 +203,53 @@ def get_stock_news(symbol: str, max_news: int = 10, date: str = None) -> list:
         return []
 
     # 缓存文件名包含日期信息
-    cache_suffix = f"_{cache_date}" if date else ""
-    news_file = os.path.join(news_dir, f"{symbol}_news{cache_suffix}.json")
+    news_file = os.path.join(news_dir, f"{symbol}_news_{cache_date}.json")
     print(f"新闻文件路径: {news_file}")
 
-    # 检查是否需要更新新闻
+    # 检查缓存是否存在且有效
+    cached_news = []
+    cache_valid = False
+
     if os.path.exists(news_file):
         try:
-            with open(news_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                cached_news = data.get("news", [])
-                if len(cached_news) >= max_news:
-                    print(f"使用缓存的新闻数据: {news_file}")
-                    return cached_news[:max_news]
-                else:
-                    print(
-                        f"缓存的新闻数量({len(cached_news)})不足，需要获取更多新闻({max_news}条)")
+            # 检查缓存文件的修改时间（时效性检查）
+            file_mtime = os.path.getmtime(news_file)
+            current_time = time.time()
+            # 缓存有效期：当天的缓存在当天有效，历史日期的缓存始终有效
+            if date:  # 如果指定了历史日期，缓存始终有效
+                cache_valid = True
+            else:  # 如果是当天数据，检查是否在同一天创建
+                cache_date_obj = datetime.fromtimestamp(file_mtime).date()
+                today = datetime.now().date()
+                cache_valid = cache_date_obj == today
+
+            if cache_valid:
+                with open(news_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    cached_news = data.get("news", [])
+
+                    if len(cached_news) >= max_news:
+                        print(
+                            f"使用缓存的新闻数据: {news_file} (缓存数量: {len(cached_news)})")
+                        return cached_news[:max_news]
+                    else:
+                        print(
+                            f"缓存的新闻数量({len(cached_news)})不足，需要获取更多新闻({max_news}条)")
+            else:
+                print(f"缓存文件已过期，将重新获取新闻")
+
         except Exception as e:
             print(f"读取缓存文件失败: {e}")
+            cached_news = []
 
     print(f'开始获取{symbol}的新闻数据...')
 
+    # 计算需要获取的新闻数量
+    need_more_news = max_news - len(cached_news)
+    fetch_count = max(need_more_news, max_news)  # 至少获取请求的数量
+
     # 优先尝试使用新的 Google 搜索方法
+    new_news_list = []
     if google_search_sync and SearchOptions:
         try:
             print("使用 Google 搜索获取新闻...")
@@ -235,7 +260,7 @@ def get_stock_news(symbol: str, max_news: int = 10, date: str = None) -> list:
 
             # 执行搜索
             search_options = SearchOptions(
-                limit=max_news * 2,  # 获取更多结果以便过滤
+                limit=fetch_count * 2,  # 获取更多结果以便过滤
                 timeout=30000,
                 locale="zh-CN"
             )
@@ -244,54 +269,69 @@ def get_stock_news(symbol: str, max_news: int = 10, date: str = None) -> list:
 
             if search_response.results:
                 # 转换搜索结果为新闻格式
-                news_list = convert_search_results_to_news_format(
+                new_news_list = convert_search_results_to_news_format(
                     search_response.results, symbol)
 
-                # 只保留指定条数的新闻
-                news_list = news_list[:max_news]
-
-                print(f"通过 Google 搜索成功获取到{len(news_list)}条新闻")
-
-                # 保存到文件
-                try:
-                    save_data = {
-                        "date": cache_date,
-                        "method": "google_search",
-                        "query": search_query,
-                        "news": news_list
-                    }
-                    with open(news_file, 'w', encoding='utf-8') as f:
-                        json.dump(save_data, f, ensure_ascii=False, indent=2)
-                    print(f"成功保存{len(news_list)}条新闻到文件: {news_file}")
-                except Exception as e:
-                    print(f"保存新闻数据到文件时出错: {e}")
-
-                return news_list
+                print(f"通过 Google 搜索成功获取到{len(new_news_list)}条新闻")
             else:
                 print("Google 搜索未返回有效结果，尝试回退到 akshare")
 
         except Exception as e:
             print(f"Google 搜索获取新闻时出错: {e}，回退到 akshare")
 
-    # 回退到原有的 akshare 方法
-    print("使用 akshare 获取新闻...")
-    news_list = get_stock_news_via_akshare(symbol, max_news)
+    # 如果 Google 搜索失败，回退到 akshare
+    if not new_news_list:
+        print("使用 akshare 获取新闻...")
+        new_news_list = get_stock_news_via_akshare(symbol, fetch_count)
 
-    if news_list:
-        # 保存到文件
+    # 合并缓存和新获取的新闻，去重
+    if cached_news and new_news_list:
+        # 创建已有新闻的标题集合用于去重
+        existing_titles = {news['title'] for news in cached_news}
+
+        # 过滤掉重复的新闻
+        unique_new_news = [
+            news for news in new_news_list
+            if news['title'] not in existing_titles
+        ]
+
+        # 合并新闻列表
+        combined_news = cached_news + unique_new_news
+        print(
+            f"合并缓存新闻({len(cached_news)}条)和新获取新闻({len(unique_new_news)}条)，总计{len(combined_news)}条")
+    else:
+        combined_news = new_news_list or cached_news
+
+    # 按发布时间排序（如果有发布时间信息）
+    try:
+        combined_news.sort(key=lambda x: x.get(
+            "publish_time", ""), reverse=True)
+    except:
+        pass  # 如果排序失败，保持原顺序
+
+    # 只保留指定条数的新闻
+    final_news_list = combined_news[:max_news]
+
+    # 保存到文件（只有当获取到新数据时才保存）
+    if new_news_list or not cache_valid:
         try:
             save_data = {
                 "date": cache_date,
-                "method": "akshare",
-                "news": news_list
+                "method": "google_search" if new_news_list and google_search_sync else "akshare",
+                "query": build_search_query(symbol, date) if new_news_list and google_search_sync else None,
+                "news": combined_news,  # 保存所有新闻，不只是返回的部分
+                "cached_count": len(cached_news),
+                "new_count": len(new_news_list),
+                "total_count": len(combined_news),
+                "last_updated": datetime.now().isoformat()
             }
             with open(news_file, 'w', encoding='utf-8') as f:
                 json.dump(save_data, f, ensure_ascii=False, indent=2)
-            print(f"成功保存{len(news_list)}条新闻到文件: {news_file}")
+            print(f"成功保存{len(combined_news)}条新闻到文件: {news_file}")
         except Exception as e:
             print(f"保存新闻数据到文件时出错: {e}")
 
-    return news_list
+    return final_news_list
 
 
 def get_news_sentiment(news_list: list, num_of_news: int = 5) -> float:
