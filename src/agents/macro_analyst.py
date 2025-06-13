@@ -13,15 +13,18 @@ logger = setup_logger('macro_analyst_agent')
 
 @agent_endpoint("macro_analyst", "宏观分析师，分析宏观经济环境对目标股票的影响")
 def macro_analyst_agent(state: AgentState):
-    """负责宏观经济分析"""
+    """Responsible for macro analysis"""
     show_workflow_status("Macro Analyst")
     show_reasoning = state["metadata"]["show_reasoning"]
     data = state["data"]
     symbol = data["ticker"]
     logger.info(f"正在进行宏观分析: {symbol}")
 
-    # 获取大量新闻数据（最多100条）
-    news_list = get_stock_news(symbol, max_news=100)  # 尝试获取100条新闻
+    # 获取 end_date 并传递给 get_stock_news
+    end_date = data.get("end_date")  # 从 run_hedge_fund 传递来的 end_date
+
+    # 获取大量新闻数据（最多100条），传递正确的日期参数
+    news_list = get_stock_news(symbol, max_news=100, date=end_date)
 
     # 过滤七天前的新闻
     cutoff_date = datetime.now() - timedelta(days=7)

@@ -189,11 +189,11 @@ async def google_search(
                         "--mute-audio"
                     ]
                 )
-                return await _perform_search_with_browser(browser, browser_was_provided)
+                return await _perform_search_with_browser(browser, browser_was_provided, headless)
         else:
-            return await _perform_search_with_browser(browser, browser_was_provided)
+            return await _perform_search_with_browser(browser, browser_was_provided, headless)
 
-    async def _perform_search_with_browser(browser: Browser, browser_was_provided: bool) -> SearchResponse:
+    async def _perform_search_with_browser(browser: Browser, browser_was_provided: bool, headless: bool = True) -> SearchResponse:
         """使用给定浏览器执行搜索"""
         try:
             # 获取设备配置

@@ -18,8 +18,8 @@ def sentiment_agent(state: AgentState):
     data = state["data"]
     symbol = data["ticker"]
     logger.info(f"正在分析股票: {symbol}")
-    # 从命令行参数获取新闻数量，默认为5条
-    num_of_news = data.get("num_of_news", 5)
+    # 从命令行参数获取新闻数量，默认为20条
+    num_of_news = data.get("num_of_news", 20)
 
     # 获取 end_date 并传递给 get_stock_news
     end_date = data.get("end_date")  # 从 run_hedge_fund 传递来的 end_date

@@ -178,10 +178,12 @@ def get_stock_news(symbol: str, max_news: int = 10, date: str = None) -> list:
     Args:
         symbol (str): 股票代码，如 "300059"
         max_news (int, optional): 获取的新闻条数，默认为10条。最大支持100条。
-        date (str, optional): 截止日期，格式 "YYYY-MM-DD"，对应 run_hedge_fund 的 end_date
+        date (str, optional): 截止日期，格式 "YYYY-MM-DD"，用于限制获取新闻的时间范围，
+                             获取该日期及之前的新闻。如果不指定，则使用当前日期。
 
     Returns:
-        list: 新闻列表，每条新闻包含标题、内容、发布时间等信息
+        list: 新闻列表，每条新闻包含标题、内容、发布时间等信息。
+              新闻来源通过智能搜索引擎获取，包含各大财经网站的相关报道。
     """
 
     # 限制最大新闻条数
