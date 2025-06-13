@@ -27,10 +27,22 @@ def sentiment_agent(state: AgentState):
     # 获取新闻数据并分析情感，添加 date 参数
     news_list = get_stock_news(symbol, max_news=num_of_news, date=end_date)
 
-    # 过滤7天内的新闻
+    # 过滤7天内的新闻（只对有publish_time字段的新闻进行过滤）
     cutoff_date = datetime.now() - timedelta(days=7)
-    recent_news = [news for news in news_list
-                   if datetime.strptime(news['publish_time'], '%Y-%m-%d %H:%M:%S') > cutoff_date]
+    recent_news = []
+    for news in news_list:
+        if 'publish_time' in news:
+            try:
+                news_date = datetime.strptime(
+                    news['publish_time'], '%Y-%m-%d %H:%M:%S')
+                if news_date > cutoff_date:
+                    recent_news.append(news)
+            except ValueError:
+                # 如果时间格式无法解析，默认包含这条新闻
+                recent_news.append(news)
+        else:
+            # 如果没有publish_time字段，默认包含这条新闻
+            recent_news.append(news)
 
     sentiment_score = get_news_sentiment(recent_news, num_of_news=num_of_news)
 

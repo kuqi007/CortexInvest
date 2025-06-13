@@ -26,10 +26,22 @@ def macro_analyst_agent(state: AgentState):
     # 获取大量新闻数据（最多100条），传递正确的日期参数
     news_list = get_stock_news(symbol, max_news=100, date=end_date)
 
-    # 过滤七天前的新闻
+    # 过滤七天前的新闻（只对有publish_time字段的新闻进行过滤）
     cutoff_date = datetime.now() - timedelta(days=7)
-    recent_news = [news for news in news_list
-                   if datetime.strptime(news['publish_time'], '%Y-%m-%d %H:%M:%S') > cutoff_date]
+    recent_news = []
+    for news in news_list:
+        if 'publish_time' in news:
+            try:
+                news_date = datetime.strptime(
+                    news['publish_time'], '%Y-%m-%d %H:%M:%S')
+                if news_date > cutoff_date:
+                    recent_news.append(news)
+            except ValueError:
+                # 如果时间格式无法解析，默认包含这条新闻
+                recent_news.append(news)
+        else:
+            # 如果没有publish_time字段，默认包含这条新闻
+            recent_news.append(news)
 
     logger.info(f"获取到 {len(recent_news)} 条七天内的新闻")
 

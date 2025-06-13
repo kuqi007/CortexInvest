@@ -93,14 +93,55 @@ def convert_search_results_to_news_format(search_results, symbol: str) -> list:
         if any(keyword in result.title.lower() for keyword in ['招聘', '求职', '广告', '登录', '注册']):
             continue
 
+        # 尝试从snippet中提取时间信息
+        publish_time = None
+        if result.snippet:
+            # 查找常见的时间模式
+            import re
+            time_patterns = [
+                r'(\d{1,2}天前)',
+                r'(\d{1,2}小时前)',
+                r'(\d{4}-\d{2}-\d{2})',
+                r'(\d{4}年\d{1,2}月\d{1,2}日)',
+                r'(\d{2}-\d{2})'
+            ]
+
+            for pattern in time_patterns:
+                match = re.search(pattern, result.snippet)
+                if match:
+                    time_str = match.group(1)
+                    try:
+                        # 处理相对时间
+                        if '天前' in time_str:
+                            days = int(time_str.replace('天前', ''))
+                            publish_date = datetime.now() - timedelta(days=days)
+                            publish_time = publish_date.strftime(
+                                '%Y-%m-%d %H:%M:%S')
+                        elif '小时前' in time_str:
+                            hours = int(time_str.replace('小时前', ''))
+                            publish_date = datetime.now() - timedelta(hours=hours)
+                            publish_time = publish_date.strftime(
+                                '%Y-%m-%d %H:%M:%S')
+                        # YYYY-MM-DD格式
+                        elif '-' in time_str and len(time_str) == 10:
+                            publish_time = f"{time_str} 00:00:00"
+                        break
+                    except:
+                        continue
+
         news_item = {
             "title": result.title,
-            "content": result.snippet or result.title,  # 使用摘要作为内容，如果没有摘要则使用标题
-            "publish_time": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),  # 默认当前时间
+            "content": result.snippet or result.title,
             "source": extract_domain(result.link),
             "url": result.link,
-            "keyword": symbol
+            "keyword": symbol,
+            "search_time": datetime.now().strftime('%Y-%m-%d %H:%M:%S')  # 搜索时间
         }
+
+        # 只有当能提取到发布时间时才添加，否则不包含这个字段
+        if publish_time:
+            news_item["publish_time"] = publish_time
+
         news_list.append(news_item)
 
     return news_list
@@ -319,7 +360,7 @@ def get_stock_news(symbol: str, max_news: int = 10, date: str = None) -> list:
         try:
             save_data = {
                 "date": cache_date,
-                "method": "google_search" if new_news_list and google_search_sync else "akshare",
+                "method": "online_search" if new_news_list and google_search_sync else "akshare",
                 "query": build_search_query(symbol, date) if new_news_list and google_search_sync else None,
                 "news": combined_news,  # 保存所有新闻，不只是返回的部分
                 "cached_count": len(cached_news),
