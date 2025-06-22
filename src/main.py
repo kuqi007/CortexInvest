@@ -196,8 +196,8 @@ if __name__ == "__main__":
                         help='End date (YYYY-MM-DD). Defaults to yesterday')
     parser.add_argument('--show-reasoning', action='store_true',
                         help='Show reasoning from each agent')
-    parser.add_argument('--num-of-news', type=int, default=5,
-                        help='Number of news articles to analyze for sentiment (default: 5)')
+    parser.add_argument('--num-of-news', type=int, default=20,
+                        help='Number of news articles to analyze for sentiment (default: 20)')
     parser.add_argument('--initial-capital', type=float, default=100000.0,
                         help='Initial cash amount (default: 100,000)')
     parser.add_argument('--initial-position', type=int,
