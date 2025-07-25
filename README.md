@@ -475,7 +475,7 @@ A_Share_investment_Agent/
 <img src="[https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.png](https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.png)" width="100%">
 </div>
 
-## ☕️ 支持与社区
+## ☕️ 支持
 
 如果这个项目对你有帮助，欢迎请我喝杯咖啡 ❤️
 
