@@ -38,9 +38,11 @@ function orderTypeLabel(o: PlanOrder): string {
 function PlanCard({
   plan,
   onChanged,
+  indicators,
 }: {
   plan: TradePlan;
   onChanged: () => void;
+  indicators?: Record<string, unknown> | null;
 }) {
   const planId = plan.id;
   const pos = plan.position;
@@ -166,6 +168,47 @@ function PlanCard({
           <div style={{ color: D.comment, fontSize: 11, marginBottom: 2 }}>-- 条件单 --</div>
           {plan.orders.map((o) => {
             const isSell = o.side === "sell";
+            const isInd = !!o.indicators;
+
+            // Compute indicator status for display
+            let indStatus: { met: boolean; cur: string; dist: string | null } | null = null;
+            if (isInd && indicators) {
+              const ic = o.indicators!;
+              const rsi = indicators.rsi as number | undefined;
+              const dif = indicators.dif as number | undefined;
+              const dea = indicators.dea as number | undefined;
+              const volRatio = indicators.vol_ratio as number | undefined;
+              const goldenCross = indicators.macd_golden_cross as boolean | undefined;
+              const bullDiv = indicators.macd_bull_divergence as boolean | undefined;
+              const ma5TurnUp = indicators.ma5_turn_up as boolean | undefined;
+
+              if (ic.rsi_below != null && rsi != null) {
+                const th = ic.rsi_below as number;
+                indStatus = { met: rsi < th, cur: `RSI=${rsi.toFixed(0)}`, dist: rsi < th ? null : `差${(rsi - th).toFixed(0)}` };
+              } else if (ic.rsi_above != null && rsi != null) {
+                const th = ic.rsi_above as number;
+                indStatus = { met: rsi > th, cur: `RSI=${rsi.toFixed(0)}`, dist: rsi > th ? null : `差${(th - rsi).toFixed(0)}` };
+              } else if (ic.macd_golden_cross) {
+                indStatus = { met: !!goldenCross, cur: dif != null && dea != null ? `DIF${dif > dea ? ">" : "<"}DEA` : "—", dist: goldenCross ? null : (dif != null && dea != null ? `差${(dea - dif).toFixed(2)}` : null) };
+              } else if (ic.macd_bull_divergence) {
+                indStatus = { met: !!bullDiv, cur: bullDiv ? "出现" : "未出现", dist: null };
+              } else if (ic.ma5_turn_up) {
+                indStatus = { met: !!ma5TurnUp, cur: ma5TurnUp ? "拐头↑" : "下行中", dist: null };
+              } else if (ic.vol_ratio_above != null && volRatio != null) {
+                const th = ic.vol_ratio_above as number;
+                indStatus = { met: volRatio >= th, cur: `${volRatio.toFixed(1)}x`, dist: volRatio >= th ? null : `差${(th - volRatio).toFixed(1)}x` };
+              } else if (ic.confluence_min != null) {
+                const min = ic.confluence_min as number;
+                let cnt = 0;
+                if (rsi != null && rsi < 35) cnt++;
+                if (goldenCross) cnt++;
+                if (bullDiv) cnt++;
+                if (ma5TurnUp) cnt++;
+                if (volRatio != null && volRatio >= 1.5) cnt++;
+                indStatus = { met: cnt >= min, cur: `${cnt}/${min}信号`, dist: cnt >= min ? null : `差${min - cnt}个` };
+              }
+            }
+
             return (
               <div key={o.id} style={{
                 display: "flex",
@@ -173,42 +216,65 @@ function PlanCard({
                 gap: 6,
                 padding: "2px 0",
                 opacity: o.triggered ? 0.5 : 1,
-                borderLeft: `2px solid ${isSell ? D.red : D.green}`,
+                borderLeft: `2px solid ${isInd ? D.cyan : isSell ? D.red : D.green}`,
                 paddingLeft: 8,
                 marginBottom: 2,
               }}>
-                <span style={{
-                  fontSize: 10,
-                  color: D.bg,
-                  background: isSell ? D.red : D.green,
-                  padding: "0 4px",
-                  borderRadius: 2,
-                  fontWeight: 700,
-                }}>
-                  {orderTypeLabel(o)}
-                </span>
-                <span style={{ color: D.comment }}>{o.op}</span>
-                <EditableCell
-                  value={o.price}
-                  onSave={(v) => handleUpdateOrder(o.id, "price", v)}
-                  width="60px"
-                  isNumber
-                  color={isSell ? D.red : D.green}
-                />
-                {o.shares != null && o.shares > 0 && (
-                  <EditableCell
-                    value={o.shares}
-                    onSave={(v) => handleUpdateOrder(o.id, "shares", v)}
-                    width="56px"
-                    isNumber
-                    color={isSell ? D.orange : D.green}
-                  />
+                {isInd ? (
+                  <>
+                    <span style={{
+                      fontSize: 10, color: D.bg, background: D.cyan,
+                      padding: "0 4px", borderRadius: 2, fontWeight: 700,
+                    }}>指标</span>
+                    <span style={{ color: indStatus?.met ? D.green : D.comment, fontWeight: indStatus?.met ? 700 : 400, fontSize: 11 }}>
+                      {indStatus?.met ? "●" : "○"}
+                    </span>
+                    <span style={{ color: D.fg, fontSize: 11 }}>{o.label}</span>
+                    {indStatus && (
+                      <span style={{
+                        fontFamily: "JetBrains Mono, monospace", fontSize: 10, marginLeft: "auto",
+                        color: indStatus.met ? D.green : D.comment,
+                      }}>
+                        {indStatus.cur}{indStatus.dist ? ` (${indStatus.dist})` : indStatus.met ? " ✓" : ""}
+                      </span>
+                    )}
+                    {!indicators && !o.triggered && (
+                      <span style={{ color: D.comment, fontSize: 10, marginLeft: "auto" }}>15:05检测</span>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <span style={{
+                      fontSize: 10, color: D.bg,
+                      background: isSell ? D.red : D.green,
+                      padding: "0 4px", borderRadius: 2, fontWeight: 700,
+                    }}>
+                      {orderTypeLabel(o)}
+                    </span>
+                    <span style={{ color: D.comment }}>{o.op}</span>
+                    <EditableCell
+                      value={o.price}
+                      onSave={(v) => handleUpdateOrder(o.id, "price", v)}
+                      width="60px"
+                      isNumber
+                      color={isSell ? D.red : D.green}
+                    />
+                    {o.shares != null && o.shares > 0 && (
+                      <EditableCell
+                        value={o.shares}
+                        onSave={(v) => handleUpdateOrder(o.id, "shares", v)}
+                        width="56px"
+                        isNumber
+                        color={isSell ? D.orange : D.green}
+                      />
+                    )}
+                    <span style={{ color: isSell ? D.orange : D.green, fontSize: 11 }}>股</span>
+                    {o.trailing && (
+                      <span style={{ color: D.purple, fontSize: 10 }}>回落{o.trailing.pct}%</span>
+                    )}
+                    <span style={{ color: D.comment, fontSize: 11 }}>{o.label}</span>
+                  </>
                 )}
-                <span style={{ color: isSell ? D.orange : D.green, fontSize: 11 }}>股</span>
-                {o.trailing && (
-                  <span style={{ color: D.purple, fontSize: 10 }}>回落{o.trailing.pct}%</span>
-                )}
-                <span style={{ color: D.comment, fontSize: 11 }}>{o.label}</span>
                 {o.triggered && (
                   <span style={{ color: D.yellow, fontSize: 10 }}>已触发 {o.triggered_at?.slice(0, 10) || ""}</span>
                 )}
@@ -673,11 +739,49 @@ export function StockDrawer({
   const [dipOverride, setDipOverride] = useState<boolean | null>(null);
   const [aliasOverride, setAliasOverride] = useState<string | null | undefined>(undefined);
 
+  // Technical indicators for A-share stocks
+  const [indicators, setIndicators] = useState<Record<string, unknown> | null>(null);
+  const [indLoading, setIndLoading] = useState(false);
+
   // Reset overrides when drawer opens a different symbol
   useEffect(() => {
     setStarOverride(null);
     setDipOverride(null);
     setAliasOverride(undefined);
+    setIndicators(null);
+  }, [symbol]);
+
+  // Fetch indicators for A-share stocks — once on open, then every 5 min with live price
+  const svcMatch = services.find((s) => s.id === symbol);
+  const livePrice = svcMatch?.price ?? 0;
+  const indTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    if (!symbol || symbol.startsWith("HK") || symbol.startsWith("KR")) {
+      setIndicators(null);
+      return;
+    }
+    let cancelled = false;
+    const fetchInd = (price: number) => {
+      const params = new URLSearchParams({ symbol });
+      if (price > 0) params.set("live_price", String(price));
+      fetch(`/api/indicators?${params}`)
+        .then((r) => r.json())
+        .then((data) => { if (!cancelled && !data.error) setIndicators(data); })
+        .catch(() => {})
+        .finally(() => { if (!cancelled) setIndLoading(false); });
+    };
+    setIndLoading(true);
+    fetchInd(livePrice);
+    // Refresh every 5 min during trading hours
+    indTimerRef.current = setInterval(() => {
+      const h = new Date().getHours();
+      if (h >= 9 && h < 16) fetchInd(livePrice);
+    }, 5 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      if (indTimerRef.current) clearInterval(indTimerRef.current);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol]);
 
   const saveConfig = useCallback(async (field: string, value: unknown) => {
@@ -719,7 +823,7 @@ export function StockDrawer({
       const res = await fetch("/api/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "update", code, tags }),
+        body: JSON.stringify({ action: "update", code, data: { tags } }),
       });
       setToast(res.ok ? { msg: "标签已保存", type: "ok" } : { msg: "保存失败", type: "err" });
       if (res.ok) onRefreshPlans();
@@ -960,6 +1064,102 @@ export function StockDrawer({
             )}
           </section>
 
+          {/* Section: 技术指标 (A-share only) */}
+          {symbol && !symbol.startsWith("HK") && !symbol.startsWith("KR") && (
+            <div style={{ borderTop: `1px solid ${D.currentLine}`, marginTop: 8, paddingTop: 16 }}>
+              <div style={{ color: D.comment, fontSize: 11, textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>
+                技术指标 (日线)
+              </div>
+              {indLoading && <div style={{ color: D.comment, fontSize: 11 }}>加载中...</div>}
+              {!indLoading && !indicators && <div style={{ color: D.comment, fontSize: 11 }}>暂无数据</div>}
+              {indicators && (() => {
+                const rsi = indicators.rsi as number;
+                const macdHist = indicators.macd_hist as number;
+                const ma5 = indicators.ma5 as number;
+                const ma10 = indicators.ma10 as number;
+                const ma20 = indicators.ma20 as number;
+                const close = indicators.close as number;
+                const volRatio = indicators.vol_ratio as number;
+                const goldenCross = indicators.macd_golden_cross as boolean;
+                const deathCross = indicators.macd_death_cross as boolean;
+                const bullDiv = indicators.macd_bull_divergence as boolean;
+                const ma5TurnUp = indicators.ma5_turn_up as boolean;
+
+                // RSI color
+                const rsiColor = rsi < 30 ? D.green : rsi > 70 ? D.red : D.fg;
+                // MA alignment
+                const maAlign = ma5 > ma10 && ma10 > ma20 ? "多头排列" : ma5 < ma10 && ma10 < ma20 ? "空头排列" : "交叉";
+                const maColor = maAlign === "多头排列" ? D.red : maAlign === "空头排列" ? D.green : D.yellow;
+
+                // Active signals
+                const signals: { label: string; color: string }[] = [];
+                if (rsi < 30) signals.push({ label: "RSI超卖", color: D.green });
+                if (rsi > 70) signals.push({ label: "RSI超买", color: D.red });
+                if (goldenCross) signals.push({ label: "MACD金叉", color: D.green });
+                if (deathCross) signals.push({ label: "MACD死叉", color: D.red });
+                if (bullDiv) signals.push({ label: "MACD底背离", color: D.cyan });
+                if (volRatio >= 2.0) signals.push({ label: `放量${volRatio.toFixed(1)}x`, color: D.yellow });
+                if (ma5TurnUp) signals.push({ label: "MA5拐头↑", color: D.green });
+
+                const rowStyle: React.CSSProperties = { display: "flex", gap: 12, fontSize: 12, padding: "2px 0" };
+                const labelStyle: React.CSSProperties = { color: D.comment, width: 60, flexShrink: 0, textAlign: "right" as const };
+                const valStyle: React.CSSProperties = { fontFamily: "JetBrains Mono, monospace" };
+
+                return (
+                  <div style={{ background: D.bg, border: `1px solid ${D.currentLine}`, borderRadius: 4, padding: "8px 12px" }}>
+                    <div style={rowStyle}>
+                      <span style={labelStyle}>RSI</span>
+                      <span style={{ ...valStyle, color: rsiColor, fontWeight: 700 }}>{rsi.toFixed(0)}</span>
+                      <span style={{ color: D.comment, fontSize: 10 }}>
+                        {rsi < 30 ? "超卖" : rsi < 40 ? "偏弱" : rsi > 70 ? "超买" : rsi > 60 ? "偏强" : "中性"}
+                      </span>
+                    </div>
+                    <div style={rowStyle}>
+                      <span style={labelStyle}>MACD</span>
+                      <span style={{ ...valStyle, color: macdHist >= 0 ? D.red : D.green }}>{macdHist.toFixed(2)}</span>
+                      <span style={{ color: D.comment, fontSize: 10 }}>
+                        DIF={(indicators.dif as number).toFixed(2)} DEA={(indicators.dea as number).toFixed(2)}
+                      </span>
+                    </div>
+                    <div style={rowStyle}>
+                      <span style={labelStyle}>均线</span>
+                      <span style={{ ...valStyle, color: maColor, fontSize: 11 }}>{maAlign}</span>
+                      <span style={{ color: D.comment, fontSize: 10 }}>
+                        MA5={ma5.toFixed(0)} MA10={ma10.toFixed(0)} MA20={ma20.toFixed(0)}
+                      </span>
+                    </div>
+                    <div style={rowStyle}>
+                      <span style={labelStyle}>量比</span>
+                      <span style={{ ...valStyle, color: volRatio >= 2 ? D.yellow : D.fg }}>{volRatio.toFixed(1)}x</span>
+                      <span style={{ color: D.comment, fontSize: 10 }}>vs MA20</span>
+                    </div>
+                    <div style={rowStyle}>
+                      <span style={labelStyle}>价格</span>
+                      <span style={valStyle}>{close.toFixed(2)}</span>
+                      <span style={{ color: D.comment, fontSize: 10 }}>
+                        {close < ma5 ? `< MA5(${ma5.toFixed(0)})` : close > ma20 ? `> MA20(${ma20.toFixed(0)})` : `MA5~MA20之间`}
+                      </span>
+                    </div>
+                    {signals.length > 0 && (
+                      <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {signals.map((s) => (
+                          <span key={s.label} style={{
+                            fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 3,
+                            background: s.color, color: D.bg,
+                          }}>{s.label}</span>
+                        ))}
+                      </div>
+                    )}
+                    {signals.length === 0 && (
+                      <div style={{ marginTop: 4, color: D.comment, fontSize: 10 }}>无活跃信号 — 等待止跌确认</div>
+                    )}
+
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
           {/* Section 4: 交易计划 */}
           <div style={{ borderTop: `1px solid ${D.currentLine}`, marginTop: 8, paddingTop: 16 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
@@ -985,7 +1185,7 @@ export function StockDrawer({
               <div style={{ color: D.comment, fontSize: 11 }}>暂无计划，点击「+ 新建」创建</div>
             )}
             {symbolPlans.map((plan) => (
-              <PlanCard key={plan.id} plan={plan} onChanged={onRefreshPlans} />
+              <PlanCard key={plan.id} plan={plan} onChanged={onRefreshPlans} indicators={indicators} />
             ))}
           </div>
 

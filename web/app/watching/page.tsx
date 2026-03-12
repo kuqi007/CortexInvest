@@ -106,8 +106,10 @@ function WatchingContent() {
   const tagFiltered = useMemo(() => filterTag
     ? tabServices.filter((s) => s.tags?.includes(filterTag))
     : tabServices, [tabServices, filterTag]);
-  const watchStock = useMemo(() => applySortList(tagFiltered.filter((s) => !s.hidden && !isETF(s))), [tagFiltered, watchSort]);
-  const watchETF = useMemo(() => applySortList(tagFiltered.filter((s) => !s.hidden && isETF(s))), [tagFiltered, watchSort]);
+  const pinnedList = useMemo(() => applySortList(tagFiltered.filter((s) => !s.hidden && s.star)), [tagFiltered, watchSort]);
+  const pinnedIds = useMemo(() => new Set(pinnedList.map((s) => s.id)), [pinnedList]);
+  const watchStock = useMemo(() => applySortList(tagFiltered.filter((s) => !s.hidden && !isETF(s) && !pinnedIds.has(s.id))), [tagFiltered, watchSort, pinnedIds]);
+  const watchETF = useMemo(() => applySortList(tagFiltered.filter((s) => !s.hidden && isETF(s) && !pinnedIds.has(s.id))), [tagFiltered, watchSort, pinnedIds]);
   const hiddenList = useMemo(() => applySortList(tagFiltered.filter((s) => s.hidden)), [tagFiltered, watchSort]);
 
   const now = ts ? new Date(ts).toLocaleTimeString("zh-CN", { hour12: false }) : "--:--:--";
@@ -179,7 +181,6 @@ function WatchingContent() {
             {s.mainNetInflowPct != null ? `${s.mainNetInflowPct >= 0 ? "+" : ""}${s.mainNetInflowPct.toFixed(1)}%` : pad("-", 6, true)}
           </span>
         )}
-        <span style={{ color: D.comment, width: "13ch", textAlign: "right" }}>{pad(`${s.low.toFixed(2)}-${s.high.toFixed(2)}`, 12, true)}</span>
         <span style={{ width: "12ch", overflow: "hidden", whiteSpace: "nowrap", marginLeft: 8 }}>
           {(s.tags ?? []).map((t) => (
             <span key={t} style={tagChipStyle(t)} onClick={(e) => { e.stopPropagation(); setFilterTag(t); }}>{t}</span>
@@ -211,7 +212,6 @@ function WatchingContent() {
       <span style={mkHStyle("9ch", "amount", true)} onClick={() => toggleWatchSort("amount")}>{pad("成交额" + mkArrow("amount"), 8, true)}</span>
       {showL2 && <span style={mkHStyle("9ch", "mainNetInflow" as SortKey, true)} onClick={() => toggleWatchSort("mainNetInflow" as SortKey)}>{pad("主力" + mkArrow("mainNetInflow" as SortKey), 8, true)}</span>}
       {showL2 && <span style={mkHStyle("7ch", "mainNetInflowPct" as SortKey, true)} onClick={() => toggleWatchSort("mainNetInflowPct" as SortKey)}>{pad("主力%" + mkArrow("mainNetInflowPct" as SortKey), 6, true)}</span>}
-      <span style={{ width: "13ch", textAlign: "right" }}>{pad("高低", 12, true)}</span>
       <span style={{ width: "12ch", color: D.pink, marginLeft: 8 }}>标签</span>
     </div>
   );
@@ -259,6 +259,15 @@ function WatchingContent() {
               visible:<span style={{ color: D.fg }}>{watchStock.length + watchETF.length}</span>{"  "}
               hidden:<span style={{ color: D.comment }}>{hiddenList.length}</span>
             </div>
+
+            {pinnedList.length > 0 && (
+              <>
+                <div style={{ color: D.comment, padding: "4px 0 1px" }}>
+                  <span style={{ color: D.yellow }}>★</span> # ── pinned ({pinnedList.length}) ──
+                </div>
+                {header}{pinnedList.map((s) => <WatchRow key={s.id} s={s} />)}
+              </>
+            )}
 
             {watchStock.length > 0 && (
               <>

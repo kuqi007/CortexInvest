@@ -134,10 +134,12 @@ function Home() {
   const tagFiltered = useMemo(() => filterTag
     ? tabServices.filter((s) => s.tags?.includes(filterTag))
     : tabServices, [tabServices, filterTag]);
-  const prodStock = useMemo(() => applySortList(tagFiltered.filter((s) => s.type === "holding" && !s.hidden && !isETF(s)), holdSort), [tagFiltered, holdSort]);
-  const prodETF = useMemo(() => applySortList(tagFiltered.filter((s) => s.type === "holding" && !s.hidden && isETF(s)), holdSort), [tagFiltered, holdSort]);
+  const pinnedList = useMemo(() => applySortList(tagFiltered.filter((s) => s.type === "holding" && !s.hidden && s.star), holdSort), [tagFiltered, holdSort]);
+  const pinnedIds = useMemo(() => new Set(pinnedList.map((s) => s.id)), [pinnedList]);
+  const prodStock = useMemo(() => applySortList(tagFiltered.filter((s) => s.type === "holding" && !s.hidden && !isETF(s) && !pinnedIds.has(s.id)), holdSort), [tagFiltered, holdSort, pinnedIds]);
+  const prodETF = useMemo(() => applySortList(tagFiltered.filter((s) => s.type === "holding" && !s.hidden && isETF(s) && !pinnedIds.has(s.id)), holdSort), [tagFiltered, holdSort, pinnedIds]);
   const hiddenList = useMemo(() => applySortList(tagFiltered.filter((s) => s.hidden && s.type === "holding"), holdSort), [tagFiltered, holdSort]);
-  const hasHold = prodStock.length > 0 || prodETF.length > 0;
+  const hasHold = pinnedList.length > 0 || prodStock.length > 0 || prodETF.length > 0;
   const allTags = useMemo(
     () => [...new Set(services.flatMap((s) => s.tags ?? []))],
     [services]
@@ -514,6 +516,17 @@ function Home() {
 
           return (
             <>
+              {/* ── pinned (starred) ── */}
+              {pinnedList.length > 0 && (
+                <>
+                  <div style={{ color: D.comment, padding: "4px 0 1px" }}>
+                    <span style={{ color: D.yellow }}>★</span>
+                    {" "}# ── pinned ({pinnedList.length}) ──
+                  </div>
+                  {holdHeader}{pinnedList.map((s) => <HoldRow key={s.id} s={s} />)}
+                </>
+              )}
+
               {/* ── prod:stocks ── */}
               {prodStock.length > 0 && (
                 <>
