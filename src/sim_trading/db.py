@@ -316,6 +316,21 @@ CREATE TABLE IF NOT EXISTS futu_orders (
 );
 CREATE INDEX IF NOT EXISTS idx_futu_orders_code ON futu_orders(code);
 CREATE INDEX IF NOT EXISTS idx_futu_orders_status ON futu_orders(status);
+
+-- 日K线缓存（回测 + 离线评分用）
+CREATE TABLE IF NOT EXISTS daily_kline (
+    date TEXT NOT NULL,
+    code TEXT NOT NULL,
+    open REAL,
+    high REAL,
+    low REAL,
+    close REAL,
+    volume REAL,
+    turnover REAL,
+    change_pct REAL,
+    PRIMARY KEY(date, code)
+);
+CREATE INDEX IF NOT EXISTS idx_daily_kline_code ON daily_kline(code);
 """
 
 
@@ -323,7 +338,7 @@ def get_connection() -> sqlite3.Connection:
     """Get a SQLite connection with WAL mode for concurrent read/write."""
     path = _db_path_override if _db_path_override is not None else str(DB_PATH)
     use_uri = path.startswith("file:")
-    conn = sqlite3.connect(path, timeout=10, uri=use_uri)
+    conn = sqlite3.connect(path, timeout=10, uri=use_uri, isolation_level=None)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
     conn.row_factory = sqlite3.Row
@@ -368,6 +383,14 @@ def init_db():
     if "watch_price_date" not in existing_cols:
         try:
             conn.execute("ALTER TABLE monitor_watchlist ADD COLUMN watch_price_date TEXT")
+        except sqlite3.OperationalError:
+            pass
+    # Migration: add atr_at_entry column to live_state if missing
+    try:
+        conn.execute("SELECT atr_at_entry FROM live_state LIMIT 1")
+    except sqlite3.OperationalError:
+        try:
+            conn.execute("ALTER TABLE live_state ADD COLUMN atr_at_entry REAL DEFAULT 0")
         except sqlite3.OperationalError:
             pass
     # Migration: add parent column to tag_meta if missing

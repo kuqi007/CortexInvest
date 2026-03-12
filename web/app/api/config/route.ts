@@ -143,7 +143,7 @@ function openMonitorDb(readonly = false): MonitorDb {
   }
   const db = new Database(SIM_DB_PATH);
   db.pragma("journal_mode = WAL");
-  db.pragma("busy_timeout = 5000");
+  db.pragma("busy_timeout = 15000");
   return db;
 }
 

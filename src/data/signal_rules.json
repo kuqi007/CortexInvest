@@ -68,8 +68,8 @@
     "HK00325": 100, "HK03896": 2000, "HK03986": 100
   },
   "daily_score": {
-    "entry_threshold": 70,
-    "exit_threshold": 40,
+    "entry_threshold": 60,
+    "exit_threshold": 46,
     "exit_extreme_threshold": 30,
     "exit_consecutive_days": 2,
     "intraday_exception_confidence": 0.85,
@@ -83,15 +83,21 @@
     "max_hold_days": 10,
     "position_pct": 0.25,
     "min_profit_after_cost_pct": 0.005,
-    "min_notional": 30000
+    "min_notional": 30000,
+    "sl_atr_mult": 2.0,
+    "tp_atr_mult": 3.0,
+    "trailing_atr": 3.0,
+    "adx_min": 25,
+    "rr_min": 2.0,
+    "cooldown_days": 6
   },
   "scoring_weights": {
-    "macd": 20,
-    "rsi": 15,
-    "ma": 20,
-    "capital_flow": 20,
-    "volume_price": 15,
-    "support": 10
+    "macd": 29,
+    "rsi": 8,
+    "ma": 10,
+    "capital_flow": 22,
+    "volume_price": 21,
+    "support": 12
   },
   "dip_buy": {
     "enabled": true,

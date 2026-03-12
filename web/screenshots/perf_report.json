@@ -1,0 +1,352 @@
+{
+  "timestamp": "2026-03-06T01:53:45.363Z",
+  "pages": {
+    "holdings": {
+      "loadTime": 5112,
+      "navTiming": {
+        "dns": 0,
+        "tcp": 0,
+        "ttfb": 104,
+        "domContentLoaded": 0,
+        "domComplete": 0,
+        "loadEvent": 0,
+        "transferSize": 5676
+      },
+      "resources": {
+        "total": 6,
+        "byType": {
+          "link": {
+            "count": 2,
+            "totalSize": 31345,
+            "totalDuration": 12.599999904632568
+          },
+          "script": {
+            "count": 4,
+            "totalSize": 1946193,
+            "totalDuration": 146.10000014305115
+          }
+        }
+      },
+      "lcp": 0,
+      "cls": 0,
+      "longTasks": [
+        128
+      ],
+      "longTaskCount": 1,
+      "tbt": 78,
+      "memory": {
+        "usedJSHeapSize": 45.2,
+        "totalJSHeapSize": 45.2
+      },
+      "domNodes": 69,
+      "apiCalls": [],
+      "apiCallCount": 0
+    },
+    "watching": {
+      "loadTime": 5044,
+      "navTiming": {
+        "dns": 0,
+        "tcp": 0,
+        "ttfb": 37,
+        "domContentLoaded": 0,
+        "domComplete": 0,
+        "loadEvent": 0,
+        "transferSize": 5775
+      },
+      "resources": {
+        "total": 6,
+        "byType": {
+          "link": {
+            "count": 2,
+            "totalSize": 31345,
+            "totalDuration": 10
+          },
+          "script": {
+            "count": 4,
+            "totalSize": 1935089,
+            "totalDuration": 131
+          }
+        }
+      },
+      "lcp": 0,
+      "cls": 0,
+      "longTasks": [
+        120
+      ],
+      "longTaskCount": 1,
+      "tbt": 70,
+      "memory": {
+        "usedJSHeapSize": 42.6,
+        "totalJSHeapSize": 48.1
+      },
+      "domNodes": 67,
+      "apiCalls": [],
+      "apiCallCount": 0
+    },
+    "alerts": {
+      "loadTime": 5048,
+      "navTiming": {
+        "dns": 0,
+        "tcp": 0,
+        "ttfb": 38,
+        "domContentLoaded": 0,
+        "domComplete": 0,
+        "loadEvent": 0,
+        "transferSize": 5789
+      },
+      "resources": {
+        "total": 6,
+        "byType": {
+          "link": {
+            "count": 2,
+            "totalSize": 31345,
+            "totalDuration": 10.700000047683716
+          },
+          "script": {
+            "count": 4,
+            "totalSize": 1930188,
+            "totalDuration": 124.19999980926514
+          }
+        }
+      },
+      "lcp": 0,
+      "cls": 0,
+      "longTasks": [
+        129
+      ],
+      "longTaskCount": 1,
+      "tbt": 79,
+      "memory": {
+        "usedJSHeapSize": 42.6,
+        "totalJSHeapSize": 45.2
+      },
+      "domNodes": 69,
+      "apiCalls": [],
+      "apiCallCount": 0
+    },
+    "sim": {
+      "loadTime": 5122,
+      "navTiming": {
+        "dns": 0,
+        "tcp": 0,
+        "ttfb": 110,
+        "domContentLoaded": 0,
+        "domComplete": 0,
+        "loadEvent": 0,
+        "transferSize": 5679
+      },
+      "resources": {
+        "total": 6,
+        "byType": {
+          "link": {
+            "count": 2,
+            "totalSize": 31345,
+            "totalDuration": 19.799999952316284
+          },
+          "script": {
+            "count": 4,
+            "totalSize": 1958131,
+            "totalDuration": 153.599999666214
+          }
+        }
+      },
+      "lcp": 0,
+      "cls": 0,
+      "longTasks": [
+        119
+      ],
+      "longTaskCount": 1,
+      "tbt": 69,
+      "memory": {
+        "usedJSHeapSize": 45.2,
+        "totalJSHeapSize": 45.2
+      },
+      "domNodes": 62,
+      "apiCalls": [],
+      "apiCallCount": 0
+    },
+    "sector": {
+      "loadTime": 5055,
+      "navTiming": {
+        "dns": 0,
+        "tcp": 0,
+        "ttfb": 45,
+        "domContentLoaded": 0,
+        "domComplete": 0,
+        "loadEvent": 0,
+        "transferSize": 5758
+      },
+      "resources": {
+        "total": 6,
+        "byType": {
+          "link": {
+            "count": 2,
+            "totalSize": 31345,
+            "totalDuration": 14.400000095367432
+          },
+          "script": {
+            "count": 4,
+            "totalSize": 1943859,
+            "totalDuration": 173.19999957084656
+          }
+        }
+      },
+      "lcp": 0,
+      "cls": 0,
+      "longTasks": [
+        116
+      ],
+      "longTaskCount": 1,
+      "tbt": 66,
+      "memory": {
+        "usedJSHeapSize": 45.2,
+        "totalJSHeapSize": 45.2
+      },
+      "domNodes": 66,
+      "apiCalls": [],
+      "apiCallCount": 0
+    }
+  },
+  "tabSwitches": {
+    "Holdings→Watching": {
+      "ms": 10082,
+      "extraApiCalls": 0,
+      "loadingFlash": true
+    },
+    "Watching→Alerts": {
+      "ms": 66,
+      "extraApiCalls": 0,
+      "loadingFlash": true
+    },
+    "Alerts→Holdings": {
+      "ms": 1404,
+      "extraApiCalls": 1,
+      "loadingFlash": false
+    },
+    "Holdings→Alerts": {
+      "ms": 178,
+      "extraApiCalls": 0,
+      "loadingFlash": false
+    },
+    "Alerts→Watching": {
+      "ms": 63,
+      "extraApiCalls": 0,
+      "loadingFlash": false
+    },
+    "Watching→Holdings": {
+      "ms": 9,
+      "extraApiCalls": 0,
+      "loadingFlash": false
+    }
+  },
+  "apiTiming": {
+    "/api/metrics": {
+      "avgMs": 21,
+      "minMs": 16,
+      "maxMs": 30,
+      "samples": [
+        {
+          "ms": 30,
+          "size": 189628,
+          "ok": true
+        },
+        {
+          "ms": 16,
+          "size": 189628,
+          "ok": true
+        },
+        {
+          "ms": 18,
+          "size": 189628,
+          "ok": true
+        }
+      ]
+    },
+    "/api/sim": {
+      "avgMs": 16,
+      "minMs": 9,
+      "maxMs": 22,
+      "samples": [
+        {
+          "ms": 18,
+          "size": 24532,
+          "ok": true
+        },
+        {
+          "ms": 22,
+          "size": 24532,
+          "ok": true
+        },
+        {
+          "ms": 9,
+          "size": 24532,
+          "ok": true
+        }
+      ]
+    },
+    "/api/sector": {
+      "avgMs": 456,
+      "minMs": 11,
+      "maxMs": 1339,
+      "samples": [
+        {
+          "ms": 1339,
+          "size": 25793,
+          "ok": true
+        },
+        {
+          "ms": 17,
+          "size": 25793,
+          "ok": true
+        },
+        {
+          "ms": 11,
+          "size": 25793,
+          "ok": true
+        }
+      ]
+    },
+    "/api/summary": {
+      "avgMs": 9,
+      "minMs": 7,
+      "maxMs": 12,
+      "samples": [
+        {
+          "ms": 12,
+          "size": 4668,
+          "ok": true
+        },
+        {
+          "ms": 7,
+          "size": 4668,
+          "ok": true
+        },
+        {
+          "ms": 7,
+          "size": 4668,
+          "ok": true
+        }
+      ]
+    }
+  },
+  "summary": {
+    "avgTabSwitchMs": 1967,
+    "anyLoadingFlash": true,
+    "extraApiCallsOnSwitch": 1,
+    "holdingsLoadMs": 5112,
+    "metricsApiAvgMs": 21,
+    "pollRatePerMin": 1.9,
+    "grades": {
+      "tabSwitch": "F",
+      "loadingFlash": "F",
+      "pollDedup": "A",
+      "apiSpeed": "A"
+    }
+  },
+  "pollRate": {
+    "duration": 32,
+    "count": 1,
+    "ratePerMin": 1.9,
+    "intervals": []
+  }
+}

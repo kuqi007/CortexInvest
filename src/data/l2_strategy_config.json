@@ -76,8 +76,8 @@
       "cooldown_minutes": 120
     },
     "institutional_retail_divergence": {
-      "enabled": true,
-      "description": "散户机构分歧(主力进散户出/主力出散户进)",
+      "enabled": false,
+      "description": "散户机构分歧 — 关闭:噪音大,几乎每只股票都触发,中长线无意义",
       "institutional_min": 10000000,
       "retail_min": 5000000,
       "cooldown_minutes": 120

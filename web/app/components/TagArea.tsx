@@ -1,10 +1,15 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { D } from "../theme";
 import { tagColor } from "../lib/tag-utils";
 
-/* ── TagEditor dropdown ── */
+/* ── TagEditor: combobox style ──────────────────────────────
+   - Single input: search existing OR create new
+   - Click tag chip to toggle instantly (no confirm button)
+   - Enter on empty match → create new tag
+   - Auto-save on close (click outside / Escape)
+   ────────────────────────────────────────────────────────── */
 function TagEditor({
   code,
   currentTags,
@@ -21,16 +26,22 @@ function TagEditor({
   zIndex?: number;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set(currentTags));
-  const [newTag, setNewTag] = useState("");
-  const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
   const ref = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Save + close
+  const close = useCallback(() => {
+    onSave(code, Array.from(selected));
+    onClose();
+  }, [code, selected, onSave, onClose]);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+      if (ref.current && !ref.current.contains(e.target as Node)) close();
     }
     function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") close();
     }
     document.addEventListener("mousedown", handleClick);
     document.addEventListener("keydown", handleKey);
@@ -38,138 +49,149 @@ function TagEditor({
       document.removeEventListener("mousedown", handleClick);
       document.removeEventListener("keydown", handleKey);
     };
-  }, [onClose]);
+  }, [close]);
 
   function toggle(tag: string) {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(tag)) next.delete(tag);
-      else next.add(tag);
+      if (next.has(tag)) next.delete(tag); else next.add(tag);
       return next;
     });
   }
 
-  function addNew() {
-    const t = newTag.trim();
-    if (!t) return;
-    setSelected((prev) => new Set(prev).add(t));
-    setNewTag("");
+  const q = query.trim();
+  const filtered = allTags.filter((t) => t.toLowerCase().includes(query.toLowerCase()));
+  const exactMatch = allTags.some((t) => t.toLowerCase() === q.toLowerCase());
+  const canCreate = q.length > 0 && !exactMatch;
+
+  function handleEnter() {
+    if (filtered.length === 1 && !canCreate) {
+      // single match → toggle it
+      toggle(filtered[0]);
+      setQuery("");
+    } else if (canCreate) {
+      // create new tag
+      setSelected((prev) => new Set(prev).add(q));
+      setQuery("");
+    }
   }
 
-  const filtered = allTags.filter((t) => t.toLowerCase().includes(search.toLowerCase()));
+  // Sort: selected first, then alphabetical
+  const sorted = [
+    ...filtered.filter((t) => selected.has(t)),
+    ...filtered.filter((t) => !selected.has(t)),
+  ];
 
   return (
     <div
       ref={ref}
       style={{
         position: "absolute",
-        top: "100%",
+        top: "calc(100% + 4px)",
         left: 0,
         zIndex,
-        background: D.bg,
+        background: "#1e1f29",
         border: `1px solid ${D.purple}`,
-        borderRadius: 4,
-        padding: "8px 10px",
-        minWidth: 180,
-        maxHeight: 260,
-        overflow: "auto",
+        borderRadius: 6,
+        padding: "8px 8px 6px",
+        minWidth: 200,
+        maxWidth: 280,
+        boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
         fontFamily: "JetBrains Mono, monospace",
         fontSize: 11,
       }}
     >
-      {allTags.length > 0 && (
-        <div style={{ marginBottom: 6 }}>
-          <input
-            autoFocus
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="search tags..."
-            style={{
-              background: D.currentLine,
-              border: `1px solid ${D.comment}`,
-              color: D.fg,
-              fontFamily: "JetBrains Mono, monospace",
-              fontSize: 11,
-              padding: "2px 6px",
-              outline: "none",
-              borderRadius: 2,
-              width: "100%",
-              boxSizing: "border-box",
-              marginBottom: 6,
-            }}
-          />
-          {filtered.map((t) => (
-            <label
-              key={t}
-              style={{ display: "flex", alignItems: "center", gap: 6, padding: "2px 0", cursor: "pointer", color: D.fg }}
-            >
-              <input
-                type="checkbox"
-                checked={selected.has(t)}
-                onChange={() => toggle(t)}
-                style={{ accentColor: D.purple }}
-              />
-              <span style={{ background: tagColor(t), color: "#282a36", padding: "0 6px", borderRadius: 3, fontSize: 10, fontWeight: 700 }}>
-                {t}
-              </span>
-            </label>
-          ))}
-        </div>
-      )}
-      <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
-        <input
-          value={newTag}
-          onChange={(e) => setNewTag(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") addNew(); }}
-          placeholder="new tag..."
-          style={{
-            background: D.currentLine,
-            border: `1px solid ${D.comment}`,
-            color: D.fg,
-            fontFamily: "JetBrains Mono, monospace",
-            fontSize: 11,
-            padding: "2px 6px",
-            outline: "none",
-            borderRadius: 2,
-            flex: 1,
-            minWidth: 0,
-          }}
-        />
-        <button
-          onClick={addNew}
-          style={{
-            background: "transparent",
-            border: `1px solid ${D.green}`,
-            color: D.green,
-            cursor: "pointer",
-            fontSize: 11,
-            fontWeight: 700,
-            padding: "0 6px",
-            borderRadius: 2,
-            fontFamily: "JetBrains Mono, monospace",
-          }}
-        >+</button>
-      </div>
-      <button
-        onClick={() => { onSave(code, Array.from(selected)); onClose(); }}
+      {/* ── Combobox input ── */}
+      <input
+        ref={inputRef}
+        autoFocus
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") handleEnter(); }}
+        placeholder="search or create tag..."
         style={{
-          background: D.purple,
-          border: "none",
-          color: D.bg,
-          cursor: "pointer",
-          fontSize: 11,
-          fontWeight: 700,
-          padding: "3px 12px",
-          borderRadius: 3,
+          background: D.currentLine,
+          border: `1px solid ${D.comment}`,
+          color: D.fg,
           fontFamily: "JetBrains Mono, monospace",
+          fontSize: 11,
+          padding: "4px 8px",
+          outline: "none",
+          borderRadius: 3,
           width: "100%",
+          boxSizing: "border-box",
+          marginBottom: 6,
         }}
-      >确定</button>
+      />
+
+      {/* ── Tag list ── */}
+      <div style={{ maxHeight: 200, overflowY: "auto", display: "flex", flexWrap: "wrap", gap: 4 }}>
+        {sorted.map((t) => {
+          const on = selected.has(t);
+          return (
+            <span
+              key={t}
+              onClick={() => { toggle(t); inputRef.current?.focus(); }}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 3,
+                background: tagColor(t),
+                color: "#282a36",
+                padding: "2px 7px",
+                borderRadius: 3,
+                fontSize: 10,
+                fontWeight: 700,
+                cursor: "pointer",
+                opacity: on ? 1 : 0.35,
+                outline: on ? `2px solid ${D.green}` : "none",
+                outlineOffset: 1,
+                userSelect: "none",
+              }}
+            >
+              {on && <span style={{ fontSize: 9, lineHeight: 1 }}>✓</span>}
+              {t}
+            </span>
+          );
+        })}
+
+        {/* Create new tag hint */}
+        {canCreate && (
+          <span
+            onClick={() => { setSelected((p) => new Set(p).add(q)); setQuery(""); inputRef.current?.focus(); }}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              background: "transparent",
+              border: `1px dashed ${D.green}`,
+              color: D.green,
+              padding: "2px 7px",
+              borderRadius: 3,
+              fontSize: 10,
+              fontWeight: 700,
+              cursor: "pointer",
+              userSelect: "none",
+            }}
+          >
+            + 创建 &ldquo;{q}&rdquo;
+          </span>
+        )}
+
+        {sorted.length === 0 && !canCreate && (
+          <span style={{ color: D.comment, fontSize: 10, padding: "2px 0" }}>no tags yet</span>
+        )}
+      </div>
+
+      {/* ── Footer hint ── */}
+      <div style={{ marginTop: 6, color: D.comment, fontSize: 10, borderTop: `1px solid ${D.currentLine}`, paddingTop: 5 }}>
+        点击 tag 选/取消 · Enter 确认 · Esc 保存关闭
+      </div>
     </div>
   );
 }
 
-/* ── TagArea: chips with hover-to-delete + editor dropdown ── */
+/* ── TagArea: chips with hover-to-delete + combobox editor ── */
 export function TagArea({
   code,
   tags,
@@ -225,8 +247,27 @@ export function TagArea({
               )}
             </span>
           ))
-        : <span style={{ color: D.comment, fontSize: 10 }}>+tag</span>
+        : null
       }
+      {/* Always-visible + button */}
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 16,
+          height: 16,
+          borderRadius: 3,
+          border: `1px dashed ${D.comment}`,
+          color: D.comment,
+          fontSize: 12,
+          lineHeight: 1,
+          cursor: "pointer",
+          flexShrink: 0,
+          opacity: editorOpen ? 1 : 0.6,
+        }}
+        title="Add tag"
+      >+</span>
       {editorOpen && (
         <TagEditor
           code={code}

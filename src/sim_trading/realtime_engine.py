@@ -161,6 +161,13 @@ class RealtimeSimEngine:
                 info = self._engine.calc_cost(r["entry_price"], r["quantity"], "BUY")
                 buy_cps = info["total"] / r["quantity"] if r["quantity"] > 0 else 0
 
+            # Restore atr_at_entry (may not exist in old schema)
+            atr_entry = 0.0
+            try:
+                atr_entry = float(r["atr_at_entry"] or 0)
+            except (KeyError, TypeError):
+                pass
+
             pos = Position(
                 code=r["code"],
                 entry_price=r["entry_price"],
@@ -176,6 +183,7 @@ class RealtimeSimEngine:
                 highest_price=max(r["entry_price"], r["current_price"] or 0),
                 entry_day_index=0,
                 buy_cost_per_share=buy_cps,
+                atr_at_entry=atr_entry,
             )
             self._pos_mgr._positions[r["code"]] = pos
             self._pos_mgr._cash -= r["entry_price"] * r["quantity"]
@@ -300,8 +308,8 @@ class RealtimeSimEngine:
                    (code, name, entry_price, quantity, current_price, entry_time, entry_date,
                     stop_loss, take_profit, max_hold_days, entry_strategy, confidence,
                     trigger_signals, unrealized_pnl, pnl_pct, daily_score,
-                    buy_cost_per_share, last_updated)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    buy_cost_per_share, atr_at_entry, last_updated)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     code, "", pos.entry_price, pos.quantity, round(current_price, 4),
                     pos.entry_time, pos.entry_date,
@@ -309,7 +317,9 @@ class RealtimeSimEngine:
                     pos.max_hold_days, pos.entry_strategy, pos.confidence,
                     json.dumps(pos.trigger_signals),
                     round(unrealized, 2), round(pnl_pct, 6), daily_score,
-                    round(pos.buy_cost_per_share, 6), now_ts,
+                    round(pos.buy_cost_per_share, 6),
+                    round(pos.atr_at_entry, 4),
+                    now_ts,
                 ),
             )
 
@@ -514,6 +524,7 @@ class RealtimeSimEngine:
                 date=today,
                 cost_calculator=lambda p, q, a: self._engine.calc_cost(p, q, a),
                 min_hold_minutes=cfg.get("min_hold_minutes", 30),
+                trailing_atr=cfg.get("trailing_atr", 0.0),
             )
             for trade in exit_trades:
                 trade["notes"] = trade.get("notes", "")
@@ -569,7 +580,10 @@ class RealtimeSimEngine:
 
         cfg = self._score_cfg
         entry_threshold = cfg.get("entry_threshold", 70)
+        cooldown_days = cfg.get("cooldown_days", 0)
         cooldown_min = cfg.get("reentry_cooldown_minutes", 120)
+        adx_min = cfg.get("adx_min", 0)
+        rr_min = cfg.get("rr_min", 0)
         position_pct = cfg.get("position_pct", 0.25)
         max_hold = cfg.get("max_hold_days", 10)
         max_per_day = cfg.get("max_new_positions_per_day", 1)
@@ -581,9 +595,15 @@ class RealtimeSimEngine:
             if code in self._broker.positions:
                 continue
 
-            # Check cooldown
+            # Check cooldown: prefer cooldown_days (calendar), fallback cooldown_minutes
             last_exit = self._last_exit_ts.get(code, 0)
-            if (now_ts - last_exit) < cooldown_min * 60 * 1000:
+            if cooldown_days > 0 and last_exit > 0:
+                exit_dt = datetime.fromtimestamp(last_exit / 1000)
+                days_since = (datetime.now() - exit_dt).days
+                if days_since < cooldown_days:
+                    logger.debug(f"Cooldown active for {code}: {days_since}d < {cooldown_days}d")
+                    continue
+            elif (now_ts - last_exit) < cooldown_min * 60 * 1000:
                 logger.debug(f"Cooldown active for {code}, skip entry")
                 continue
 
@@ -591,13 +611,41 @@ class RealtimeSimEngine:
             score_result = self._get_score(code)
             total = score_result.get("total", 0)
 
-            if total >= entry_threshold:
-                candidates.append((code, score_result))
-                logger.info(
-                    f"Entry candidate: {code} score={total} "
-                    f"action={score_result['action']} "
-                    f"SL={score_result.get('stop_loss', 0):.2f}"
-                )
+            if total < entry_threshold:
+                continue
+
+            # ADX trend strength filter
+            adx_val = score_result.get("adx", 99)
+            if adx_min > 0 and adx_val < adx_min:
+                logger.debug(f"ADX filter: {code} ADX={adx_val:.1f} < {adx_min}")
+                continue
+
+            # Reward/Risk ratio filter (price-based, same as backtester)
+            if rr_min > 0:
+                atr = score_result.get("atr", 0)
+                sl_mult = cfg.get("sl_atr_mult", 2.0)
+                tp_mult = cfg.get("tp_atr_mult", 3.0)
+                price = prices.get(code, 0)
+                if atr > 0 and price > 0:
+                    sl = max(price - atr * sl_mult, price * 0.90)  # floor at -10%
+                    tp = price + atr * tp_mult
+                    if sl >= price:
+                        sl = price * 0.95
+                    risk = price - sl
+                    reward = tp - price
+                    rr = reward / risk if risk > 0 else 0
+                    if rr < rr_min:
+                        logger.debug(f"RR filter: {code} RR={rr:.2f} < {rr_min} "
+                                     f"(reward={reward:.2f}, risk={risk:.2f})")
+                        continue
+
+            candidates.append((code, score_result))
+            logger.info(
+                f"Entry candidate: {code} score={total} "
+                f"ADX={score_result.get('adx', 0):.1f} "
+                f"action={score_result['action']} "
+                f"SL={score_result.get('stop_loss', 0):.2f}"
+            )
 
         # Sort by score descending
         candidates.sort(key=lambda x: x[1]["total"], reverse=True)
@@ -656,19 +704,21 @@ class RealtimeSimEngine:
 
             cost_info = self._engine.calc_cost(exec_price, est_qty, "BUY")
 
-            # Override stop_loss / take_profit from scorer
-            # Sanity check: if scorer SL/TP is wildly off from exec_price
-            # (e.g. ex-rights kline vs real-time price mismatch), fallback to ATR-based
-            sl = score_result.get("stop_loss", 0)
-            tp = score_result.get("take_profit", 0)
-            if sl <= 0 or sl >= exec_price or abs(sl - exec_price) / exec_price > 0.15:
-                sl = exec_price - atr * 2
+            # SL/TP from ATR multipliers (v3 backtest params, with -10% floor)
+            sl_atr_mult = cfg.get("sl_atr_mult", 2.0)
+            tp_atr_mult = cfg.get("tp_atr_mult", 3.0)
+            sl = max(exec_price - atr * sl_atr_mult, exec_price * 0.90)
+            tp = exec_price + atr * tp_atr_mult
+
+            # Sanity check: if SL is invalid, fallback
+            if sl <= 0 or sl >= exec_price:
+                sl = exec_price * 0.95
                 logger.warning(
-                    f"Scorer SL {score_result.get('stop_loss', 0):.2f} invalid for "
-                    f"{code}@{exec_price:.2f}, fallback SL={sl:.2f}"
+                    f"ATR SL invalid for {code}@{exec_price:.2f} (atr={atr:.2f}), "
+                    f"fallback SL={sl:.2f}"
                 )
-            if tp <= 0 or tp <= exec_price or abs(tp - exec_price) / exec_price > 0.15:
-                tp = exec_price + atr * 3
+            if tp <= exec_price:
+                tp = exec_price * 1.05
 
             # broker.open_position handles Futu-first (FutuBroker) or pure virtual
             pos = self._broker.open_position(
@@ -678,10 +728,11 @@ class RealtimeSimEngine:
                 day_index=self._day_index,
             )
             if pos:
-                # Override SL/TP from scorer
+                # Override SL/TP from ATR-based params (v3 backtest)
                 pos.stop_loss = sl
                 pos.take_profit = tp
                 pos.max_hold_days = max_hold
+                pos.atr_at_entry = atr  # for trailing stop
                 self._new_positions_today += 1
                 logger.info(
                     f"RT BUY {code}: {est_qty} @ {exec_price:.2f} "
@@ -721,7 +772,7 @@ class RealtimeSimEngine:
         try:
             subprocess.run(
                 ["terminal-notifier", "-title", title, "-message", msg,
-                 "-sound", "default", "-open", "http://localhost:3120/sim"],
+                 "-sound", "default", "-open", "http://localhost:3120/alerts"],
                 capture_output=True, timeout=5,
             )
         except Exception as e:

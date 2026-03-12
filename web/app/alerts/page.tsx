@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { D } from "../theme";
 import { AppTabs } from "../components/AppTabs";
 import { AppTitleBar } from "../components/AppTitleBar";
@@ -319,6 +319,9 @@ function TabBar({
   showL3,
   onToggleL3,
   visibleCount,
+  viewMode,
+  onToggleView,
+  groupCount,
 }: {
   l1Count: number;
   l2Count: number;
@@ -326,6 +329,9 @@ function TabBar({
   showL3: boolean;
   onToggleL3: () => void;
   visibleCount: number;
+  viewMode: "grouped" | "detail";
+  onToggleView: () => void;
+  groupCount: number;
 }) {
   return (
     <AppTabs
@@ -349,10 +355,188 @@ function TabBar({
             L3:{l3Count} {showL3 ? "(shown)" : "(hidden)"}
           </span>
           <span style={{ color: D.comment }}>|</span>
-          <span>{visibleCount} visible | 30s</span>
+          <span
+            onClick={onToggleView}
+            style={{ cursor: "pointer", textDecoration: "underline", textDecorationStyle: "dotted" as const, color: D.cyan }}
+            title={viewMode === "grouped" ? "Switch to detail view" : "Switch to grouped view"}
+          >
+            {viewMode === "grouped" ? `${groupCount} stocks` : `${visibleCount} events`}
+          </span>
+          <span style={{ color: D.comment }}>| 30s</span>
         </span>
       )}
     />
+  );
+}
+
+// ── Grouped view types ───────────────────────────────────────────────────────
+
+type SignalChip = { signal: string; color: string; count: number };
+type TimelineEvent = { time: string; level: number; signal: string; signalColor: string; price: string; changePct: number; detail: string };
+
+type StockGroup = {
+  symbol: string;
+  stockCode: string;
+  stockName: string;
+  price: string;
+  changePct: number;
+  maxLevel: number;
+  signals: SignalChip[];
+  timeline: TimelineEvent[];
+  totalCount: number;
+  latestTime: string;
+};
+
+function buildGroups(events: AlertEvent[]): StockGroup[] {
+  const map = new Map<string, StockGroup>();
+  // Process in chronological order so latest overwrites
+  for (const e of events) {
+    const parsed = parseAlert(e);
+    const key = e.symbol || parsed.stockCode || "unknown";
+    let group = map.get(key);
+    if (!group) {
+      group = {
+        symbol: e.symbol || "",
+        stockCode: parsed.stockCode,
+        stockName: parsed.stockName,
+        price: parsed.price,
+        changePct: e.change_pct || 0,
+        maxLevel: e.level ?? 2,
+        signals: [],
+        timeline: [],
+        totalCount: 0,
+        latestTime: e.time || "",
+      };
+      map.set(key, group);
+    }
+    // Update with latest data
+    if (parsed.price) group.price = parsed.price;
+    if (e.change_pct) group.changePct = e.change_pct;
+    if (parsed.stockName) group.stockName = parsed.stockName;
+    if ((e.level ?? 2) < group.maxLevel) group.maxLevel = e.level ?? 2;
+    if (e.time) group.latestTime = e.time;
+    group.totalCount++;
+
+    // Merge signal chips (for summary row)
+    const existing = group.signals.find((s) => s.signal === parsed.signal);
+    if (existing) {
+      existing.count++;
+    } else {
+      group.signals.push({ signal: parsed.signal, color: parsed.signalColor, count: 1 });
+    }
+
+    // Push to timeline (for expanded view)
+    group.timeline.push({
+      time: e.time || "",
+      level: e.level ?? 2,
+      signal: parsed.signal,
+      signalColor: parsed.signalColor,
+      price: parsed.price,
+      changePct: e.change_pct || 0,
+      detail: parsed.detail,
+    });
+  }
+  // Sort: latest alert time desc (most recent activity first)
+  return Array.from(map.values()).sort((a, b) => b.latestTime.localeCompare(a.latestTime));
+}
+
+function GroupedRow({ group, expanded, onToggle }: { group: StockGroup; expanded: boolean; onToggle: () => void }) {
+  const isHighPriority = group.maxLevel <= 1;
+  return (
+    <div>
+      <div
+        onClick={onToggle}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          padding: "5px 6px",
+          borderBottom: "1px solid #191a21",
+          background: isHighPriority ? "#44475a" : "transparent",
+          borderLeft: isHighPriority ? `3px solid ${D.yellow}` : "3px solid transparent",
+          cursor: "pointer",
+          gap: 4,
+        }}
+      >
+        {/* Expand arrow */}
+        <span style={{ color: D.comment, width: 16, flexShrink: 0, fontSize: 10 }}>
+          {expanded ? "\u25be" : "\u25b8"}
+        </span>
+        {/* Level badge */}
+        <span style={{ color: LEVEL_COLORS[group.maxLevel] || D.comment, flexShrink: 0, width: 24, fontWeight: 700, fontSize: 11 }}>
+          L{group.maxLevel}
+        </span>
+        {/* Stock code */}
+        <span style={{ color: D.cyan, flexShrink: 0, width: 64, fontWeight: 600 }}>
+          {group.stockCode}
+        </span>
+        {/* Stock name */}
+        <span style={{ color: D.fg, flexShrink: 0, width: 90, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {group.stockName}
+        </span>
+        {/* Signal chips */}
+        <span style={{ marginLeft: 8, flex: 1, display: "flex", flexWrap: "wrap", gap: 4, overflow: "hidden" }}>
+          {group.signals.map((s) => (
+            <span
+              key={s.signal}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 3,
+                background: s.color + "22",
+                color: s.color,
+                padding: "1px 6px",
+                borderRadius: 3,
+                fontSize: 10,
+                fontWeight: 600,
+                whiteSpace: "nowrap",
+                border: `1px solid ${s.color}44`,
+              }}
+            >
+              {s.signal}
+              {s.count > 1 && <span style={{ opacity: 0.6, fontSize: 9 }}>×{s.count}</span>}
+            </span>
+          ))}
+        </span>
+        {/* Total count */}
+        <span style={{ color: D.comment, flexShrink: 0, fontSize: 10, marginLeft: 4 }}>
+          {group.totalCount}条
+        </span>
+        {/* Latest time */}
+        <span style={{ color: D.comment, flexShrink: 0, width: 56, textAlign: "right", fontSize: 11 }}>
+          {group.latestTime}
+        </span>
+      </div>
+      {/* Expanded timeline */}
+      {expanded && (
+        <div style={{ background: "#1a1b26", borderLeft: "3px solid #44475a" }}>
+          {[...group.timeline].reverse().map((ev, i) => (
+            <div
+              key={`${ev.time}-${i}`}
+              style={{
+                display: "flex",
+                alignItems: "baseline",
+                padding: "2px 6px 2px 24px",
+                borderBottom: "1px solid #15161e",
+                fontSize: 12,
+                gap: 4,
+              }}
+            >
+              <span style={{ color: D.comment, fontSize: 9, flexShrink: 0, width: 10 }}>&#9679;</span>
+              <span style={{ color: D.comment, width: 56, flexShrink: 0 }}>{ev.time}</span>
+              <span style={{ color: LEVEL_COLORS[ev.level] || D.comment, width: 22, flexShrink: 0, fontSize: 10, fontWeight: 600 }}>
+                L{ev.level}
+              </span>
+              <span style={{ color: ev.signalColor, width: 96, flexShrink: 0, fontWeight: 600 }}>{ev.signal}</span>
+              {ev.price && <span style={{ color: D.fg, width: 56, flexShrink: 0, textAlign: "right" }}>{ev.price}</span>}
+              {ev.changePct ? <span style={{ color: ev.changePct > 0 ? D.red : D.green, width: 52, flexShrink: 0, textAlign: "right" }}>{ev.changePct >= 0 ? "+" : ""}{ev.changePct.toFixed(1)}%</span> : null}
+              <span style={{ color: D.comment, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {ev.detail}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -361,6 +545,8 @@ export default function AlertsPage() {
   const [summary, setSummary] = useState<DailySummary | null>(null);
   const [summaryOpen, setSummaryOpen] = useState(true);
   const [showL3, setShowL3] = useState(false);
+  const [viewMode, setViewMode] = useState<"grouped" | "detail">("grouped");
+  const [expandedStocks, setExpandedStocks] = useState<Set<string>>(new Set());
 
   const fetchSummary = useCallback(async () => {
     try {
@@ -380,14 +566,30 @@ export default function AlertsPage() {
     return () => clearInterval(timer);
   }, [fetchSummary]);
 
-  // Level counts
-  const l1Count = events.filter((e) => (e.level ?? 2) === 1).length;
-  const l2Count = events.filter((e) => (e.level ?? 2) === 2).length;
-  const l3Count = events.filter((e) => (e.level ?? 2) === 3).length;
+  // Level counts (memoized to avoid re-filtering on every render)
+  const { l1Count, l2Count, l3Count } = useMemo(() => {
+    let l1 = 0, l2 = 0, l3 = 0;
+    for (const e of events) {
+      const lvl = e.level ?? 2;
+      if (lvl === 1) l1++;
+      else if (lvl === 2) l2++;
+      else if (lvl === 3) l3++;
+    }
+    return { l1Count: l1, l2Count: l2, l3Count: l3 };
+  }, [events]);
 
   // 按时间倒序（最新在前），默认隐藏 L3
-  const filtered = showL3 ? events : events.filter((e) => (e.level ?? 2) <= 2);
-  const sorted = [...filtered].reverse();
+  const filtered = useMemo(() => showL3 ? events : events.filter((e) => (e.level ?? 2) <= 2), [events, showL3]);
+  const sorted = useMemo(() => [...filtered].reverse(), [filtered]);
+  const groups = useMemo(() => buildGroups(filtered), [filtered]);
+
+  const toggleStock = useCallback((key: string) => {
+    setExpandedStocks((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }, []);
 
   const st = summary?.stats;
 
@@ -412,6 +614,9 @@ export default function AlertsPage() {
         showL3={showL3}
         onToggleL3={() => setShowL3(!showL3)}
         visibleCount={sorted.length}
+        viewMode={viewMode}
+        onToggleView={() => setViewMode((v) => v === "grouped" ? "detail" : "grouped")}
+        groupCount={groups.length}
       />
 
       {/* event list */}
@@ -498,52 +703,63 @@ export default function AlertsPage() {
           </div>
         )}
 
-        {sorted.map((e, i) => {
-          const parsed = parseAlert(e);
-          const chgColor = e.change_pct > 0 ? D.red : e.change_pct < 0 ? D.green : D.comment;
-          const isHighPriority = (e.level ?? 2) <= 1;
+        {viewMode === "grouped" ? (
+          groups.map((g) => (
+            <GroupedRow
+              key={g.symbol || g.stockCode}
+              group={g}
+              expanded={expandedStocks.has(g.symbol || g.stockCode)}
+              onToggle={() => toggleStock(g.symbol || g.stockCode)}
+            />
+          ))
+        ) : (
+          sorted.map((e, i) => {
+            const parsed = parseAlert(e);
+            const chgColor = e.change_pct > 0 ? D.red : e.change_pct < 0 ? D.green : D.comment;
+            const isHighPriority = (e.level ?? 2) <= 1;
 
-          return (
-            <div
-              key={`${e.ts}-${i}`}
-              style={{
-                display: "flex",
-                alignItems: "baseline",
-                padding: "3px 6px",
-                borderBottom: "1px solid #191a21",
-                background: isHighPriority ? "#44475a" : "transparent",
-                borderLeft: isHighPriority ? `3px solid ${D.yellow}` : "3px solid transparent",
-              }}
-            >
-              {/* Time */}
-              <span style={{ color: D.comment, flexShrink: 0, width: 72 }}>{e.time}</span>
-              {/* Level */}
-              <span style={{ color: LEVEL_COLORS[e.level ?? 2] || D.comment, flexShrink: 0, width: 28, fontWeight: isHighPriority ? 700 : 500 }}>
-                {`L${e.level ?? 2}`}
-              </span>
-              {/* Signal name (actual strategy) */}
-              <span style={{ color: parsed.signalColor, flexShrink: 0, width: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: isHighPriority ? 700 : 500 }}>
-                {parsed.signal}
-              </span>
-              {/* Stock code */}
-              <span style={{ color: D.cyan, flexShrink: 0, width: 72, overflow: "hidden", whiteSpace: "nowrap" }}>
-                {parsed.stockCode}
-              </span>
-              {/* Price */}
-              <span style={{ color: D.fg, flexShrink: 0, width: 60, textAlign: "right" }}>
-                {parsed.price}
-              </span>
-              {/* Change% */}
-              <span style={{ color: chgColor, flexShrink: 0, width: 52, textAlign: "right" }}>
-                {e.change_pct ? `${e.change_pct >= 0 ? "+" : ""}${e.change_pct.toFixed(1)}%` : ""}
-              </span>
-              {/* Name + Detail */}
-              <span style={{ color: isHighPriority ? D.yellow : D.comment, marginLeft: 10, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {parsed.stockName ? <span style={{ color: D.fg }}>{parsed.stockName} </span> : null}{parsed.detail}
-              </span>
-            </div>
-          );
-        })}
+            return (
+              <div
+                key={`${e.ts}-${i}`}
+                style={{
+                  display: "flex",
+                  alignItems: "baseline",
+                  padding: "3px 6px",
+                  borderBottom: "1px solid #191a21",
+                  background: isHighPriority ? "#44475a" : "transparent",
+                  borderLeft: isHighPriority ? `3px solid ${D.yellow}` : "3px solid transparent",
+                }}
+              >
+                {/* Time */}
+                <span style={{ color: D.comment, flexShrink: 0, width: 72 }}>{e.time}</span>
+                {/* Level */}
+                <span style={{ color: LEVEL_COLORS[e.level ?? 2] || D.comment, flexShrink: 0, width: 28, fontWeight: isHighPriority ? 700 : 500 }}>
+                  {`L${e.level ?? 2}`}
+                </span>
+                {/* Signal name (actual strategy) */}
+                <span style={{ color: parsed.signalColor, flexShrink: 0, width: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: isHighPriority ? 700 : 500 }}>
+                  {parsed.signal}
+                </span>
+                {/* Stock code */}
+                <span style={{ color: D.cyan, flexShrink: 0, width: 72, overflow: "hidden", whiteSpace: "nowrap" }}>
+                  {parsed.stockCode}
+                </span>
+                {/* Price */}
+                <span style={{ color: D.fg, flexShrink: 0, width: 60, textAlign: "right" }}>
+                  {parsed.price}
+                </span>
+                {/* Change% */}
+                <span style={{ color: chgColor, flexShrink: 0, width: 52, textAlign: "right" }}>
+                  {e.change_pct ? `${e.change_pct >= 0 ? "+" : ""}${e.change_pct.toFixed(1)}%` : ""}
+                </span>
+                {/* Name + Detail */}
+                <span style={{ color: isHighPriority ? D.yellow : D.comment, marginLeft: 10, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {parsed.stockName ? <span style={{ color: D.fg }}>{parsed.stockName} </span> : null}{parsed.detail}
+                </span>
+              </div>
+            );
+          })
+        )}
 
       </div>
     </div>

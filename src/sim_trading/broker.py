@@ -45,6 +45,7 @@ class AbstractBroker(ABC):
         self, prices: dict, day_index: int,
         ts: int = 0, date: str = "",
         cost_calculator=None, min_hold_minutes: int = 0,
+        trailing_atr: float = 0.0,
     ) -> list[dict]:
         """Check stop-loss / take-profit / max-hold conditions. Returns closed trades."""
 
@@ -96,12 +97,13 @@ class VirtualBroker(AbstractBroker):
         )
 
     def check_exits(self, prices, day_index, ts=0, date="",
-                    cost_calculator=None, min_hold_minutes=0):
+                    cost_calculator=None, min_hold_minutes=0, trailing_atr=0.0):
         return self._pm.check_exits(
             prices, day_index,
             current_ts=ts, current_date=date,
             cost_calculator=cost_calculator,
             min_hold_minutes=min_hold_minutes,
+            trailing_atr=trailing_atr,
         )
 
     def tighten_stop(self, code, stop_atr, price, atr):
@@ -223,13 +225,13 @@ class FutuBroker(AbstractBroker):
         )
 
     def check_exits(self, prices, day_index, ts=0, date="",
-                    cost_calculator=None, min_hold_minutes=0):
+                    cost_calculator=None, min_hold_minutes=0, trailing_atr=0.0):
         """Risk exits: evaluate conditions on shadow PM, then execute via Futu.
 
         For stop-loss / emergency exits, shadow PM is closed regardless of Futu status
         (risk control must not be blocked by connectivity issues).
         """
-        candidates = self._get_exit_candidates(prices, day_index, ts, min_hold_minutes)
+        candidates = self._get_exit_candidates(prices, day_index, ts, min_hold_minutes, trailing_atr)
         if not candidates:
             return []
 
@@ -308,6 +310,7 @@ class FutuBroker(AbstractBroker):
 
     def _get_exit_candidates(
         self, prices: dict, day_index: int, ts: int, min_hold_minutes: int,
+        trailing_atr: float = 0.0,
     ) -> list[tuple]:
         """Evaluate exit conditions on shadow PM without closing. Returns
         [(code, price, reason, qty)] for each position that should exit.
@@ -326,6 +329,13 @@ class FutuBroker(AbstractBroker):
             # Update highest price (same as PM.check_exits)
             if price > pos.highest_price:
                 pos.highest_price = price
+
+            # Trailing stop: ratchet SL up when price makes new highs
+            if (trailing_atr > 0 and pos.atr_at_entry > 0
+                    and price > pos.entry_price):
+                trail_sl = pos.highest_price - pos.atr_at_entry * trailing_atr
+                if trail_sl > pos.stop_loss:
+                    pos.stop_loss = trail_sl
 
             hold_minutes = (
                 (ts - pos.entry_time) / 60000

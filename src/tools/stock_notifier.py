@@ -309,9 +309,9 @@ DEFAULT_PORTFOLIO_DELTA_PCT = 2.0  # 组合: P&L 变化 >= 2%
 
 # ── 分级通知策略表（配置驱动，可扩展） ──
 NOTIFY_POLICIES = {
-    1: {"trigger_pct": 4, "delta_pct": 3, "cooldown_min": 5,
+    1: {"trigger_pct": 4, "delta_pct": 5, "cooldown_min": 5,
         "big_move": True, "threshold": True, "dispatch": "sound"},
-    2: {"trigger_pct": 6, "delta_pct": 5, "cooldown_min": 15,
+    2: {"trigger_pct": 6, "delta_pct": 7, "cooldown_min": 15,
         "big_move": True, "threshold": True, "dispatch": "silent"},
     3: {"trigger_pct": None, "delta_pct": None, "cooldown_min": 30,
         "big_move": False, "threshold": True, "dispatch": "web_only"},
@@ -1177,6 +1177,13 @@ def check_l2_signals() -> list[dict]:
         code = s.get("code", "")
         should_notify = s.get("notify", False)
 
+        # Per code+strategy daily dedup: same signal for same stock only once per day
+        # Key uses (symbol, message) to match DB UNIQUE and survive restarts
+        dedup_key = (code, message)
+        if dedup_key in check_l2_signals._seen_today:
+            continue
+        check_l2_signals._seen_today.add(dedup_key)
+
         # Per-stock daily cap check (exempt notify=True / L1 signals)
         count = check_l2_signals._daily_counts.get(code, 0)
         if count >= PER_STOCK_DAILY_CAP and not should_notify:
@@ -1199,6 +1206,36 @@ def check_l2_signals() -> list[dict]:
 # Initialize consumption watermark and daily counters
 check_l2_signals._last_consumed = 0
 check_l2_signals._daily_counts = {}  # {code: count} — reset daily at 08:00
+
+
+def _load_seen_today_from_db() -> set:
+    """Load today's already-written (symbol, message) pairs from alert_events DB.
+
+    This ensures dedup survives daemon/notifier restarts — same signal
+    for the same stock won't be written twice even after process restart.
+    """
+    seen = set()
+    conn = None
+    try:
+        from src.sim_trading.db import get_connection
+        import datetime as _dt
+        today_str = _dt.date.today().strftime("%Y-%m-%d")
+        conn = get_connection()
+        rows = conn.execute(
+            "SELECT symbol, message FROM alert_events WHERE date = ? AND kind = 'l2_strategy'",
+            (today_str,)
+        ).fetchall()
+        for sym, msg in rows:
+            seen.add((sym, msg))
+    except Exception:
+        pass
+    finally:
+        if conn:
+            conn.close()
+    return seen
+
+
+check_l2_signals._seen_today = _load_seen_today_from_db()
 
 
 def stealth_dispatch(alerts: list[dict], *, sound: str = ""):
@@ -1996,6 +2033,7 @@ def run():
                 _eng.reset()
             watchdog.reset()  # clear staleness tracking for new day
             check_l2_signals._daily_counts = {}  # reset per-stock L2 cap
+            check_l2_signals._seen_today = set()  # reset code+strategy dedup
             # 归档昨日数据 + 清空（新交易日重新开始）
             _archive_and_reset(today)
             # Reload config at day boundary

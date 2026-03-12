@@ -1255,6 +1255,94 @@ class TestFutuBrokerGetExitCandidates:
         assert candidates == []
 
 
+# ── TestTrailingStop ──────────────────────────────────────────────────────────
+
+
+class TestTrailingStop:
+    """Trailing stop ratchets SL up when price exceeds entry."""
+
+    def test_trailing_stop_ratchets_sl(self, rules):
+        """PM trailing stop: price rises → SL moves up via trailing_atr."""
+        pm = PositionManager(500_000, rules.get("lot_sizes", {}))
+        decision = _make_decision("HK09988")
+        pm.open_position(decision, 100.0, 2.0, 50.0,
+                         current_date="2026-01-01", current_ts=1_000_000, day_index=0)
+        pos = pm.positions["HK09988"]
+        pos.atr_at_entry = 2.0
+        original_sl = pos.stop_loss
+
+        # Price rises to 106: trailing SL = 106 - 2.0*3.0 = 100.0
+        pm.check_exits(
+            {"HK09988": 106.0}, day_index=1,
+            current_ts=2_000_000, trailing_atr=3.0,
+        )
+        assert pos.stop_loss >= 100.0
+        assert pos.stop_loss > original_sl
+
+    def test_trailing_stop_only_ratchets_up(self, rules):
+        """SL should never decrease — only goes up when highest_price increases."""
+        pm = PositionManager(500_000, rules.get("lot_sizes", {}))
+        decision = _make_decision("HK09988")
+        pm.open_position(decision, 100.0, 2.0, 50.0,
+                         current_date="2026-01-01", current_ts=1_000_000, day_index=0)
+        pos = pm.positions["HK09988"]
+        pos.atr_at_entry = 2.0
+
+        # First: price up to 108 → SL = 108 - 6.0 = 102.0
+        pm.check_exits(
+            {"HK09988": 108.0}, day_index=1,
+            current_ts=2_000_000, trailing_atr=3.0,
+        )
+        sl_after_up = pos.stop_loss
+
+        # Then: price drops to 104 → SL should NOT decrease
+        pm.check_exits(
+            {"HK09988": 104.0}, day_index=1,
+            current_ts=3_000_000, trailing_atr=3.0,
+        )
+        assert pos.stop_loss >= sl_after_up
+
+    def test_trailing_stop_not_active_below_entry(self, rules):
+        """Trailing stop should not engage when price is below entry."""
+        pm = PositionManager(500_000, rules.get("lot_sizes", {}))
+        decision = _make_decision("HK09988")
+        pm.open_position(decision, 100.0, 2.0, 50.0,
+                         current_date="2026-01-01", current_ts=1_000_000, day_index=0)
+        pos = pm.positions["HK09988"]
+        pos.atr_at_entry = 2.0
+        original_sl = pos.stop_loss
+
+        # Price below entry → trailing should not engage
+        pm.check_exits(
+            {"HK09988": 98.0}, day_index=1,
+            current_ts=2_000_000, trailing_atr=3.0,
+        )
+        assert pos.stop_loss == original_sl
+
+    def test_futu_broker_trailing_stop(self, rules):
+        """FutuBroker passes trailing_atr to _get_exit_candidates."""
+        from .broker import FutuBroker
+        pm = PositionManager(500_000, rules.get("lot_sizes", {}))
+        broker = FutuBroker(pm, _make_adapter())
+        decision = _make_decision("HK09988")
+        broker.open_position(decision, exec_price=100.0, atr=2.0,
+                             trade_cost=50.0, date="2026-01-01",
+                             ts=1_000_000, day_index=0)
+        pos = pm.positions["HK09988"]
+        pos.atr_at_entry = 2.0
+        pos.take_profit = 120.0  # set high TP so it doesn't trigger
+        original_sl = pos.stop_loss
+
+        # Price rises to 105 → trailing SL = 105 - 2.0*3.0 = 99.0
+        candidates = broker._get_exit_candidates(
+            {"HK09988": 105.0}, day_index=1,
+            ts=2_000_000, min_hold_minutes=0, trailing_atr=3.0,
+        )
+        assert pos.stop_loss > original_sl
+        # 105 > trailing SL (99), so no exit yet
+        assert candidates == []
+
+
 # ── TestHKTickRounding ─────────────────────────────────────────────────────────
 
 

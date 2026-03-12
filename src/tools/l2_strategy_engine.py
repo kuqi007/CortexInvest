@@ -1435,7 +1435,7 @@ def _calc_adx(high: pd.Series, low: pd.Series, close: pd.Series,
     dx = 100 * (plus_di - minus_di).abs() / di_sum.replace(0, np.nan)
     dx = dx.fillna(0)
     adx = dx.ewm(span=period, adjust=False).mean()
-    return adx
+    return adx, plus_di, minus_di
 
 
 class DailyIndicatorTracker:
@@ -1556,8 +1556,8 @@ class DailyIndicatorTracker:
         bb_lower = bb_mid - bb_std * bb_rolling_std
         bb_width = (bb_upper - bb_lower) / bb_mid * 100  # 百分比带宽
 
-        # ADX
-        adx = _calc_adx(high, low, close, cfg.get("adx_period", 14))
+        # ADX + Directional Indicators
+        adx, plus_di, minus_di = _calc_adx(high, low, close, cfg.get("adx_period", 14))
 
         # ATR (True Range → EWM, independent of ADX period)
         atr_period = cfg.get("atr_period", 14)
@@ -1585,6 +1585,8 @@ class DailyIndicatorTracker:
             "bb_lower": bb_lower,
             "bb_width": bb_width,
             "adx": adx,
+            "plus_di": plus_di,
+            "minus_di": minus_di,
             "atr": atr,
             "vol_ma20": vol_ma20,
         }
@@ -1599,9 +1601,11 @@ class DailyIndicatorTracker:
         signals.extend(self._check_bollinger(code))
         signals.extend(self._check_adx(code))
         signals.extend(self._check_volume_patterns(code))
-        signals.extend(self._check_kline_patterns(code))
+        # disabled: engulfing_pattern — low reliability candlestick pattern, noise for mid-long term
+        # signals.extend(self._check_kline_patterns(code))
         signals.extend(self._check_support_resistance(code))
-        signals.extend(self._check_relative_strength(code))
+        # disabled: relative_strength — static 60-day fact, not actionable signal
+        # signals.extend(self._check_relative_strength(code))
         return signals
 
     def _already_triggered(self, code: str, strategy: str) -> bool:
@@ -2479,12 +2483,25 @@ class DailyIndicatorTracker:
         stop_loss = max(support - atr * 0.5, c - atr * 2)
         take_profit = min(resistance, c + atr * 3)
 
+        # +DI / -DI for directional filter
+        plus_di_val, minus_di_val = 0.0, 0.0
+        if "plus_di" in ind and len(ind["plus_di"]) > 0:
+            _pdi = ind["plus_di"].iloc[-1]
+            if not pd.isna(_pdi):
+                plus_di_val = float(_pdi)
+        if "minus_di" in ind and len(ind["minus_di"]) > 0:
+            _mdi = ind["minus_di"].iloc[-1]
+            if not pd.isna(_mdi):
+                minus_di_val = float(_mdi)
+
         return {
             "total": total, **scores,
             "action": action,
             "stop_loss": round(stop_loss, 4),
             "take_profit": round(take_profit, 4),
             "atr": round(atr, 4),
+            "adx": round(adx_val, 2),
+            "bullish_di": plus_di_val > minus_di_val,
         }
 
     def set_capital_flow_pct(self, code: str, pct_fraction: float):
@@ -2552,7 +2569,7 @@ class L2StrategyEngine:
         # Daily indicator strategies use longer cooldown (default 480 min = 8h, effectively once/day)
         daily_cooldown = strategy_config.get("daily_indicators", {}).get("cooldown_minutes", 480)
         for s in DAILY_NOTIFY_STRATEGIES | {"rsi_overbought", "rsi_oversold", "adx_trend_start",
-                "volume_divergence_top", "engulfing_pattern", "relative_strength"}:
+                "volume_divergence_top"}:
             cooldowns[s] = daily_cooldown
         self._cooldown = CooldownManager(cooldowns)
 

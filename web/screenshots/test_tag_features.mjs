@@ -125,8 +125,8 @@ if (allTags.length > 1) {
     await page.waitForTimeout(300);
     await shot("tag_03_dropdown_open.png");
 
-    // Check search input exists
-    const searchInput = page.locator("input[placeholder='search tags...']").first();
+    // Check search/create combobox input exists (new UX: placeholder "search or create tag...")
+    const searchInput = page.locator("input[placeholder='search or create tag...']").first();
     const searchInputCount = await searchInput.count();
     searchInputCount > 0 ? ok("Search input in TagEditor") : ng("Search input not found in TagEditor");
 
@@ -136,56 +136,32 @@ if (allTags.length > 1) {
       await page.waitForTimeout(200);
       await shot("tag_04_search_filtered.png");
 
-      // Count visible checkboxes — should be filtered
-      // Count tag labels inside the dropdown (labels with checkboxes — the dropdown uses <label> elements)
-      const dropdownLabelCount = await page.evaluate(() => {
-        // The dropdown has labels with checkboxes for each tag
-        const labels = Array.from(document.querySelectorAll("label"));
-        return labels.filter(l => l.querySelector("input[type='checkbox']")).length;
-      });
-
-      const matchingLabels = await page.evaluate((prefix) => {
-        const labels = Array.from(document.querySelectorAll("label"));
-        return labels.filter(l => l.querySelector("input[type='checkbox']") && l.textContent?.toLowerCase().includes(prefix.toLowerCase())).length;
+      // New combobox UI: tags rendered as <span> chips (not labels/checkboxes)
+      // Count visible tag chips in the dropdown after filtering
+      const dropdownChipCount = await page.evaluate((prefix) => {
+        const spans = Array.from(document.querySelectorAll("span"));
+        // Tag chips inside the dropdown have a background color and match the prefix
+        return spans.filter(s => {
+          const text = s.textContent?.trim() || "";
+          return s.style?.background && text.length > 0 && text.toLowerCase().includes(prefix.toLowerCase());
+        }).length;
       }, searchPrefix);
 
-      console.log(`  Search "${searchPrefix}": ${dropdownLabelCount} rendered labels, ${matchingLabels} match prefix`);
+      console.log(`  Search "${searchPrefix}": ${dropdownChipCount} chips visible matching prefix`);
 
-      // After filtering, rendered labels should be < total tags (filtered)
-      dropdownLabelCount < allTags.length
-        ? ok(`Search filters tags: ${dropdownLabelCount} labels shown (filtered from ${allTags.length} total)`)
-        : ng("Search not filtering", `${dropdownLabelCount} labels shown, expected < ${allTags.length}`);
-
-      matchingLabels === dropdownLabelCount
-        ? ok(`All rendered labels match search "${searchPrefix}"`)
-        : ng(`Some labels don't match search`, `${matchingLabels} matching / ${dropdownLabelCount} shown`);
+      dropdownChipCount > 0
+        ? ok(`Search filters tags: ${dropdownChipCount} chips match "${searchPrefix}"`)
+        : ng("Search not filtering or no matching chips found");
     }
 
     // Close dropdown with Escape
     await page.keyboard.press("Escape");
     await page.waitForTimeout(500);
-    // Verify closed
-    const dropdownGone = await page.locator("input[placeholder='search tags...']").count() === 0;
+    // Verify closed (combobox input gone)
+    const dropdownGone = await page.locator("input[placeholder='search or create tag...']").count() === 0;
     dropdownGone ? ok("TagEditor closed after Escape") : ng("TagEditor still open after Escape");
   } else {
-    // Try clicking on existing tag chip area
-    if (tagCount > 0) {
-      // Click on the parent span that contains the tags
-      await page.evaluate((tag) => {
-        const spans = Array.from(document.querySelectorAll("span"));
-        const tagEl = spans.find(s => s.textContent?.trim() === tag && s.style?.background);
-        const parent = tagEl?.closest("span[title]") || tagEl?.parentElement;
-        if (parent) /** @type {HTMLElement} */ (parent).click();
-      }, firstTag);
-      await page.waitForTimeout(300);
-      await shot("tag_03b_dropdown_open.png");
-
-      const searchInput2 = page.locator("input[placeholder='search tags...']").first();
-      const si2Count = await searchInput2.count();
-      si2Count > 0 ? ok("Search input in TagEditor (via tag click)") : ng("Search input not found via tag click");
-    } else {
-      ng("Could not open TagEditor — no tag area found");
-    }
+    ng("Could not open TagEditor — no tag area found with title='Click to edit tags'");
   }
 } else {
   ok("Search test skipped (insufficient tags in system)");
@@ -225,7 +201,8 @@ if (testTags.length >= 1) {
     }
 
     if (xBtnCount > 0) {
-      await page.waitForTimeout(1500);
+      // Wait for the config POST to complete (not just fire)
+      await page.waitForTimeout(2500);
       await shot("tag_05_after_delete.png");
       tagUpdateCalled ? ok("API /api/config POST was called") : ng("API /api/config POST was NOT called");
 

@@ -1,0 +1,10 @@
+import { chromium } from "playwright";
+const browser = await chromium.launch({ headless: true });
+const page = await (await browser.newContext({ viewport: { width: 1600, height: 900 } })).newPage();
+await page.route("**/*.googleapis.com/**", r => r.abort());
+await page.route("**/*.gstatic.com/**", r => r.abort());
+await page.goto("http://localhost:3120/alerts", { waitUntil: "domcontentloaded", timeout: 30000 });
+await page.waitForTimeout(3000);
+await page.screenshot({ path: "screenshots/alerts_full.png", fullPage: true });
+console.log("done");
+await browser.close();

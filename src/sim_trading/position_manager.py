@@ -31,6 +31,7 @@ class Position:
     highest_price: float = 0.0  # for trailing stop
     entry_day_index: int = 0  # trading day index since entry
     buy_cost_per_share: float = 0.0  # buy-side cost / quantity, for proportional allocation on partial close
+    atr_at_entry: float = 0.0  # ATR at entry time, for trailing stop calculation
 
 
 class PositionManager:
@@ -214,6 +215,7 @@ class PositionManager:
         current_date: str = "",
         cost_calculator=None,
         min_hold_minutes: int = 0,
+        trailing_atr: float = 0.0,
     ) -> list[dict]:
         """Check all positions for stop-loss, take-profit, or max-hold exits.
 
@@ -224,6 +226,7 @@ class PositionManager:
             current_date: YYYY-MM-DD
             cost_calculator: optional callable(price, qty, action) → cost
             min_hold_minutes: skip SL/TP exits within this period (extreme loss exempt)
+            trailing_atr: if > 0, trailing stop = highest_price - atr_at_entry * trailing_atr
 
         Returns list of closed trade records.
         """
@@ -242,6 +245,18 @@ class PositionManager:
             # Update highest price for trailing stop
             if price > pos.highest_price:
                 pos.highest_price = price
+
+            # Trailing stop: ratchet SL up when price makes new highs
+            if (trailing_atr > 0 and pos.atr_at_entry > 0
+                    and price > pos.entry_price):
+                trail_sl = pos.highest_price - pos.atr_at_entry * trailing_atr
+                if trail_sl > pos.stop_loss:
+                    logger.debug(
+                        f"Trailing SL {pos.code}: "
+                        f"{pos.stop_loss:.2f} → {trail_sl:.2f} "
+                        f"(high={pos.highest_price:.2f})"
+                    )
+                    pos.stop_loss = trail_sl
 
             # min_hold guard: skip normal SL/TP during hold period
             # Exception: extreme loss (>8%) or emergency stop (>5%) always exits
