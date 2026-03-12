@@ -51,7 +51,7 @@ export default function Page() {
 }
 
 function Home() {
-  const { services, ts, tick, loading, settings, fetchError, alertEvents, marketTurnover, hkdCnyRate } = useMetrics();
+  const { services, ts, tick, loading, settings, fetchError, alertEvents, marketTurnover, hkdCnyRate, refresh } = useMetrics();
   // tab state: URL ?tab=A|HK, default by time (before 15:00 → A, after → HK)
   const searchParams = useSearchParams();
 
@@ -599,6 +599,7 @@ function Home() {
         allTags={allTags}
         onClose={() => setDrawerSymbol(null)}
         onRefreshPlans={refreshPlans}
+        onRefreshMetrics={refresh}
       />
     </div>
   );

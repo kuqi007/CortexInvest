@@ -15,6 +15,7 @@ interface MetricsContextValue {
   fetchError: string | null;
   alertEvents: AlertEvent[];
   marketTurnover: MarketTurnover | null;
+  refresh: () => void;
 }
 
 const MetricsContext = createContext<MetricsContextValue | null>(null);
@@ -73,7 +74,7 @@ export function MetricsProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <MetricsContext.Provider
-      value={{ services, ts, tick, loading, settings, hkdCnyRate, fetchError, alertEvents, marketTurnover }}
+      value={{ services, ts, tick, loading, settings, hkdCnyRate, fetchError, alertEvents, marketTurnover, refresh: fetchData }}
     >
       {children}
     </MetricsContext.Provider>

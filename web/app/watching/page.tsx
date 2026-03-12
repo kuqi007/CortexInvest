@@ -41,7 +41,7 @@ export default function WatchingPage() {
 }
 
 function WatchingContent() {
-  const { services, ts, tick, loading, settings, fetchError, alertEvents } = useMetrics();
+  const { services, ts, tick, loading, settings, fetchError, alertEvents, refresh } = useMetrics();
   const searchParams = useSearchParams();
 
   function getDefaultTab(): MarketTab {
@@ -315,6 +315,7 @@ function WatchingContent() {
         allTags={allTags}
         onClose={() => setDrawerSymbol(null)}
         onRefreshPlans={refreshPlans}
+        onRefreshMetrics={refresh}
       />
     </div>
   );

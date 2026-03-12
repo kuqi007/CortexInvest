@@ -16,6 +16,7 @@ export interface StockDrawerProps {
   allTags: string[];
   onClose: () => void;
   onRefreshPlans: () => void;
+  onRefreshMetrics?: () => void;
 }
 
 /* ── Order type options ── */
@@ -786,6 +787,7 @@ export function StockDrawer({
   allTags,
   onClose,
   onRefreshPlans,
+  onRefreshMetrics,
 }: StockDrawerProps) {
   // Keep a stable ref to onClose so the ESC handler doesn't need it as a dep
   const onCloseRef = useRef(onClose);
@@ -835,11 +837,12 @@ export function StockDrawer({
         body: JSON.stringify({ action: "update", code: symbol, data: { [field]: value } }),
       });
       setToast(res.ok ? { msg: "已保存", type: "ok" } : { msg: "保存失败", type: "err" });
+      if (res.ok) onRefreshMetrics?.();
     } catch {
       setToast({ msg: "保存失败", type: "err" });
     }
     setTimeout(() => setToast(null), 2000);
-  }, [symbol]);
+  }, [symbol, onRefreshMetrics]);
 
   const saveData = useCallback(async (data: Record<string, unknown>) => {
     try {
@@ -849,11 +852,12 @@ export function StockDrawer({
         body: JSON.stringify({ action: "update", code: symbol, data }),
       });
       setToast(res.ok ? { msg: "已保存", type: "ok" } : { msg: "保存失败", type: "err" });
+      if (res.ok) onRefreshMetrics?.();
     } catch {
       setToast({ msg: "保存失败", type: "err" });
     }
     setTimeout(() => setToast(null), 2000);
-  }, [symbol]);
+  }, [symbol, onRefreshMetrics]);
 
   const saveTags = useCallback(async (code: string, tags: string[]) => {
     try {
