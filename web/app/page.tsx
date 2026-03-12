@@ -304,7 +304,7 @@ function Home() {
           borderBottom: `1px solid #191a21`,
         }}
       >
-        <span style={{ color: s.star ? D.yellow : D.comment, width: "6ch" }}>{s.star ? "★" : " "} DEV</span>
+        <span style={{ color: s.star ? D.yellow : D.comment, width: "9ch" }}>{s.star ? "★" : " "} DEV</span>
         <span style={{ color: D.cyan, width: "10ch" }}>{pad(s.id, 9)}</span>
         <span style={{ color: D.fg, width: "10ch" }}>{pad(s.name.slice(0, 6), 8)}</span>
         <span style={{ color: D.fg, width: "10ch", textAlign: "right" }}>
@@ -478,7 +478,7 @@ function Home() {
 
           const holdHeader = (
             <div style={{ display: "flex", whiteSpace: "pre", color: D.pink, borderBottom: `1px solid ${D.currentLine}`, paddingBottom: 3, marginBottom: 2, fontWeight: 500 }}>
-              <span style={{ width: "6ch" }}> 类型</span>
+              <span style={{ width: "9ch" }}> 类型</span>
               <span style={hs("10ch", "id")} onClick={() => ht("id")}>代码{ha("id")}</span>
               <span style={{ width: "10ch" }}>名称</span>
               <span style={hs("10ch", "price", true)} onClick={() => ht("price")}>{pad("现价" + ha("price"), 9, true)}</span>

@@ -198,7 +198,7 @@ function WatchingContent() {
 
   const header = (
     <div style={{ display: "flex", whiteSpace: "pre", color: D.pink, borderBottom: `1px solid ${D.currentLine}`, paddingBottom: 3, marginBottom: 2, fontWeight: 500 }}>
-      <span style={{ width: "6ch" }}> 类型</span>
+      <span style={{ width: "9ch" }}> 类型</span>
       <span style={mkHStyle("10ch", "id")} onClick={() => toggleWatchSort("id")}>代码{mkArrow("id")}</span>
       <span style={{ width: "10ch" }}>名称</span>
       <span style={mkHStyle("10ch", "price", true)} onClick={() => toggleWatchSort("price")}>{pad("现价" + mkArrow("price"), 9, true)}</span>
