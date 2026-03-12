@@ -1302,8 +1302,8 @@
           "consecutive_days": null,
           "trailing": null,
           "label": "主力成本区上沿试探",
-          "triggered": false,
-          "triggered_at": null
+          "triggered": true,
+          "triggered_at": "2026-03-12T09:39:29.286027"
         },
         {
           "id": "buy2",

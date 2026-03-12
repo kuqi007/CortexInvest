@@ -984,8 +984,8 @@ export function StockDrawer({
                 />
               </span>
             </div>
-            {/* star + dip toggles */}
-            <div style={{ display: "flex", gap: 16, marginTop: 10, alignItems: "center" }}>
+            {/* star + dip toggles + delete */}
+            <div style={{ display: "flex", gap: 16, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
               {/* star */}
               <button
                 onClick={() => { setStarOverride(!isStar); saveData({ star: !isStar }); }}
@@ -1041,6 +1041,48 @@ export function StockDrawer({
                 </span>
                 dip 回调监控
               </span>
+              {/* delete */}
+              <button
+                onClick={async () => {
+                  if (!symbol) return;
+                  const label = service?.type === "holding" ? "持仓" : "自选";
+                  if (!window.confirm(`确认删除 ${label} ${symbol}（${service?.name ?? ""}）？此操作不可撤销。`)) return;
+                  try {
+                    const res = await fetch("/api/config", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ action: "remove", code: symbol }),
+                    });
+                    const json = await res.json();
+                    if (res.ok && json.success) {
+                      onRefreshMetrics?.();
+                      onClose();
+                    } else {
+                      setToast({ msg: json.message || "删除失败", type: "err" });
+                      setTimeout(() => setToast(null), 2500);
+                    }
+                  } catch {
+                    setToast({ msg: "删除失败", type: "err" });
+                    setTimeout(() => setToast(null), 2500);
+                  }
+                }}
+                title="从监控列表中删除"
+                style={{
+                  marginLeft: "auto",
+                  background: "transparent",
+                  border: `1px solid ${D.red}`,
+                  color: D.red,
+                  cursor: "pointer",
+                  fontSize: 11,
+                  padding: "2px 10px",
+                  borderRadius: 3,
+                  fontFamily: "JetBrains Mono, monospace",
+                  userSelect: "none",
+                  opacity: 0.7,
+                }}
+              >
+                删除
+              </button>
             </div>
           </section>
 
