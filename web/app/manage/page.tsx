@@ -56,6 +56,7 @@ function TagEditor({
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set(currentTags));
   const [newTag, setNewTag] = useState("");
+  const [search, setSearch] = useState("");
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -103,7 +104,26 @@ function TagEditor({
     >
       {allTags.length > 0 && (
         <div style={{ marginBottom: 6 }}>
-          {allTags.map((t) => (
+          <input
+            autoFocus
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="search tags..."
+            style={{
+              background: D.currentLine,
+              border: `1px solid ${D.comment}`,
+              color: D.fg,
+              fontFamily: "JetBrains Mono, monospace",
+              fontSize: 11,
+              padding: "2px 6px",
+              outline: "none",
+              borderRadius: 2,
+              width: "100%",
+              boxSizing: "border-box",
+              marginBottom: 6,
+            }}
+          />
+          {allTags.filter((t) => t.toLowerCase().includes(search.toLowerCase())).map((t) => (
             <label
               key={t}
               style={{
@@ -235,6 +255,7 @@ function StockRow({
   onToggleSelect: (code: string) => void;
 }) {
   const [tagEditorOpen, setTagEditorOpen] = useState(false);
+  const [hoveredTag, setHoveredTag] = useState<string | null>(null);
   const isPromoting = promoting === code;
 
   const typeBadgeStyle: React.CSSProperties = {
@@ -482,16 +503,41 @@ function StockRow({
             ? (entry.tags || []).map((t) => (
                 <span
                   key={t}
+                  onMouseEnter={() => setHoveredTag(t)}
+                  onMouseLeave={() => setHoveredTag(null)}
                   style={{
+                    position: "relative",
+                    display: "inline-flex",
+                    alignItems: "center",
                     background: tagColor(t),
                     color: "#282a36",
-                    padding: "0 5px",
+                    padding: hoveredTag === t ? "0 2px 0 5px" : "0 5px",
                     borderRadius: 3,
                     fontSize: 10,
                     fontWeight: 700,
                     whiteSpace: "nowrap",
+                    cursor: "default",
                   }}
-                >{t}</span>
+                >
+                  {t}
+                  {hoveredTag === t && (
+                    <span
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSaveTags(code, (entry.tags || []).filter((x) => x !== t));
+                      }}
+                      style={{
+                        marginLeft: 3,
+                        cursor: "pointer",
+                        fontWeight: 900,
+                        fontSize: 11,
+                        lineHeight: 1,
+                        color: "#282a36",
+                        opacity: 0.8,
+                      }}
+                    >×</span>
+                  )}
+                </span>
               ))
             : <span style={{ color: D.comment, fontSize: 10 }}>+tag</span>
           }
