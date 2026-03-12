@@ -56,6 +56,27 @@ export interface Service {
   retailNetInflow?: number;
   bidAskRatio?: number;
   avgPrice?: number;
+  /* Daily technical indicators (from indicator_cache, refreshed every 30min) */
+  indicators?: {
+    close: number;
+    rsi: number;
+    dif: number;
+    dea: number;
+    macd_hist: number;
+    macd_hist_prev: number;
+    ma5: number;
+    ma5_prev: number;
+    ma5_prev2: number;
+    ma10: number;
+    ma20: number;
+    vol: number;
+    vol_ma20: number;
+    vol_ratio: number;
+    macd_golden_cross: boolean;
+    macd_death_cross: boolean;
+    macd_bull_divergence: boolean;
+    ma5_turn_up: boolean;
+  };
 }
 
 export interface AlertSettings {

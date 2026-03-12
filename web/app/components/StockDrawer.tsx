@@ -739,49 +739,15 @@ export function StockDrawer({
   const [dipOverride, setDipOverride] = useState<boolean | null>(null);
   const [aliasOverride, setAliasOverride] = useState<string | null | undefined>(undefined);
 
-  // Technical indicators for A-share stocks
-  const [indicators, setIndicators] = useState<Record<string, unknown> | null>(null);
-  const [indLoading, setIndLoading] = useState(false);
+  // Technical indicators from MetricsProvider (via indicator_cache)
+  const svcMatch = services.find((s) => s.id === symbol);
+  const indicators = svcMatch?.indicators ?? null;
 
   // Reset overrides when drawer opens a different symbol
   useEffect(() => {
     setStarOverride(null);
     setDipOverride(null);
     setAliasOverride(undefined);
-    setIndicators(null);
-  }, [symbol]);
-
-  // Fetch indicators for A-share stocks — once on open, then every 5 min with live price
-  const svcMatch = services.find((s) => s.id === symbol);
-  const livePrice = svcMatch?.price ?? 0;
-  const indTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  useEffect(() => {
-    if (!symbol || symbol.startsWith("HK") || symbol.startsWith("KR")) {
-      setIndicators(null);
-      return;
-    }
-    let cancelled = false;
-    const fetchInd = (price: number) => {
-      const params = new URLSearchParams({ symbol });
-      if (price > 0) params.set("live_price", String(price));
-      fetch(`/api/indicators?${params}`)
-        .then((r) => r.json())
-        .then((data) => { if (!cancelled && !data.error) setIndicators(data); })
-        .catch(() => {})
-        .finally(() => { if (!cancelled) setIndLoading(false); });
-    };
-    setIndLoading(true);
-    fetchInd(livePrice);
-    // Refresh every 5 min during trading hours
-    indTimerRef.current = setInterval(() => {
-      const h = new Date().getHours();
-      if (h >= 9 && h < 16) fetchInd(livePrice);
-    }, 5 * 60 * 1000);
-    return () => {
-      cancelled = true;
-      if (indTimerRef.current) clearInterval(indTimerRef.current);
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol]);
 
   const saveConfig = useCallback(async (field: string, value: unknown) => {
@@ -826,12 +792,12 @@ export function StockDrawer({
         body: JSON.stringify({ action: "update", code, data: { tags } }),
       });
       setToast(res.ok ? { msg: "标签已保存", type: "ok" } : { msg: "保存失败", type: "err" });
-      if (res.ok) onRefreshPlans();
+      if (res.ok) { onRefreshPlans(); onRefreshMetrics?.(); }
     } catch {
       setToast({ msg: "保存失败", type: "err" });
     }
     setTimeout(() => setToast(null), 2000);
-  }, [onRefreshPlans]);
+  }, [onRefreshPlans, onRefreshMetrics]);
 
   if (!symbol) return null;
 
@@ -1064,14 +1030,13 @@ export function StockDrawer({
             )}
           </section>
 
-          {/* Section: 技术指标 (A-share only) */}
-          {symbol && !symbol.startsWith("HK") && !symbol.startsWith("KR") && (
+          {/* Section: 技术指标 */}
+          {symbol && !symbol.startsWith("KR") && (
             <div style={{ borderTop: `1px solid ${D.currentLine}`, marginTop: 8, paddingTop: 16 }}>
               <div style={{ color: D.comment, fontSize: 11, textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>
                 技术指标 (日线)
               </div>
-              {indLoading && <div style={{ color: D.comment, fontSize: 11 }}>加载中...</div>}
-              {!indLoading && !indicators && <div style={{ color: D.comment, fontSize: 11 }}>暂无数据</div>}
+              {!indicators && <div style={{ color: D.comment, fontSize: 11 }}>暂无数据</div>}
               {indicators && (() => {
                 const rsi = indicators.rsi as number;
                 const macdHist = indicators.macd_hist as number;

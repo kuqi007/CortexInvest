@@ -11,6 +11,7 @@ export interface PlanOrder {
   volume_min: number | null;
   consecutive_days: number | null;
   trailing: { pct: number; watermark: number | null; active: boolean } | null;
+  indicators?: Record<string, unknown>;
   label: string;
   triggered: boolean;
   triggered_at: string | null;

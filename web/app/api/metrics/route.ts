@@ -210,7 +210,7 @@ export async function GET() {
 
     data.settings = settings;
 
-    // 读 alert events（notifier 写入 SQLite，web 只读）
+    // 读 alert events + indicator cache（notifier 写入 SQLite，web 只读）
     try {
       const now = new Date();
       const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
@@ -221,6 +221,24 @@ export async function GET() {
           "FROM alert_events WHERE date = ? ORDER BY ts",
         )
         .all(today);
+
+      // 读 indicator_cache 并附到 services
+      try {
+        const indRows = db.prepare(
+          "SELECT symbol, data_json FROM indicator_cache WHERE date = ?"
+        ).all(today) as { symbol: string; data_json: string }[];
+        const indMap: Record<string, unknown> = {};
+        for (const r of indRows) {
+          try { indMap[r.symbol] = JSON.parse(r.data_json); } catch { /* skip */ }
+        }
+        if (Object.keys(indMap).length > 0) {
+          for (const svc of data.services) {
+            const ind = indMap[svc.id];
+            if (ind) (svc as Record<string, unknown>).indicators = ind;
+          }
+        }
+      } catch { /* indicator_cache table may not exist yet */ }
+
       db.close();
     } catch {
       data.alertEvents = [];

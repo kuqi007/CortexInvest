@@ -1507,12 +1507,22 @@ class TradePlanEngine:
 
     每 tick 调用 check()，返回触发的告警列表（格式兼容 write_alert_events）。
     触发后自动更新 trade_plans.json（标记 triggered=True）并写入 trade_plan_events 表。
+
+    A 股指标条件单: order 中含 "indicators" 字段时，自动从 akshare 拉取日线计算指标。
+    每日每只 A 股最多拉取一次 kline（缓存到 _ashare_ind_cache）。
+    仅在 15:05-15:20 时间窗口检测指标条件（收盘数据才有意义）。
     """
+
+    # A 股 kline 缓存刷新间隔 (秒) — 盘中每 30 分钟重新拉 kline
+    KLINE_REFRESH_INTERVAL = 1800
 
     def __init__(self):
         self._plans: dict = {}
         self._consecutive_tracker: dict[str, dict] = {}  # {plan_id: {cond_id: {"count": N, "last_date": "YYYY-MM-DD"}}}
         self._last_mtime: float = 0.0
+        self._ashare_kline_cache: dict[str, object] = {}  # {symbol: kline DataFrame}
+        self._ashare_kline_ts: dict[str, float] = {}  # {symbol: last fetch timestamp}
+        self._ashare_kline_date: str = ""  # 缓存日期
         self._reload_plans()
 
     def _reload_plans(self):
@@ -1538,6 +1548,86 @@ class TradePlanEngine:
         tmp.rename(TRADE_PLANS_PATH)
         self._last_mtime = TRADE_PLANS_PATH.stat().st_mtime
 
+    def _get_ashare_indicators(self, symbol: str, live_price: float = 0,
+                               live_volume: float = 0) -> dict:
+        """获取 A 股日线技术指标，盘中用实时价格预估。
+
+        - kline 缓存每 30 分钟刷新一次（避免 akshare 限速）
+        - 盘中 (9:30-15:00): 用 live_price 追加当日 bar，计算预估指标
+        - 收盘后 (15:00+): 直接用 kline 最后一根 bar（当日完整数据）
+        - 非交易时段: 返回上次缓存的指标或空 dict
+        """
+        now = datetime.now()
+        if now.weekday() >= 5:
+            return {}
+        hhmm = now.hour * 100 + now.minute
+        # 仅交易时段 + 收盘后 20 分钟内检测 (9:25 - 15:20)
+        if hhmm < 925 or hhmm > 1520:
+            return {}
+
+        today = now.strftime("%Y-%m-%d")
+        # 日期变化 → 清空 kline 缓存
+        if self._ashare_kline_date != today:
+            self._ashare_kline_cache.clear()
+            self._ashare_kline_ts.clear()
+            self._ashare_kline_date = today
+
+        # 拉取/刷新 kline（每 30 分钟一次）
+        ts_now = now.timestamp()
+        last_ts = self._ashare_kline_ts.get(symbol, 0)
+        if symbol not in self._ashare_kline_cache or (ts_now - last_ts > self.KLINE_REFRESH_INTERVAL):
+            try:
+                from src.tools.indicator_alert_engine import fetch_kline_akshare
+                import time
+                kline = fetch_kline_akshare(symbol, days=60)
+                if kline is None:
+                    logger.warning(f"TradePlan: A-share kline fetch failed for {symbol}")
+                    return {}
+                self._ashare_kline_cache[symbol] = kline
+                self._ashare_kline_ts[symbol] = ts_now
+                time.sleep(1.5)  # akshare 限速
+            except Exception as e:
+                logger.warning(f"TradePlan: A-share kline error for {symbol}: {e}")
+                return {}
+
+        kline = self._ashare_kline_cache.get(symbol)
+        if kline is None:
+            return {}
+
+        try:
+            from src.tools.indicator_alert_engine import compute_indicators
+            # 盘中 (9:30-15:00): 用实时价格作为当日收盘预估
+            is_trading = 930 <= hhmm <= 1500
+            if is_trading and live_price > 0:
+                ind = compute_indicators(kline, live_price=live_price, live_volume=live_volume)
+            else:
+                ind = compute_indicators(kline)
+
+            if ind is None:
+                return {}
+
+            return {
+                "rsi": ind.get("rsi"),
+                "macd_hist_list": [ind.get("macd_hist_prev", 0), ind.get("macd_hist", 0)],
+                "vol_ratio": ind.get("vol_ratio"),
+                "macd_golden_cross": ind.get("macd_golden_cross", False),
+                "macd_death_cross": ind.get("macd_death_cross", False),
+                "macd_bull_divergence": ind.get("macd_bull_divergence", False),
+                "ma5_turn_up": ind.get("ma5_turn_up", False),
+            }
+        except Exception as e:
+            logger.warning(f"TradePlan: A-share indicator compute error for {symbol}: {e}")
+            return {}
+
+    def _plan_has_indicator_orders(self, plan: dict) -> bool:
+        """Check if any order in the plan has indicator conditions."""
+        for order in plan.get("orders", []):
+            if order.get("triggered"):
+                continue
+            if order.get("indicators"):
+                return True
+        return False
+
     def check(self, quotes: dict) -> list[dict]:
         """Check all active plans against current quotes.
 
@@ -1562,12 +1652,21 @@ class TradePlanEngine:
             change = q.get("change_pct", 0) or q.get("change", 0)
             name = q.get("name", symbol)
 
+            # 获取指标: HK 股先从 quotes 取 (L2 daemon)，无则 akshare 拉取; A 股直接 akshare
+            ind = q.get("indicators", {})
+            if not ind and not symbol.startswith("KR"):
+                if self._plan_has_indicator_orders(plan):
+                    ind = self._get_ashare_indicators(
+                        symbol, live_price=price,
+                        live_volume=q.get("volume", 0) or 0,
+                    )
+
             # 条件单 (统一处理 buy/sell/止损/trailing)
             for order in plan.get("orders", []):
                 if order.get("triggered"):
                     continue
                 if not self._check_order_conditions(plan_id, order, price, amount, today,
-                                                        indicators=q.get("indicators", {})):
+                                                        indicators=ind):
                     if order.pop("_ts_dirty", False):
                         dirty = True
                     continue
@@ -1724,6 +1823,29 @@ class TradePlanEngine:
         if "vol_ratio_above" in cond:
             vol_ratio = indicators.get("vol_ratio")
             if vol_ratio is None or vol_ratio <= cond["vol_ratio_above"]:
+                return False
+
+        # ── Boolean signals (from A-share compute_indicators) ──
+        if cond.get("macd_bull_divergence"):
+            if not indicators.get("macd_bull_divergence"):
+                return False
+
+        if cond.get("ma5_turn_up"):
+            if not indicators.get("ma5_turn_up"):
+                return False
+
+        # ── Confluence: require N or more boolean signals to be true ──
+        confluence_min = cond.get("confluence_min")
+        if confluence_min:
+            count = sum(1 for k in ("macd_golden_cross", "macd_bull_divergence",
+                                     "ma5_turn_up") if indicators.get(k))
+            rsi = indicators.get("rsi")
+            if rsi is not None and rsi < 35:
+                count += 1
+            vol_ratio = indicators.get("vol_ratio")
+            if vol_ratio is not None and vol_ratio >= 1.5:
+                count += 1
+            if count < confluence_min:
                 return False
 
         return True
@@ -2006,6 +2128,8 @@ def run():
     # ── 注册通用形态引擎（新增形态只需在此 register 一行）──
     register_pattern_engine(GapFadeEngine(config))
     register_pattern_engine(WatchDriftPatternEngine(ALERT_CONFIG_PATH))
+    # A股日线技术指标: 不再全局告警，改为交易计划条件单按需检测
+    # (TradePlanEngine._get_ashare_indicators 在 15:05-15:20 窗口内自动拉取)
     sent_open_today = False
     sent_close_today = False
     sent_summary_today = False
@@ -2014,6 +2138,8 @@ def run():
     latest_quotes: dict | None = None       # last merged quotes (for close summary)
     latest_hkd_cny_rate: float | None = None
     market_snapshot: dict | None = None     # latest parsed market_data.json (for watchdog)
+    last_indicator_refresh: float = 0.0     # 指标缓存上次刷新时间戳
+    INDICATOR_REFRESH_INTERVAL = 1800       # 30 分钟刷新一次
 
     while running:
         # Reset daily at 08:00 (before market open)
@@ -2104,6 +2230,16 @@ def run():
                     if plan_alerts:
                         write_alert_events(plan_alerts)
                         all_alerts.extend(plan_alerts)
+
+                    # ── 指标缓存刷新（盘中每 30 分钟 + 收盘后一次）──
+                    ts_now = time.time()
+                    if ts_now - last_indicator_refresh > INDICATOR_REFRESH_INTERVAL:
+                        try:
+                            from src.tools.indicator_alert_engine import refresh_indicator_cache
+                            refresh_indicator_cache(watchlist=watchlist, live_quotes=quotes)
+                            last_indicator_refresh = ts_now
+                        except Exception as _ie:
+                            logger.warning(f"indicator_cache refresh failed: {_ie}")
 
                     # ── 注册表形态引擎（统一驱动，隔离异常）──
                     for _eng in _pattern_engines:

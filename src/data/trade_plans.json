@@ -1392,19 +1392,6 @@
       "created_at": "2026-03-12",
       "orders": [
         {
-          "id": "watch_ma60",
-          "side": "buy",
-          "op": "<=",
-          "price": 126,
-          "shares": 0,
-          "volume_min": null,
-          "consecutive_days": null,
-          "trailing": null,
-          "label": "触达MA60支撑126 — 开始关注止跌信号",
-          "triggered": false,
-          "triggered_at": null
-        },
-        {
           "id": "watch_100",
           "side": "buy",
           "op": "<=",
@@ -1418,15 +1405,54 @@
           "triggered_at": null
         },
         {
-          "id": "bounce_signal",
+          "id": "ind_rsi_oversold",
           "side": "buy",
-          "op": ">=",
-          "price": 132,
+          "op": "<=",
+          "price": 999,
           "shares": 0,
-          "volume_min": null,
-          "consecutive_days": null,
-          "trailing": null,
-          "label": "反弹站上MA5约132 — 止跌确认信号",
+          "indicators": {
+            "rsi_below": 30
+          },
+          "label": "RSI超卖(<30) — 关注抄底时机",
+          "triggered": false,
+          "triggered_at": null
+        },
+        {
+          "id": "ind_macd_golden",
+          "side": "buy",
+          "op": "<=",
+          "price": 999,
+          "shares": 0,
+          "indicators": {
+            "macd_golden_cross": true
+          },
+          "label": "MACD金叉 — 趋势转多信号",
+          "triggered": false,
+          "triggered_at": null
+        },
+        {
+          "id": "ind_bull_divergence",
+          "side": "buy",
+          "op": "<=",
+          "price": 999,
+          "shares": 0,
+          "indicators": {
+            "macd_bull_divergence": true
+          },
+          "label": "MACD底背离 — 底部反转信号",
+          "triggered": false,
+          "triggered_at": null
+        },
+        {
+          "id": "ind_confluence",
+          "side": "buy",
+          "op": "<=",
+          "price": 999,
+          "shares": 0,
+          "indicators": {
+            "confluence_min": 2
+          },
+          "label": "多信号共振(≥2) — 强开仓信号",
           "triggered": false,
           "triggered_at": null
         }
