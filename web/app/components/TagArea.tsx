@@ -85,6 +85,7 @@ function TagEditor({
   return (
     <div
       ref={ref}
+      onClick={(e) => e.stopPropagation()}
       style={{
         position: "absolute",
         top: "calc(100% + 4px)",

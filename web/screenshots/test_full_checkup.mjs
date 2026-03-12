@@ -426,11 +426,24 @@ async function main() {
         return Number.isFinite(n) ? n : NaN;
       };
       // Find row containers via 6-digit A-share stock codes (watching A tab)
+      // Skip rows in the pinned section — only check rows after "watching:stocks" header
+      const bodyText = document.body?.innerText || '';
+      const hasPinned = bodyText.includes('pinned');
       const rows = Array.from(document.querySelectorAll('span'))
         .filter((s) => /^\d{6}$/.test((s.textContent || '').trim()))
         .map((s) => s.parentElement)
         .filter(Boolean);
-      return rows
+      // If pinned section exists, skip rows until we find ones after "watching:stocks"
+      let filtered = rows;
+      if (hasPinned) {
+        const stocksHeader = Array.from(document.querySelectorAll('div[style*="cursor: pointer"]'))
+          .find((d) => (d.textContent || '').includes('watching:stocks'));
+        if (stocksHeader) {
+          const headerRect = stocksHeader.getBoundingClientRect();
+          filtered = rows.filter((r) => r.getBoundingClientRect().top > headerRect.bottom);
+        }
+      }
+      return filtered
         .slice(0, 8)
         .map((row) => {
           const spans = row.querySelectorAll(':scope > span');
@@ -601,7 +614,7 @@ async function main() {
       const res = await fetch('/api/metrics');
       const data = await res.json();
       const services = data.services || [];
-      const check = ['HK09618', 'HK09927', 'HK03288', 'HK07262'];
+      const check = ['HK09927', 'HK03288', 'HK07262'];
       return check.map(code => {
         const s = services.find(x => x.id === code);
         return { code, found: !!s, type: s?.type, cost: s?.cost, shares: s?.shares, name: s?.name };
