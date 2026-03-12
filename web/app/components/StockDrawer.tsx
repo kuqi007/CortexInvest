@@ -822,14 +822,18 @@ export function StockDrawer({
   // Optimistic overrides: take precedence over stale service data from 30s poll
   const [starOverride, setStarOverride] = useState<boolean | null>(null);
   const [dipOverride, setDipOverride] = useState<boolean | null>(null);
+  const [aliasOverride, setAliasOverride] = useState<string | null | undefined>(undefined);
 
   // Reset overrides when drawer opens a different symbol
   useEffect(() => {
     setStarOverride(null);
     setDipOverride(null);
+    setAliasOverride(undefined);
   }, [symbol]);
 
   const saveConfig = useCallback(async (field: string, value: unknown) => {
+    // Optimistic update for alias
+    if (field === "alias") setAliasOverride(value as string | null);
     try {
       const res = await fetch("/api/config", {
         method: "POST",
@@ -838,8 +842,10 @@ export function StockDrawer({
       });
       setToast(res.ok ? { msg: "已保存", type: "ok" } : { msg: "保存失败", type: "err" });
       if (res.ok) onRefreshMetrics?.();
+      else if (field === "alias") setAliasOverride(undefined); // revert on error
     } catch {
       setToast({ msg: "保存失败", type: "err" });
+      if (field === "alias") setAliasOverride(undefined);
     }
     setTimeout(() => setToast(null), 2000);
   }, [symbol, onRefreshMetrics]);
@@ -882,6 +888,7 @@ export function StockDrawer({
   // Optimistic values: override takes precedence over stale poll data
   const isStar = starOverride !== null ? starOverride : (service?.star ?? false);
   const isDip = dipOverride !== null ? dipOverride : (service?.dip_buy ?? false);
+  const aliasVal = aliasOverride !== undefined ? aliasOverride : (service?.alias ?? null);
 
   return (
     <>
@@ -977,7 +984,7 @@ export function StockDrawer({
               </span>
               <span style={{ color: D.comment }}>别名&nbsp;
                 <EditableCell
-                  value={service?.alias ?? null}
+                  value={aliasVal}
                   onSave={(v) => saveConfig("alias", v.trim() || null)}
                   width="90px"
                   placeholder="-"
