@@ -51,7 +51,7 @@ export default function Page() {
 }
 
 function Home() {
-  const { services, ts, tick, loading, settings, fetchError, alertEvents, marketTurnover } = useMetrics();
+  const { services, ts, tick, loading, settings, fetchError, alertEvents, marketTurnover, hkdCnyRate } = useMetrics();
   // tab state: URL ?tab=A|HK, default by time (before 15:00 → A, after → HK)
   const searchParams = useSearchParams();
 
@@ -428,6 +428,15 @@ function Home() {
           </span>
           {"  "}alerts:<span style={{ color: isStale ? D.red : D.green }}>{isStale ? "stale" : "on"}</span>
         </div>
+        {/* FX rate — HK tab only */}
+        {activeTab === "HK" && (
+          <div style={{ color: D.comment, marginBottom: 6 }}>
+            {hkdCnyRate != null
+              ? <span>FX: <span style={{ color: D.fg }}>HKD/CNY {hkdCnyRate.toFixed(4)}</span></span>
+              : <span style={{ color: D.yellow }}>[WARN FX unavailable]</span>
+            }
+          </div>
+        )}
         {/* market turnover — A-share tab only */}
         {activeTab === "A" && marketTurnover && (
           <div style={{ color: D.comment, marginBottom: 6 }}>

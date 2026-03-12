@@ -480,11 +480,12 @@ async function main() {
 
     // collapse/expand should not destroy current sort
     const beforeCollapse = await getWatchingColumnValues(6, 'number');
-    const stockSectionToggle = page.locator('div', { hasText: 'watching:stocks' }).first();
+    // Use style-based selector to find the actual toggle div (cursor:pointer), not an ancestor
+    const stockSectionToggle = page.locator('div[style*="cursor: pointer"]').filter({ hasText: 'watching:stocks' }).first();
     await stockSectionToggle.click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(400);
     await stockSectionToggle.click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(600);
     const afterExpand = await getWatchingColumnValues(6, 'number');
     // Check sort direction preserved (ascending), not exact values (data may refresh)
     const sortPreserved = afterExpand.length >= 2 && afterExpand.every((v, i) => i === 0 || afterExpand[i - 1] <= v);
