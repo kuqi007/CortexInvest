@@ -3651,17 +3651,17 @@
     {
       "id": "KR000660",
       "name": "SK hynix",
-      "price": 931000.0,
-      "change": -2.51,
-      "chgAmt": -24000.0,
-      "vol": 2527574,
+      "price": 930000.0,
+      "change": -2.62,
+      "chgAmt": -25000.0,
+      "vol": 4475500,
       "amount": 0,
       "amp": 0,
       "turnover": 0,
       "volRatio": 0,
       "high": 963000.0,
       "low": 928000.0,
-      "open": 931000.0,
+      "open": 930000.0,
       "prevClose": 955000.0
     },
     {
@@ -4031,7 +4031,7 @@
       "avgPrice": 1.798
     }
   ],
-  "ts": 1773304181419,
+  "ts": 1773305134129,
   "settings": {
     "big_move_pct": 5,
     "cooldown_minutes": 10,
