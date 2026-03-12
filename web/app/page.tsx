@@ -198,11 +198,6 @@ function Home() {
     const mktVal = s.shares != null ? s.price * s.shares : null;
     const totalPnlRaw = s.cost != null && s.cost !== 0 && s.shares != null ? (s.price - s.cost) * s.shares : null;
     const dayPnl = s.shares != null ? calcDayPnl(s, 1) : null;
-    // Near alert threshold indicator
-    const nearAlert =
-      (s.above && s.price > 0 && (s.above - s.price) / s.price < 0.03) ||
-      (s.below && s.price > 0 && (s.price - s.below) / s.price < 0.03);
-
     return (
       <div
         style={{
@@ -210,7 +205,6 @@ function Home() {
           whiteSpace: "pre",
           padding: "1px 0",
           borderBottom: `1px solid #191a21`,
-          background: nearAlert ? "#44475a33" : "transparent",
           cursor: "pointer",
         }}
         onClick={() => setDrawerSymbol(s.id)}

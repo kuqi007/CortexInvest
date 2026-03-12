@@ -195,8 +195,6 @@ function StockRow({
   code,
   entry,
   isHolding,
-  above,
-  below,
   promoting,
   promoCost,
   promoShares,
@@ -218,8 +216,6 @@ function StockRow({
   code: string;
   entry: WatchEntry;
   isHolding: boolean;
-  above?: number;
-  below?: number;
   promoting: string | null;
   promoCost: string;
   promoShares: string;
@@ -371,23 +367,6 @@ function StockRow({
             PROD
           </button>
         )}
-        {/* alert thresholds */}
-        <span style={{ color: D.comment, fontSize: 11, paddingLeft: 4 }}>^</span>
-        <EditableCell
-          value={above}
-          onSave={(v) => onUpdateField(code, "above", v)}
-          width="60px"
-          placeholder="-"
-          isNumber
-        />
-        <span style={{ color: D.comment, fontSize: 11 }}>v</span>
-        <EditableCell
-          value={below}
-          onSave={(v) => onUpdateField(code, "below", v)}
-          width="60px"
-          placeholder="-"
-          isNumber
-        />
         {/* star toggle */}
         <button
           onClick={() => onToggleStar(code, !entry.star)}
@@ -600,9 +579,6 @@ export default function ManagePage() {
   const [promoCost, setPromoCost] = useState("");
   const [promoShares, setPromoShares] = useState("");
 
-  // alert rules from alert_config.json
-  const [alertRules, setAlertRules] = useState<Record<string, { above?: number; below?: number }>>({});
-
   // add form state
   const [addCode, setAddCode] = useState("");
   const [addType, setAddType] = useState<"watching" | "holding">("watching");
@@ -638,7 +614,6 @@ export default function ManagePage() {
     try {
       const resp = await fetch("/api/config", { cache: "no-store" });
       const data = await resp.json();
-      setAlertRules(data.alerts || {});
       setConfig(data as MonitorConfig);
       const s = data.settings;
       setSettingsDraft({
@@ -1076,8 +1051,6 @@ export default function ManagePage() {
           <span style={{ width: 80 }}>cost</span>
           <span style={{ width: 80 }}>shares</span>
           <span style={{ width: 60 }}></span>
-          <span style={{ width: 75, color: D.orange }}>^ above</span>
-          <span style={{ width: 75, color: D.cyan }}>v below</span>
           <span style={{ width: 30 }}>*</span>
           <span style={{ width: 40 }}>dip</span>
           <span style={{ width: 40 }}>hide</span>
@@ -1097,7 +1070,6 @@ export default function ManagePage() {
             {prodStockOpen && prodStock.map(([code, entry]) => (
               <StockRow
                 key={code} code={code} entry={entry} isHolding
-                above={alertRules[code]?.above} below={alertRules[code]?.below}
                 promoting={promoting} promoCost={promoCost} promoShares={promoShares}
                 setPromoting={setPromoting} setPromoCost={setPromoCost} setPromoShares={setPromoShares}
                 onUpdateField={handleUpdateField} onUpdateType={handleUpdateType}
@@ -1122,7 +1094,6 @@ export default function ManagePage() {
             {prodETFOpen && prodETF.map(([code, entry]) => (
               <StockRow
                 key={code} code={code} entry={entry} isHolding
-                above={alertRules[code]?.above} below={alertRules[code]?.below}
                 promoting={promoting} promoCost={promoCost} promoShares={promoShares}
                 setPromoting={setPromoting} setPromoCost={setPromoCost} setPromoShares={setPromoShares}
                 onUpdateField={handleUpdateField} onUpdateType={handleUpdateType}
@@ -1147,7 +1118,6 @@ export default function ManagePage() {
             {prodHKOpen && prodHK.map(([code, entry]) => (
               <StockRow
                 key={code} code={code} entry={entry} isHolding
-                above={alertRules[code]?.above} below={alertRules[code]?.below}
                 promoting={promoting} promoCost={promoCost} promoShares={promoShares}
                 setPromoting={setPromoting} setPromoCost={setPromoCost} setPromoShares={setPromoShares}
                 onUpdateField={handleUpdateField} onUpdateType={handleUpdateType}
@@ -1176,7 +1146,6 @@ export default function ManagePage() {
             {watchOpen && watching.map(([code, entry]) => (
               <StockRow
                 key={code} code={code} entry={entry} isHolding={false}
-                above={alertRules[code]?.above} below={alertRules[code]?.below}
                 promoting={promoting} promoCost={promoCost} promoShares={promoShares}
                 setPromoting={setPromoting} setPromoCost={setPromoCost} setPromoShares={setPromoShares}
                 onUpdateField={handleUpdateField} onUpdateType={handleUpdateType}

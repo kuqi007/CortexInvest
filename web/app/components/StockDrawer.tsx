@@ -1096,37 +1096,7 @@ export function StockDrawer({
           {/* Divider */}
           <div style={{ borderTop: "1px solid " + D.currentLine, marginBottom: 16, paddingTop: 16 }} />
 
-          {/* Section 2: 告警阈值 */}
-          <section style={{ marginBottom: 20 }}>
-            <div style={{ color: D.comment, fontSize: 11, marginBottom: 8, textTransform: "uppercase", letterSpacing: 1 }}>告警阈值</div>
-            <div style={{ display: "flex", gap: 24 }}>
-              <span style={{ color: D.red }}>上限&nbsp;
-                <EditableCell
-                  value={service?.above ?? null}
-                  onSave={(v) => saveConfig("above", v === "" ? null : parseFloat(v))}
-                  width="80px"
-                  isNumber
-                  placeholder="-"
-                  color={D.red}
-                />
-              </span>
-              <span style={{ color: D.green }}>下限&nbsp;
-                <EditableCell
-                  value={service?.below ?? null}
-                  onSave={(v) => saveConfig("below", v === "" ? null : parseFloat(v))}
-                  width="80px"
-                  isNumber
-                  placeholder="-"
-                  color={D.green}
-                />
-              </span>
-            </div>
-          </section>
-
-          {/* Divider */}
-          <div style={{ borderTop: "1px solid " + D.currentLine, marginBottom: 16, paddingTop: 16 }} />
-
-          {/* Section 3: 标签 */}
+          {/* Section 2: 标签 */}
           <section style={{ marginBottom: 20 }}>
             <div style={{ color: D.comment, fontSize: 11, marginBottom: 8, textTransform: "uppercase", letterSpacing: 1 }}>标签</div>
             <span
