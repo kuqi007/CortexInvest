@@ -54,7 +54,7 @@
 
 ```bash
 poetry run pytest src/sim_trading/test_sim_trading.py -v   # 详细输出
-poetry run pytest src/sim_trading/test_sim_trading.py -q   # 快速检查（当前 109 tests）
+poetry run pytest src/sim_trading/test_sim_trading.py -q   # 快速检查（当前 113 tests）
 ```
 
 ### 测试文件结构
@@ -72,6 +72,7 @@ poetry run pytest src/sim_trading/test_sim_trading.py -q   # 快速检查（当�
 | `TestSyncFromFutuPreservesEntryTime` | **sync_from_futu 保留 entry_time（T3 bug 回归）** |
 | `TestT3EntryTimeZeroGuard` | **entry_time=0 防御拦截（T3 bug 回归）** |
 | `TestEvaluateEntriesFallback` | 候选股开仓失败 fallback |
+| `TestTrailingStop` | **trailing stop ratchet up + 不降 + 入场价下不触发（v3 回归）** |
 
 ## When in Doubt
 

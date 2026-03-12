@@ -15,7 +15,9 @@ poetry run python src/backtester.py --ticker 301157 --start-date 2024-12-11 --en
 poetry run python run_with_backend.py                   # FastAPI on :8000 (Swagger at /docs)
 poetry run python run_with_backend.py --ticker 002848   # API server + immediate analysis
 poetry run python -m src.sim_trading.replay_runner       # sim trading replay (writes to sim_trading.db)
-poetry run pytest src/sim_trading/test_sim_trading.py -v # sim trading tests (109 tests)
+poetry run pytest src/sim_trading/test_sim_trading.py -v # sim trading tests (113 tests)
+poetry run python -m src.sim_trading.kline_fetcher          # fetch HK daily klines from Tencent Finance
+poetry run python -m src.sim_trading.scoring_backtester      # v3 Optuna walk-forward backtest
 ```
 
 ### Web Dashboard (Next.js)
@@ -345,24 +347,27 @@ JSON 同时存储三种视图：`watchlist`（统一）、`holdings`（仅持仓
 
 ### Simulated Trading (`src/sim_trading/`)
 
-模拟交易系统，v2 策略：日线评分驱动型交易（替代 v1 的 L2 秒级信号驱动）。
+模拟交易系统，v2→v3 策略：日线评分驱动型交易（替代 v1 的 L2 秒级信号驱动）。
 
-**v2 策略核心**:
-- **开仓**: 日线综合评分 >= 70 分（6 维度加权：MACD/RSI/MA排列/主力资金/量价/支撑位）
-- **平仓**: 止损/止盈实时检查 + 15:30 收盘评估（评分 < 40 → 平仓）
+**v3 策略核心**（v2 基础 + Optuna walk-forward 优化）:
+- **开仓**: 日线综合评分 >= 60 分 + ADX >= 25（趋势过滤）+ RR >= 2.0（盈亏比过滤）
+- **止损/止盈**: SL = max(price - 2×ATR, price×0.90), TP = price + 3×ATR
+- **Trailing stop**: 价格创新高后 SL = highest_price - 3×ATR（只升不降，保护盈利）
+- **平仓**: 止损/止盈实时检查 + 15:30 收盘评估（评分 < 46 → 平仓）
 - **入场窗口**: 10:00-10:30，每天最多 1 只新开仓
 - **日内例外**: 极强 L2 信号（confidence >= 0.85 且 score >= 60）可在窗口外入场
 - **T3 纠偏**: 加手续费过滤（|pnl| > 0.5%）+ min_hold 30 分钟检查；盈利时只收窄止损不卖出
-- **冷却**: 同一股票平仓后 120 分钟内不再入场
+- **冷却**: 同一股票平仓后 6 日历天内不再入场（防止同股反复开平）
 - **最小交易额**: notional < 30,000 HKD 的交易不执行（避免小仓位手续费率过高）
 
-**v1→v2 改进背景**: v1 在实盘中 17 笔交易全部被 T3:large_order_reversal 反复平仓，手续费 1,406 HKD（占 |PnL| 的 171%），6/17 笔毛利为正但扣费后亏损。
+**v2→v3 改进背景**: v2 在 walk-forward 回测中 131 笔交易手续费 45K，Optuna 优化后加 ADX/RR/trailing 过滤降至 33 笔，OOS +280K，avg Sharpe 2.84。v1→v2 改进背景: v1 在实盘中 17 笔交易全部被 T3 反复平仓，手续费占 PnL 171%。
 
 **数据流**:
 ```
 实时: L2 signals → signal_archiver → sim_trading.db
-      DailyIndicatorTracker.score() → RealtimeSimEngine.tick() → live_state / trades
+      DailyIndicatorTracker.score() → RealtimeSimEngine.tick() → ADX/RR filter → trailing stop → live_state / trades
 回放: sim_trading.db → replay_runner → trades/daily_pnl
+回测: kline_fetcher (腾讯财经) → daily_kline → scoring_backtester (Optuna) → 最优参数 → signal_rules.json
 Web:  sim_trading.db → /api/sim → /sim 页面
 ```
 
@@ -371,10 +376,12 @@ Web:  sim_trading.db → /api/sim → /sim 页面
 | 模块 | 职责 |
 |------|------|
 | `signal_archiver.py` | 实时归档 L2 信号 + 30s 价格快照到 SQLite |
-| `realtime_engine.py` | **v2 实时引擎**: 日线评分入场、时间窗口控制、T3 手续费过滤、per-tick score 缓存 |
-| `broker.py` | **AbstractBroker 策略模式**: VirtualBroker（纯虚拟 PM）/ FutuBroker（Futu-first + 影子 PM），Plan A 写一致性 |
+| `realtime_engine.py` | **v3 实时引擎**: 日线评分入场 + ADX/RR 过滤 + trailing stop + cooldown_days |
+| `broker.py` | **AbstractBroker 策略模式**: VirtualBroker（纯虚拟 PM）/ FutuBroker（Futu-first + 影子 PM），支持 trailing_atr 透传 |
 | `signal_mapper.py` | 4 层信号规则引擎 (Tier1 独立→Tier2 增强→Tier3 纠偏→Tier4 仅日志) |
-| `position_manager.py` | 虚拟持仓管理 (lot-size 对齐, SL/TP/max-hold 退出) |
+| `position_manager.py` | 虚拟持仓管理 (lot-size 对齐, SL/TP/trailing-stop/max-hold 退出, atr_at_entry) |
+| `scoring_backtester.py` | **v3 回测引擎**: Optuna walk-forward 优化 (5 窗口, 300 trials)，离线评分+交易模拟 |
+| `kline_fetcher.py` | 腾讯财经日 K 线获取器（无 Futu 依赖），写入 daily_kline 表 |
 | `simulation_engine.py` | HK 交易成本 (佣金+印花税+交易费+结算费) + 流动性滑点 |
 | `trade_analyzer.py` | 绩效分析: 胜率/Sharpe/最大回撤/Calmar/归因 |
 | `replay_runner.py` | 历史回放入口 |
@@ -404,21 +411,23 @@ Web:  sim_trading.db → /api/sim → /sim 页面
 - 每 30 分钟从 Futu OpenD 刷新日 K 线（120 天），计算 RSI/MACD/MA/BB/ADX/ATR/Vol
 - 无 kline 数据时返回 `{"total": 0, "action": "WAIT"}` — 不会误开仓或误平仓
 
-**评分维度 (`signal_rules.json → scoring_weights`)**:
+**评分维度 (`signal_rules.json → scoring_weights`)**（v3 Optuna 优化后权重）:
 
-| 维度 | 满分 | 计算逻辑 |
+| 维度 | 权重 | 计算逻辑 |
 |------|------|---------|
-| MACD | 20 | 金叉=20, hist扩张=18, 死叉=0, DIF/DEA零轴上方+2 |
-| RSI | 15 | 60-70=15, 50-60=10, >80=3(极度超买), <30=2 |
-| MA排列 | 20 | 多头排列+站上MA20=20, 空头排列=0 |
-| 主力资金 | 20 | 净流入>10%=20, 无数据时固定=8 (需L2数据传入) |
-| 量价配合 | 15 | 放量上涨=15, 缩量上涨=6, 放量下跌=2 |
-| 支撑位 | 10 | 距支撑<2%=10, <5%=8, >10%=3 |
+| MACD | 29 | 金叉=20, hist扩张=18, 死叉=0, DIF/DEA零轴上方+2, ADX<20 时-5 |
+| RSI | 8 | 50-65=15, 45-50=12, >80=3(极度超买), ADX<20 时-5 |
+| MA排列 | 10 | 多头排列+站上MA20=20, 空头排列=0 |
+| 主力资金 | 22 | 净流入>10%=20, 无数据时固定=8 (需L2数据传入) |
+| 量价配合 | 21 | 放量上涨=15, 缩量上涨=6, 放量下跌=2 |
+| 支撑位 | 12 | 距支撑<2%=10, <5%=8, >10%=3 |
+
+权重为各维度满分上限（Optuna 独立搜索 5-30），非归一化到 100。entry/exit 阈值相应调整。
 
 **信号规则 (`src/data/signal_rules.json`)**:
 - `tiers.1-4`: 同 v1（14 种独立 + 2 种增强 + 6 种纠偏 + 11 种日志）
-- `daily_score`: v2 核心配置（entry/exit 阈值、时间窗口、冷却、min_hold、min_notional）
-- `scoring_weights`: 6 维度权重（合计 100 分）
+- `daily_score`: v3 核心配置（entry/exit 阈值、ADX/RR 过滤、trailing stop、cooldown_days、时间窗口、min_hold、min_notional）
+- `scoring_weights`: 6 维度权重（Optuna 优化，非归一化）
 - `risk_control`: min_confidence=0.60, max_single_stock=25%, max_total_invested=80%
 - `cost_model`: HK 市场费率 (佣金 0.03% min 3 HKD, 印花税 0.13%, 交易费 0.00565%, 结算费 0.002%)
 - `lot_sizes`: 每只 HK 股的每手股数
@@ -430,11 +439,12 @@ L2StrategyEngine (poll_once → L2 signals)
   └── 传递引用 → RealtimeSimEngine(rules, daily_tracker=engine._daily_indicators)
        ├── _broker: FutuBroker(shadow_pm, adapter) 或 VirtualBroker(pm)
        ├── tick() 每 3s 调用（交易时段）
-       ├── _evaluate_entries() → 10:00-10:30 评分选股
-       │     └── _run_candidates() → 按评分排序遍历，top 失败则 fallback 到下一个
+       ├── _evaluate_entries() → 10:00-10:30 评分选股 + ADX/RR/cooldown_days 过滤
+       │     └── _run_candidates() → 按评分排序遍历，SL=max(p-2ATR, p*0.90), TP=p+3ATR
+       ├── check_exits() → trailing_atr=3.0 动态抬升 SL（only ratchet up）
        ├── _process_signal_v2() → T3 过滤 + 日内例外
-       ├── _evaluate_exits() → 15:30 收盘评估
-       └── _persist_state() → live_state 表 (含 daily_score)
+       ├── _evaluate_exits() → 15:30 收盘评估 (score < 46 → 平仓)
+       └── _persist_state() → live_state 表 (含 daily_score, atr_at_entry)
 ```
 
 **运行回放**:
@@ -443,14 +453,21 @@ poetry run python -m src.sim_trading.replay_runner                    # 默认 v
 poetry run python -m src.sim_trading.replay_runner --version v2_test  # 指定参数版本
 ```
 
-**重启 daemon (v2)**:
+**运行回测 (v3 Optuna)**:
+```bash
+poetry run python -m src.sim_trading.kline_fetcher                      # 先获取 9 月日 K 线
+poetry run python -m src.sim_trading.kline_fetcher --codes HK09988,HK00700  # 指定股票
+poetry run python -m src.sim_trading.scoring_backtester                  # walk-forward 优化 (300 trials)
+```
+
+**重启 daemon (v3)**:
 ```bash
 pkill -f l2_strategy_daemon
 nohup poetry run python src/tools/l2_strategy_daemon.py >> logs/l2_daemon_out.log 2>&1 &
-tail -f logs/l2_daemon.log | grep rt_sim   # 观察 v2 RT 日志
+tail -f logs/l2_daemon.log | grep rt_sim   # 观察 v3 RT 日志
 ```
 
-**测试**: `poetry run pytest src/sim_trading/test_sim_trading.py -v` (101 tests)
+**测试**: `poetry run pytest src/sim_trading/test_sim_trading.py -v` (113 tests)
 
 **SQLite 数据库 (`src/data/sim_trading.db`)**:
 - `signals`: 归档的 L2 信号 (strategy, code, direction, price_at_signal) — 180 天保留
@@ -458,7 +475,8 @@ tail -f logs/l2_daemon.log | grep rt_sim   # 观察 v2 RT 日志
 - `session_snapshots`: 5 分钟 session 上下文快照 (资金流、盘口状态) — 180 天保留
 - `trades`: 已平仓交易 (entry/exit price, pnl, exit_reason, param_version="live") — 永久保留
 - `daily_pnl`: 每日权益快照 (equity, cash, invested, positions_json) — 永久保留
-- `live_state`: 实时持仓 (entry_price, SL/TP, daily_score, unrealized_pnl)
+- `live_state`: 实时持仓 (entry_price, SL/TP, daily_score, unrealized_pnl, atr_at_entry)
+- `daily_kline`: 日 K 线缓存 (date, code, OHLCV, change_pct) — 回测用，腾讯财经数据源
 - `param_versions`: 参数版本配置
 - `alert_events`: 告警事件 (ts, date, symbol, kind, level, message, display, change_pct) — 30 天保留
 - `trade_plan_events`: 交易计划触发事件 (ts, date, plan_id, event_type, condition_id, label, price, shares) — 30 天保留
