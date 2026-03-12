@@ -1714,3 +1714,130 @@ class TestT3EntryTimeZeroGuard:
         # Still in min_hold window → no sell
         assert "HK00700" in pm.positions
         engine._mapper.process_signal.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# KlineProvider tests
+# ---------------------------------------------------------------------------
+
+
+class TestKlineProvider:
+    """Tests for kline_provider abstraction."""
+
+    def test_detect_market(self):
+        from .kline_provider import detect_market
+        assert detect_market("HK09988") == "HK"
+        assert detect_market("HK00700") == "HK"
+        assert detect_market("000792") == "A"
+        assert detect_market("688135") == "A"
+        assert detect_market("301308") == "A"
+
+    def test_raw_code(self):
+        from .kline_provider import _raw_code
+        assert _raw_code("HK09988") == "09988"
+        assert _raw_code("KR005930") == "005930"
+        assert _raw_code("000792") == "000792"
+
+    def test_tencent_prefix(self):
+        from .kline_provider import _tencent_prefix
+        assert _tencent_prefix("HK09988") == "hk"
+        assert _tencent_prefix("600036") == "sh"
+        assert _tencent_prefix("000792") == "sz"
+        assert _tencent_prefix("300260") == "sz"
+        assert _tencent_prefix("688135") == "sh"
+        assert _tencent_prefix("512800") == "sh"  # ETF
+
+    def test_tencent_provider_returns_dataframe(self):
+        """TencentKlineProvider returns DataFrame with correct columns."""
+        from .kline_provider import TencentKlineProvider
+        p = TencentKlineProvider()
+        df = p.fetch_daily("000792", days=5)
+        # May fail if network unavailable; skip gracefully
+        if df is None:
+            pytest.skip("Tencent API unavailable")
+        assert list(df.columns) == [
+            "date", "open", "high", "low", "close", "volume", "change_pct"
+        ]
+        assert len(df) > 0
+        assert df["close"].dtype in ("float64", "float32", "object")
+
+    def test_sqlite_provider_reads_cache(self):
+        """SqliteKlineProvider reads from daily_kline table."""
+        from .kline_provider import SqliteKlineProvider
+        p = SqliteKlineProvider()
+        df = p.fetch_daily("000792", days=30)
+        if df is None:
+            pytest.skip("No cached kline data for 000792")
+        assert "close" in df.columns
+        assert len(df) > 0
+
+    def test_composite_fallback(self):
+        """CompositeKlineProvider falls back when first provider returns None."""
+        from .kline_provider import KlineProvider, CompositeKlineProvider
+        import pandas as pd
+
+        class FailProvider(KlineProvider):
+            @property
+            def name(self):
+                return "fail"
+            def fetch_daily(self, code, start=None, end=None, days=120):
+                return None
+
+        class OkProvider(KlineProvider):
+            @property
+            def name(self):
+                return "ok"
+            def fetch_daily(self, code, start=None, end=None, days=120):
+                return pd.DataFrame(
+                    [{"date": "2026-01-01", "open": 10, "high": 11,
+                      "low": 9, "close": 10.5, "volume": 1000, "change_pct": 1.0}]
+                )
+
+        comp = CompositeKlineProvider([FailProvider(), OkProvider()])
+        df = comp.fetch_daily("TEST")
+        assert df is not None
+        assert len(df) == 1
+        assert df.iloc[0]["close"] == 10.5
+
+    def test_composite_all_fail(self):
+        """CompositeKlineProvider returns None when all providers fail."""
+        from .kline_provider import KlineProvider, CompositeKlineProvider
+
+        class FailProvider(KlineProvider):
+            @property
+            def name(self):
+                return "fail"
+            def fetch_daily(self, code, start=None, end=None, days=120):
+                return None
+
+        comp = CompositeKlineProvider([FailProvider(), FailProvider()])
+        df = comp.fetch_daily("TEST")
+        assert df is None
+
+    def test_get_provider_auto(self):
+        """get_provider auto-detects market from code."""
+        from .kline_provider import get_provider
+        p_a = get_provider(market="auto", code="000792")
+        p_hk = get_provider(market="auto", code="HK09988")
+        assert "akshare" in p_a.name
+        assert "futu" in p_hk.name
+
+    def test_futu_provider_unavailable_fast_skip(self):
+        """FutuKlineProvider skips quickly when OpenD not running."""
+        from .kline_provider import FutuKlineProvider
+        import time
+        # Use a port that's definitely not listening
+        futu = FutuKlineProvider.__new__(FutuKlineProvider)
+        futu._ctx = None
+        futu._unavailable = True  # simulate already-detected unavailable
+        t0 = time.time()
+        assert futu.is_available() is False
+        assert time.time() - t0 < 0.1  # must be instant
+
+    def test_futu_to_futu_code(self):
+        """FutuKlineProvider code conversion."""
+        from .kline_provider import FutuKlineProvider
+        assert FutuKlineProvider._to_futu_code("HK09988") == "HK.09988"
+        assert FutuKlineProvider._to_futu_code("600036") == "SH.600036"
+        assert FutuKlineProvider._to_futu_code("000792") == "SZ.000792"
+        assert FutuKlineProvider._to_futu_code("300260") == "SZ.300260"

@@ -1219,8 +1219,8 @@
           "consecutive_days": null,
           "trailing": null,
           "label": "主力成本区+MA20",
-          "triggered": false,
-          "triggered_at": null
+          "triggered": true,
+          "triggered_at": "2026-03-16T09:26:22.104382"
         },
         {
           "id": "buy3",
@@ -1427,8 +1427,8 @@
             "macd_golden_cross": true
           },
           "label": "MACD金叉 — 趋势转多信号",
-          "triggered": false,
-          "triggered_at": null
+          "triggered": true,
+          "triggered_at": "2026-03-16T09:26:54.366075"
         },
         {
           "id": "ind_bull_divergence",
