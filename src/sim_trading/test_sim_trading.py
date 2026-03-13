@@ -1717,6 +1717,136 @@ class TestT3EntryTimeZeroGuard:
 
 
 # ---------------------------------------------------------------------------
+# FutuPositionSync preserves risk params (SL/TP/entry_time bug regression)
+# ---------------------------------------------------------------------------
+
+
+class TestSyncLiveStatePreservesRiskParams:
+    """Regression: futu_position_sync.sync_live_state was overwriting
+    stop_loss/take_profit/entry_time with 0/None every tick, destroying
+    values set by dip-buy or RT engine open_position.
+    """
+
+    def _setup_db(self):
+        """Create in-memory DB with live_state table."""
+        from .db import _db_path_override
+        import src.sim_trading.db as db_mod
+        # Use in-memory DB for test
+        old = db_mod._db_path_override
+        uri = f"file:test_sync_{id(self)}?mode=memory&cache=shared"
+        db_mod._db_path_override = uri
+        from .db import init_db, get_connection
+        init_db()
+        return old, uri
+
+    def _teardown_db(self, old):
+        import src.sim_trading.db as db_mod
+        db_mod._db_path_override = old
+
+    def test_sync_preserves_existing_sl_tp(self):
+        """sync_live_state must keep SL/TP/entry_time set by RT engine."""
+        import src.sim_trading.db as db_mod
+        from .db import get_connection, init_db
+        import os
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp.close()
+        old = db_mod._db_path_override
+        db_mod._db_path_override = tmp.name
+        try:
+            init_db()
+            conn = get_connection()
+
+            # Pre-seed live_state with dip-buy position (SL=12.87, TP=43.06)
+            conn.execute(
+                """INSERT INTO live_state
+                   (code, name, entry_price, quantity, current_price, entry_time, entry_date,
+                    stop_loss, take_profit, max_hold_days, entry_strategy, confidence,
+                    trigger_signals, unrealized_pnl, pnl_pct, daily_score,
+                    buy_cost_per_share, atr_at_entry, last_updated)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                ("HK07709", "test", 26.96, 4400, 27.0, 1710000000000, "2026-03-13",
+                 12.87, 43.06, 30, "dip_buy", 0.38,
+                 "[]", 176.0, 0.0015, 54, 0.001, 4.7, 1710000000000),
+            )
+            conn.commit()
+            conn.close()
+
+            # Mock Futu adapter
+            adapter = MagicMock()
+            fp = MagicMock()
+            fp.name = "test_stock"
+            fp.avg_price = 26.96
+            fp.quantity = 4400
+            fp.market_val = 26.96 * 4400
+            fp.unrealized_pnl = 176.0
+            adapter.get_positions.return_value = {"HK07709": fp}
+
+            from .futu_position_sync import FutuPositionSync
+            sync = FutuPositionSync(adapter)
+            sync.sync_live_state({"HK07709": 54})
+
+            # Verify SL/TP preserved
+            conn = get_connection()
+            row = conn.execute(
+                "SELECT stop_loss, take_profit, entry_time, entry_date, "
+                "entry_strategy, atr_at_entry FROM live_state WHERE code = ?",
+                ("HK07709",),
+            ).fetchone()
+            conn.close()
+
+            assert row["stop_loss"] == 12.87, f"SL was overwritten to {row['stop_loss']}"
+            assert row["take_profit"] == 43.06, f"TP was overwritten to {row['take_profit']}"
+            assert row["entry_time"] == 1710000000000, "entry_time was overwritten"
+            assert row["entry_date"] == "2026-03-13", "entry_date was overwritten"
+            assert row["entry_strategy"] == "dip_buy", "strategy was overwritten"
+            assert row["atr_at_entry"] == 4.7, "atr_at_entry was overwritten"
+        finally:
+            db_mod._db_path_override = old
+            os.unlink(tmp.name)
+
+    def test_sync_new_position_gets_defaults(self):
+        """New position not in live_state gets default SL=0."""
+        import src.sim_trading.db as db_mod
+        from .db import get_connection, init_db
+        import os
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp.close()
+        old = db_mod._db_path_override
+        db_mod._db_path_override = tmp.name
+        try:
+            init_db()
+
+            adapter = MagicMock()
+            fp = MagicMock()
+            fp.name = "new_stock"
+            fp.avg_price = 100.0
+            fp.quantity = 200
+            fp.market_val = 20000.0
+            fp.unrealized_pnl = 0.0
+            adapter.get_positions.return_value = {"HK00700": fp}
+
+            from .futu_position_sync import FutuPositionSync
+            sync = FutuPositionSync(adapter)
+            sync.sync_live_state({})
+
+            conn = get_connection()
+            row = conn.execute(
+                "SELECT stop_loss, take_profit, entry_strategy FROM live_state WHERE code = ?",
+                ("HK00700",),
+            ).fetchone()
+            conn.close()
+
+            assert row["stop_loss"] == 0, "New position should have SL=0"
+            assert row["take_profit"] is None, "New position should have TP=None"
+            assert row["entry_strategy"] == "futu_sim"
+        finally:
+            db_mod._db_path_override = old
+            os.unlink(tmp.name)
+
+
+# ---------------------------------------------------------------------------
 # KlineProvider tests
 # ---------------------------------------------------------------------------
 

@@ -61,23 +61,53 @@ class FutuPositionSync:
                     if fp.avg_price > 0 and fp.quantity > 0 else 0
                 )
 
+                # Preserve existing risk params set by dip-buy or RT engine
+                existing = conn.execute(
+                    "SELECT entry_time, entry_date, stop_loss, take_profit, "
+                    "max_hold_days, entry_strategy, confidence, trigger_signals, "
+                    "buy_cost_per_share, atr_at_entry FROM live_state WHERE code = ?",
+                    (code,),
+                ).fetchone()
+                if existing and existing["entry_time"]:
+                    entry_time = existing["entry_time"]
+                    entry_date = existing["entry_date"] or ""
+                    sl = existing["stop_loss"] or 0
+                    tp = existing["take_profit"]
+                    max_hold = existing["max_hold_days"] or 10
+                    strategy = existing["entry_strategy"] or "futu_sim"
+                    confidence = existing["confidence"] or 0.0
+                    signals = existing["trigger_signals"] or "[]"
+                    bps = existing["buy_cost_per_share"] or 0
+                    atr_entry = existing["atr_at_entry"] or 0
+                else:
+                    entry_time = 0
+                    entry_date = ""
+                    sl = 0
+                    tp = None
+                    max_hold = 10
+                    strategy = "futu_sim"
+                    confidence = 0.0
+                    signals = "[]"
+                    bps = 0
+                    atr_entry = 0
+
                 conn.execute(
                     """INSERT OR REPLACE INTO live_state
                        (code, name, entry_price, quantity, current_price, entry_time, entry_date,
                         stop_loss, take_profit, max_hold_days, entry_strategy, confidence,
                         trigger_signals, unrealized_pnl, pnl_pct, daily_score,
-                        buy_cost_per_share, last_updated)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        buy_cost_per_share, atr_at_entry, last_updated)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         code, fp.name,
                         fp.avg_price, fp.quantity,
                         round(fp.market_val / fp.quantity, 4) if fp.quantity > 0 else 0,
-                        0, "",  # entry_time/date not available from Futu positions
-                        0, None, 10, "futu_sim", 0.0,
-                        "[]",
+                        entry_time, entry_date,
+                        sl, tp, max_hold, strategy, confidence,
+                        signals,
                         round(unrealized, 2), round(pnl_pct, 6),
                         scores.get(code, 0),
-                        0, now_ts,
+                        bps, atr_entry, now_ts,
                     ),
                 )
 
