@@ -132,24 +132,25 @@ def is_any_market_open(has_hk: bool = False) -> bool:
     """Check if any watched market is currently in trading hours.
 
     A-shares: trading day 09:15-11:30, 13:00-15:00
-    HK:       trading day 09:15-12:00, 13:00-16:00 (when has_hk=True)
+        09:15-09:25 开盘集合竞价, 09:30-11:30/13:00-14:57 连续竞价, 14:57-15:00 收盘集合竞价
+    HK:       trading day 09:00-12:00, 13:00-16:10 (when has_hk=True)
+        09:00-09:30 开市前时段(竞价), 09:30-12:00/13:00-16:00 连续交易, 16:00-16:10 收市竞价
 
     Uses Futu trading calendar for accurate holiday detection,
     falls back to weekday check if Futu is unavailable.
-    Uses 09:15 instead of 09:30 to catch pre-open auction moves.
     """
     from src.tools.trading_calendar import is_trading_day
 
     now = datetime.now()
     t = now.hour * 100 + now.minute
 
-    # A-share session
+    # A-share session (09:15 开盘集合竞价 ~ 15:00 收盘集合竞价结束)
     if (915 <= t <= 1130) or (1300 <= t <= 1500):
         if is_trading_day("CN"):
             return True
 
-    # HK extended session
-    if has_hk and ((915 <= t <= 1200) or (1300 <= t <= 1600)):
+    # HK session (09:00 开市前时段 ~ 16:10 收市竞价结束)
+    if has_hk and ((900 <= t <= 1200) or (1300 <= t <= 1610)):
         if is_trading_day("HK"):
             return True
 
@@ -678,7 +679,7 @@ class DataFreshnessWatchdog:
         if market == "A":
             return ((930 <= t <= 1130) or (1300 <= t <= 1500)) and is_trading_day("CN")
         if market == "HK" and has_hk:
-            return ((930 <= t <= 1200) or (1300 <= t <= 1600)) and is_trading_day("HK")
+            return ((930 <= t <= 1200) or (1300 <= t <= 1610)) and is_trading_day("HK")
         return False
 
     def _check_price_freeze(self, market: dict, has_hk: bool, now: float) -> list[dict]:

@@ -47,6 +47,7 @@ const KIND_LABELS: Record<string, { label: string; color: string }> = {
   STALE: { label: "数据监控", color: "#ff6b6b" },
   DRIFT: { label: "涨跌追踪", color: "#8be9fd" },
   MAINLINE: { label: "主线行情", color: "#ff5555" },
+  trade_plan: { label: "交易计划", color: D.purple },
 };
 
 // ── Alert 解析器类型 ──────────────────────────────────────────────────────────
@@ -181,6 +182,37 @@ function parsePortfolio(_e: AlertEvent, d: string, _sym: string, _shortCode: str
   return { stockName: "组合", stockCode: "", signal: "组合P&L", signalColor: D.purple, price: "", detail: d };
 }
 
+function parseTradePlan(e: AlertEvent, d: string, _sym: string, shortCode: string): ParsedAlert | null {
+  // 两种格式:
+  // 1. "📋 五一视界 回踩分批建仓 | 主力成本区+MA20 | 买入 200 股 @ 55.00" (新格式)
+  // 2. "HK06651 五一视界 跌幅 11.6%" (旧格式 fallback)
+  let planName = "", label = "", priceStr = "";
+  if (d.includes("📋")) {
+    // 新格式
+    const parts = d.replace(/^📋\s*/, "").split(/\s*\|\s*/);
+    planName = parts[0] || "";
+    label = parts[1] || "";
+    const action = parts[2] || "";
+    const priceMatch = action.match(/@\s*([\d.]+)/);
+    priceStr = priceMatch ? priceMatch[1] : "";
+  } else {
+    // 旧格式 fallback: "HK06651 五一视界 跌幅 11.6%"
+    const priceMatch = d.match(/现价([\d.]+)/);
+    priceStr = priceMatch ? priceMatch[1] : "";
+    // 提取股票名 (跳过 code)
+    const parts = d.split(/\s+/);
+    planName = parts.length > 1 ? parts.slice(1).join(" ").split(/\s/)[0] : "";
+  }
+  return {
+    stockName: planName.split(/\s+/)[0] || "",
+    stockCode: shortCode,
+    signal: label || "交易计划",
+    signalColor: D.purple,
+    price: priceStr,
+    detail: d,
+  };
+}
+
 // ── 注册表：新增形态只改这里 ─────────────────────────────────────────────────
 const KIND_PARSERS: Record<string, AlertParser> = {
   l2_strategy: parseL2Strategy,
@@ -192,6 +224,7 @@ const KIND_PARSERS: Record<string, AlertParser> = {
   MAINLINE:    parseMainline,
   STALE:       parseStale,
   portfolio:   parsePortfolio,
+  trade_plan:  parseTradePlan,
 };
 
 // ── 统一入口 ──────────────────────────────────────────────────────────────────
@@ -482,29 +515,44 @@ function GroupedRow({ group, expanded, onToggle }: { group: StockGroup; expanded
         <span style={{ color: D.fg, flexShrink: 0, width: 90, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {group.stockName}
         </span>
-        {/* Signal chips */}
-        <span style={{ marginLeft: 8, flex: 1, display: "flex", flexWrap: "wrap", gap: 4, overflow: "hidden" }}>
-          {group.signals.map((s) => (
+        {/* Price + change% */}
+        {group.price && (
+          <span style={{ flexShrink: 0, width: 110, display: "flex", gap: 4, fontSize: 11 }}>
+            <span style={{ color: D.fg }}>{group.price}</span>
+            {group.changePct !== 0 && (
+              <span style={{ color: group.changePct > 0 ? D.red : D.green, fontWeight: 600 }}>
+                {group.changePct > 0 ? "+" : ""}{group.changePct.toFixed(1)}%
+              </span>
+            )}
+          </span>
+        )}
+        {/* Signal: 只显示最新信号，去掉聚合噪音 */}
+        <span style={{ marginLeft: 8, flex: 1, display: "flex", gap: 4, overflow: "hidden" }}>
+          {group.signals[0] && (
             <span
-              key={s.signal}
+              key={group.signals[0].signal}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 3,
-                background: s.color + "22",
-                color: s.color,
+                background: group.signals[0].color + "22",
+                color: group.signals[0].color,
                 padding: "1px 6px",
                 borderRadius: 3,
                 fontSize: 10,
                 fontWeight: 600,
                 whiteSpace: "nowrap",
-                border: `1px solid ${s.color}44`,
+                border: `1px solid ${group.signals[0].color}44`,
               }}
             >
-              {s.signal}
-              {s.count > 1 && <span style={{ opacity: 0.6, fontSize: 9 }}>×{s.count}</span>}
+              {group.signals[0].signal}
             </span>
-          ))}
+          )}
+          {group.signals.length > 1 && (
+            <span style={{ color: D.comment, fontSize: 10, flexShrink: 0 }}>
+              +{group.signals.length - 1}
+            </span>
+          )}
         </span>
         {/* Total count */}
         <span style={{ color: D.comment, flexShrink: 0, fontSize: 10, marginLeft: 4 }}>
@@ -588,8 +636,19 @@ export default function AlertsPage() {
     return { l1Count: l1, l2Count: l2, l3Count: l3 };
   }, [events]);
 
-  // 按时间倒序（最新在前），默认隐藏 L3
-  const filtered = useMemo(() => showL3 ? events : events.filter((e) => (e.level ?? 2) <= 2), [events, showL3]);
+  // 高价值信号 kinds — 始终显示（不受 L3 过滤影响）
+  const HIGH_VALUE_KINDS = new Set(["trade_plan", "MAINLINE", "big_move", "threshold", "gap_fade", "gap_recover"]);
+  // 按时间倒序（最新在前），默认隐藏 L3 + 低价值 kinds
+  const filtered = useMemo(() => {
+    return events.filter((e) => {
+      // L1 始终显示
+      if ((e.level ?? 2) <= 1) return true;
+      // 高价值 kinds 始终显示
+      if (HIGH_VALUE_KINDS.has(e.kind)) return true;
+      // L2 + L3 需要 showL3
+      return showL3;
+    });
+  }, [events, showL3]);
   const sorted = useMemo(() => [...filtered].reverse(), [filtered]);
   const groups = useMemo(() => buildGroups(filtered), [filtered]);
 
