@@ -984,5 +984,240 @@ class TestSnapshotIndicators(unittest.TestCase):
         self.assertIsNone(snap["TEST"]["vol_ratio"])
 
 
+# ══════════════════════════════════════════
+# Group: TradePlanEngine.check() — observation orders (shares=0)
+# ══════════════════════════════════════════
+
+class TestObservationOrderTrigger(unittest.TestCase):
+    """Observation orders (shares=0) should trigger alerts and write to alert_events."""
+
+    def _make_engine_with_plans(self, plans_dict):
+        """Create a TradePlanEngine with injected plans (no file I/O)."""
+        from src.tools.stock_notifier import TradePlanEngine
+        engine = TradePlanEngine()
+        engine._plans = plans_dict
+        engine._reload_plans = lambda: None  # skip file reload
+        engine._save_plans = lambda: None    # skip file write
+        engine._write_plan_event = MagicMock()  # capture calls
+        return engine
+
+    def _observation_plan(self, symbol="603929", price_target=120, extra_orders=None):
+        """Build a plan with observation orders (shares=0)."""
+        orders = [
+            {"id": "watch_100", "side": "buy", "op": "<=", "price": price_target,
+             "shares": 0, "label": "跌至120前平台", "triggered": False, "triggered_at": None},
+        ]
+        if extra_orders:
+            orders.extend(extra_orders)
+        return {
+            "name": "亚翔集成 观察计划",
+            "symbol": symbol,
+            "status": "active",
+            "orders": orders,
+        }
+
+    def _quotes(self, symbol="603929", price=105.0, change_pct=2.0, name="亚翔集成"):
+        return {symbol: {"price": price, "change_pct": change_pct, "name": name, "amount": 5e8}}
+
+    # ── Basic trigger ──
+
+    def test_observation_order_triggers_when_price_met(self):
+        """shares=0 order should trigger and return alert when price <= target."""
+        plan = self._observation_plan(price_target=120)
+        engine = self._make_engine_with_plans({"603929_entry": plan})
+        alerts = engine.check(self._quotes(price=105))
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(alerts[0]["symbol"], "603929")
+        self.assertEqual(alerts[0]["_kind"], "trade_plan")
+        self.assertEqual(alerts[0]["_level"], 1)
+
+    def test_observation_order_marks_triggered(self):
+        """After trigger, order.triggered should be True."""
+        plan = self._observation_plan(price_target=120)
+        engine = self._make_engine_with_plans({"603929_entry": plan})
+        engine.check(self._quotes(price=105))
+        self.assertTrue(plan["orders"][0]["triggered"])
+        self.assertIsNotNone(plan["orders"][0]["triggered_at"])
+
+    def test_observation_order_writes_plan_event(self):
+        """Triggered observation order should write to trade_plan_events."""
+        plan = self._observation_plan(price_target=120)
+        engine = self._make_engine_with_plans({"603929_entry": plan})
+        engine.check(self._quotes(price=105))
+        engine._write_plan_event.assert_called_once_with(
+            "603929_entry", "buy_triggered", "watch_100", "跌至120前平台", 105.0, 0)
+
+    def test_observation_order_no_trigger_when_price_above_target(self):
+        """shares=0 order should NOT trigger when price > target."""
+        plan = self._observation_plan(price_target=120)
+        engine = self._make_engine_with_plans({"603929_entry": plan})
+        alerts = engine.check(self._quotes(price=140))
+        self.assertEqual(len(alerts), 0)
+        self.assertFalse(plan["orders"][0]["triggered"])
+
+    def test_already_triggered_observation_order_skipped(self):
+        """Already triggered order should not fire again."""
+        plan = self._observation_plan(price_target=120)
+        plan["orders"][0]["triggered"] = True
+        engine = self._make_engine_with_plans({"603929_entry": plan})
+        alerts = engine.check(self._quotes(price=105))
+        self.assertEqual(len(alerts), 0)
+
+    # ── Alert dict content ──
+
+    def test_observation_alert_message_contains_price(self):
+        """Alert message should include '@ price' even for shares=0."""
+        plan = self._observation_plan(price_target=120)
+        engine = self._make_engine_with_plans({"603929_entry": plan})
+        alerts = engine.check(self._quotes(price=105))
+        self.assertIn("@ 105.00", alerts[0]["message"])
+
+    def test_observation_alert_display_contains_plan_name(self):
+        """Alert display should include plan name for readability."""
+        plan = self._observation_plan(price_target=120)
+        engine = self._make_engine_with_plans({"603929_entry": plan})
+        alerts = engine.check(self._quotes(price=105))
+        self.assertIn("亚翔集成 观察计划", alerts[0]["display"])
+
+    def test_observation_alert_message_shows_zero_shares(self):
+        """Buy prefix should show '买入 0股' for observation orders."""
+        plan = self._observation_plan(price_target=120)
+        engine = self._make_engine_with_plans({"603929_entry": plan})
+        alerts = engine.check(self._quotes(price=105))
+        self.assertIn("买入 0股", alerts[0]["message"])
+
+    # ── Indicator observation orders ──
+
+    def test_indicator_observation_triggers_with_rsi_oversold(self):
+        """Indicator observation order triggers when RSI < threshold."""
+        plan = self._observation_plan()
+        plan["orders"] = [{
+            "id": "ind_rsi", "side": "buy", "op": "<=", "price": 999,
+            "shares": 0, "label": "RSI超卖", "triggered": False,
+            "indicators": {"rsi_below": 30},
+        }]
+        engine = self._make_engine_with_plans({"603929_entry": plan})
+        # Inject indicators via quotes (simulating daemon/cache)
+        quotes = self._quotes(price=105)
+        quotes["603929"]["indicators"] = {"rsi": 25.0}
+        alerts = engine.check(quotes)
+        self.assertEqual(len(alerts), 1)
+        self.assertIn("RSI超卖", alerts[0]["message"])
+
+    def test_indicator_observation_no_trigger_when_rsi_above(self):
+        """Indicator observation order does NOT trigger when RSI > threshold."""
+        plan = self._observation_plan()
+        plan["orders"] = [{
+            "id": "ind_rsi", "side": "buy", "op": "<=", "price": 999,
+            "shares": 0, "label": "RSI超卖", "triggered": False,
+            "indicators": {"rsi_below": 30},
+        }]
+        engine = self._make_engine_with_plans({"603929_entry": plan})
+        quotes = self._quotes(price=105)
+        quotes["603929"]["indicators"] = {"rsi": 55.0}
+        alerts = engine.check(quotes)
+        self.assertEqual(len(alerts), 0)
+
+    # ── Multiple observation orders in one plan ──
+
+    def test_multiple_observation_orders_trigger_independently(self):
+        """Two observation orders that both meet conditions should both trigger."""
+        plan = self._observation_plan(price_target=120, extra_orders=[
+            {"id": "watch_200", "side": "buy", "op": "<=", "price": 110,
+             "shares": 0, "label": "深度超卖区", "triggered": False, "triggered_at": None},
+        ])
+        engine = self._make_engine_with_plans({"603929_entry": plan})
+        alerts = engine.check(self._quotes(price=105))
+        self.assertEqual(len(alerts), 2)
+        triggered_ids = {a["_condition_id"] for a in alerts}
+        self.assertEqual(triggered_ids, {"watch_100", "watch_200"})
+
+    def test_partial_trigger_one_met_one_not(self):
+        """Only the order whose condition is met should trigger."""
+        plan = self._observation_plan(price_target=120, extra_orders=[
+            {"id": "watch_deep", "side": "buy", "op": "<=", "price": 80,
+             "shares": 0, "label": "极端超卖", "triggered": False, "triggered_at": None},
+        ])
+        engine = self._make_engine_with_plans({"603929_entry": plan})
+        alerts = engine.check(self._quotes(price=105))
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(alerts[0]["_condition_id"], "watch_100")
+
+    # ── write_alert_events integration ──
+
+    def test_write_alert_events_preserves_trade_plan_display(self):
+        """write_alert_events should use _make_alert's display for trade_plan kind,
+        not the generic direction+price format."""
+        import tempfile, os
+        from src.tools.stock_notifier import write_alert_events
+        alert = {
+            "symbol": "603929",
+            "title": "亚翔集成 RSI超卖",
+            "message": "[PLAN] 亚翔集成 RSI超卖 @ 105.00",
+            "display": "📋 亚翔集成 观察计划 | RSI超卖 | @ 105.00",
+            "_kind": "trade_plan",
+            "_level": 1,
+            "_change_pct": 2.0,
+            "_stealth": "603929 RSI超卖 @ 105.00",
+        }
+        # Use temp file DB (write_alert_events closes conn, so can't use :memory:)
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp.close()
+        try:
+            setup_conn = sqlite3.connect(tmp.name)
+            setup_conn.execute(
+                "CREATE TABLE alert_events "
+                "(ts INTEGER, date TEXT, time TEXT, symbol TEXT, kind TEXT, "
+                "level INTEGER, message TEXT, display TEXT, change_pct REAL, "
+                "UNIQUE(ts, symbol, message))"
+            )
+            setup_conn.commit()
+            setup_conn.close()
+
+            def _fake_conn():
+                return sqlite3.connect(tmp.name)
+
+            with patch("src.sim_trading.db.get_connection", side_effect=_fake_conn):
+                write_alert_events([alert])
+
+            verify_conn = sqlite3.connect(tmp.name)
+            rows = verify_conn.execute("SELECT kind, display FROM alert_events").fetchall()
+            verify_conn.close()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0][0], "trade_plan")
+            # display should contain the plan-specific text, not generic "涨幅/跌幅"
+            self.assertIn("观察计划", rows[0][1])
+        finally:
+            os.unlink(tmp.name)
+
+    # ── Inactive plan skipped ──
+
+    def test_inactive_plan_not_checked(self):
+        """Paused plan should not trigger any orders."""
+        plan = self._observation_plan(price_target=120)
+        plan["status"] = "paused"
+        engine = self._make_engine_with_plans({"603929_entry": plan})
+        alerts = engine.check(self._quotes(price=105))
+        self.assertEqual(len(alerts), 0)
+
+    # ── Mixed real + observation orders ──
+
+    def test_real_and_observation_orders_both_trigger(self):
+        """Plan with both real (shares>0) and observation (shares=0) orders."""
+        plan = self._observation_plan(price_target=120, extra_orders=[
+            {"id": "buy_real", "side": "buy", "op": "<=", "price": 110,
+             "shares": 1000, "label": "实际买入", "triggered": False, "triggered_at": None},
+        ])
+        engine = self._make_engine_with_plans({"603929_entry": plan})
+        alerts = engine.check(self._quotes(price=105))
+        self.assertEqual(len(alerts), 2)
+        shares_list = sorted([a.get("_event_type") for a in alerts])
+        self.assertEqual(shares_list, ["buy_triggered", "buy_triggered"])
+        # One alert should mention 1000股, the other 0股
+        messages = " ".join(a["message"] for a in alerts)
+        self.assertIn("1000股", messages)
+        self.assertIn("0股", messages)
+
+
 if __name__ == "__main__":
     unittest.main()

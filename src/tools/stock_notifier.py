@@ -1112,6 +1112,8 @@ def write_alert_events(alerts: list[dict]):
             display = a.get("display", a.get("message", ""))
         elif kind == "MAINLINE":
             display = a.get("display", a.get("message", ""))
+        elif kind == "trade_plan":
+            display = a.get("display", a.get("message", ""))
         else:
             direction = "涨幅" if change_pct > 0 else "跌幅"
             p = a.get("_price", 0)
