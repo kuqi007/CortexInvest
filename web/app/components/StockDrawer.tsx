@@ -967,6 +967,48 @@ export function StockDrawer({
                 </span>
                 dip 回调监控
               </span>
+              {/* demote: holding → watching */}
+              {service?.type === "holding" && (
+                <button
+                  onClick={async () => {
+                    if (!symbol) return;
+                    if (!window.confirm(`将 ${symbol}（${service?.name ?? ""}）从持仓降为自选？`)) return;
+                    try {
+                      const res = await fetch("/api/config", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ action: "update", code: symbol, data: { type: "watching" } }),
+                      });
+                      const json = await res.json();
+                      if (res.ok && json.success) {
+                        onRefreshMetrics?.();
+                        onClose();
+                      } else {
+                        setToast({ msg: json.message || "操作失败", type: "err" });
+                        setTimeout(() => setToast(null), 2500);
+                      }
+                    } catch {
+                      setToast({ msg: "操作失败", type: "err" });
+                      setTimeout(() => setToast(null), 2500);
+                    }
+                  }}
+                  title="从持仓降为自选"
+                  style={{
+                    background: "transparent",
+                    border: `1px solid ${D.orange}`,
+                    color: D.orange,
+                    cursor: "pointer",
+                    fontSize: 11,
+                    padding: "2px 10px",
+                    borderRadius: 3,
+                    fontFamily: "JetBrains Mono, monospace",
+                    userSelect: "none",
+                    opacity: 0.7,
+                  }}
+                >
+                  转自选
+                </button>
+              )}
               {/* delete */}
               <button
                 onClick={async () => {

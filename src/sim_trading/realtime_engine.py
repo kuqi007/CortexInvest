@@ -378,6 +378,7 @@ class RealtimeSimEngine:
                     "change": float(svc.get("change", 0) or 0),
                     "open": float(svc.get("open", 0) or 0),
                     "prevClose": float(svc.get("prevClose", 0) or 0),
+                    "name": svc.get("name", ""),
                 }
         return result
 
@@ -761,12 +762,14 @@ class RealtimeSimEngine:
         return codes
 
     def _notify_dip_buy(self, code: str, drawdown_pct: float, price: float,
-                        score: int, high_20d: float, date: str):
+                        score: int, high_20d: float, date: str,
+                        name: str = ""):
         """Send macOS notification + write alert_event for dip_buy opportunity."""
         now_ts = int(time.time() * 1000)
+        label = name or code
 
         # macOS notification (stealth title, audible)
-        msg = f"{code} dd={drawdown_pct:+.1f}% @{price:.2f}"
+        msg = f"{label} 回撤{abs(drawdown_pct):.1f}% @{price:.2f}"
         titles = ["CI Pipeline Alert", "Deploy Monitor", "SRE Notification", "Build Status"]
         title = titles[now_ts % len(titles)]
         try:
@@ -780,7 +783,7 @@ class RealtimeSimEngine:
 
         # Write to alert_events table
         display = (
-            f"[DIP_BUY] {code} 距20日高点({high_20d:.2f})回撤{abs(drawdown_pct):.1f}%, "
+            f"[DIP_BUY] {code} {name} 距20日高点({high_20d:.2f})回撤{abs(drawdown_pct):.1f}%, "
             f"现价{price:.2f}, 评分{score}, 建议关注抄底"
         )
         try:
@@ -880,7 +883,8 @@ class RealtimeSimEngine:
                 continue
 
             # 1. Always notify (not subject to position limits)
-            self._notify_dip_buy(code, dd, price, score_result["total"], high_nd, date)
+            stock_name = market.get(code, {}).get("name", "")
+            self._notify_dip_buy(code, dd, price, score_result["total"], high_nd, date, name=stock_name)
             self._dip_buy_notified_today.add(code)
 
             # 2. Sim trade (subject to limits)
