@@ -7,6 +7,7 @@ import { useLogEntries } from "../hooks/useCommand";
 import { useTradePlans } from "../hooks/useTradePlans";
 import type { Service } from "../types";
 import { tagColor } from "../lib/tag-utils";
+import { useTradingStatus } from "../lib/trading-hours";
 import { D } from "../theme";
 import { StockDrawer } from "../components/StockDrawer";
 import { AppTabs } from "../components/AppTabs";
@@ -42,6 +43,7 @@ export default function WatchingPage() {
 
 function WatchingContent() {
   const { services, ts, tick, loading, settings, fetchError, alertEvents, refresh } = useMetrics();
+  const { status: tradingStatus } = useTradingStatus();
   const searchParams = useSearchParams();
 
   function getDefaultTab(): MarketTab {
@@ -241,6 +243,8 @@ function WatchingContent() {
               <span>Every {pollMs / 1000}.0s: svc-monitor --watching</span>
               <span style={{ float: "right" }}>
                 {isStale && <span style={{ color: D.red, fontWeight: 500, marginRight: 8 }}>STALE</span>}
+                {tradingStatus?.trading ? "交易中" : "休市"}
+                {" | "}
                 devbox: <span style={{ color: isStale ? D.red : D.comment }}>{now}</span> &nbsp; refresh #{tick}
               </span>
             </div>

@@ -5,6 +5,7 @@ import { D } from "../theme";
 import { AppTabs } from "../components/AppTabs";
 import { AppTitleBar } from "../components/AppTitleBar";
 import { useMetrics } from "../providers/MetricsProvider";
+import { useTradingStatus } from "../lib/trading-hours";
 import type { AlertEvent } from "../types";
 
 interface DailySummary {
@@ -322,6 +323,8 @@ function TabBar({
   viewMode,
   onToggleView,
   groupCount,
+  services,
+  trading,
 }: {
   l1Count: number;
   l2Count: number;
@@ -332,6 +335,8 @@ function TabBar({
   viewMode: "grouped" | "detail";
   onToggleView: () => void;
   groupCount: number;
+  services?: { id: string }[];
+  trading?: boolean;
 }) {
   return (
     <AppTabs
@@ -339,6 +344,10 @@ function TabBar({
       rightSlot={(
         <span style={{ color: D.comment, fontSize: 11, marginLeft: 12, marginRight: 16, display: "flex", gap: 8, alignItems: "center" }}>
           <span style={{ color: D.fg }}>{new Date().toISOString().slice(0, 10)}</span>
+          <span style={{ color: D.comment }}>|</span>
+          <span style={{ color: trading ? D.green : D.comment }}>
+            {trading ? "交易中" : "休市"}
+          </span>
           <span style={{ color: D.comment }}>|</span>
           <span style={{ color: D.yellow }}>L1:{l1Count}</span>
           <span style={{ color: D.orange }}>L2:{l2Count}</span>
@@ -541,7 +550,8 @@ function GroupedRow({ group, expanded, onToggle }: { group: StockGroup; expanded
 }
 
 export default function AlertsPage() {
-  const { alertEvents: events, loading, fetchError } = useMetrics();
+  const { alertEvents: events, loading, fetchError, services } = useMetrics();
+  const { status: tradingStatus } = useTradingStatus();
   const [summary, setSummary] = useState<DailySummary | null>(null);
   const [summaryOpen, setSummaryOpen] = useState(true);
   const [showL3, setShowL3] = useState(false);
@@ -617,6 +627,8 @@ export default function AlertsPage() {
         viewMode={viewMode}
         onToggleView={() => setViewMode((v) => v === "grouped" ? "detail" : "grouped")}
         groupCount={groups.length}
+        services={services}
+        trading={tradingStatus?.trading}
       />
 
       {/* event list */}

@@ -13,6 +13,7 @@ import { StockDrawer } from "./components/StockDrawer";
 
 import type { Service } from "./types";
 import { tagColor } from "./lib/tag-utils";
+import { useTradingStatus } from "./lib/trading-hours";
 
 const DEFAULT_POLL_SEC = 30;
 
@@ -52,6 +53,7 @@ export default function Page() {
 
 function Home() {
   const { services, ts, tick, loading, settings, fetchError, alertEvents, marketTurnover, hkdCnyRate, refresh } = useMetrics();
+  const { status: tradingStatus } = useTradingStatus();
   // tab state: URL ?tab=A|HK, default by time (before 15:00 → A, after → HK)
   const searchParams = useSearchParams();
 
@@ -384,6 +386,8 @@ function Home() {
             {isStale && (
               <span style={{ color: D.red, fontWeight: 500, marginRight: 8 }}>STALE</span>
             )}
+            {tradingStatus?.trading ? "交易中" : "休市"}
+            {" | "}
             devbox: <span style={{ color: isStale ? D.red : D.comment }}>{now}</span> &nbsp; refresh #{tick}
           </span>
         </div>
