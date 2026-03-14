@@ -12,7 +12,9 @@ Usage:
 """
 
 import json
+import os
 import time
+import requests
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -35,6 +37,10 @@ ALERT_CONFIG_PATH = DATA_DIR / "alert_config.json"
 L2_SIGNALS_PATH = DATA_DIR / "l2_strategy_signals.json"
 DAILY_SUMMARY_PATH = DATA_DIR / "daily_summary.json"
 TRADE_PLANS_PATH = DATA_DIR / "trade_plans.json"
+MORNING_BRIEFING_PATH = DATA_DIR / "morning_briefing.json"
+
+# Rate limiting flag - set to True when API daily limit is reached
+_morning_api_rate_limited = False
 
 
 def _read_json(path: Path) -> dict | None:
@@ -43,6 +49,277 @@ def _read_json(path: Path) -> dict | None:
             return json.load(f)
     except Exception:
         return None
+
+
+# ── Morning Briefing Functions ──
+
+def _call_eastmoney_api(query: str) -> dict:
+    """调用东方财富 API 获取市场数据或新闻.
+
+    Returns:
+        Empty dict if API key not set or rate limited.
+    """
+    # Try to get API key from env or ~/.eastmoney_api
+    api_key = os.environ.get("EASTMONEY_APIKEY")
+    if not api_key:
+        api_file = os.path.expanduser("~/.eastmoney_api")
+        if os.path.exists(api_file):
+            with open(api_file) as f:
+                api_key = f.read().strip()
+
+    if not api_key:
+        logger.warning("EASTMONEY_APIKEY not set, skipping API call")
+        return {}
+
+    url = "https://mkapi2.dfcfs.com/finskillshub/api/claw/query"
+    headers = {
+        "Content-Type": "application/json",
+        "apikey": api_key,
+    }
+    try:
+        response = requests.post(
+            url,
+            json={"toolQuery": query},
+            headers=headers,
+            timeout=30,
+        )
+        response.raise_for_status()
+        result = response.json()
+
+        # Check for rate limit (status 113 = daily limit reached)
+        if result.get("status") == 113:
+            global _morning_api_rate_limited
+            _morning_api_rate_limited = True
+            logger.warning(f"API rate limit reached: {result.get('message')}")
+            return {"_rate_limited": True}
+
+        return result
+    except Exception as e:
+        logger.warning(f"Eastmoney API call failed for '{query}': {e}")
+        return {}
+
+
+def _call_news_search_api(query: str) -> dict:
+    """调用东方财富新闻搜索 API.
+
+    Returns:
+        Empty dict if API key not set or error.
+    """
+    api_key = os.environ.get("EASTMONEY_APIKEY")
+    if not api_key:
+        api_file = os.path.expanduser("~/.eastmoney_api")
+        if os.path.exists(api_file):
+            with open(api_file) as f:
+                api_key = f.read().strip()
+
+    if not api_key:
+        logger.warning("EASTMONEY_APIKEY not set, skipping news search")
+        return {}
+
+    url = "https://mkapi2.dfcfs.com/finskillshub/api/claw/news-search"
+    headers = {
+        "Content-Type": "application/json",
+        "apikey": api_key,
+    }
+    try:
+        response = requests.post(
+            url,
+            json={"query": query},
+            headers=headers,
+            timeout=30,
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        logger.warning(f"News search API call failed for '{query}': {e}")
+        return {}
+
+
+def _fetch_us_markets() -> dict:
+    """获取美股走势 (通过新闻搜索)."""
+    markets = {}
+
+    # Get today's date for fresh news
+    today = datetime.now()
+    date_str = today.strftime("%Y年%m月%d日")
+
+    # Search for overnight US market news with date
+    data = _call_news_search_api(f"{date_str} 隔夜美股 道琼斯 纳斯达克 标普500")
+    try:
+        # Parse news to extract market movements
+        # Look for headlines mentioning specific indices and their changes
+        inner_data = (data.get("data") or {}).get("data", {}) if isinstance(data.get("data"), dict) else {}
+        llm_response = inner_data.get("llmSearchResponse", {})
+        news_list = llm_response.get("data", [])
+
+        # Extract market info from news headlines
+        for item in news_list[:5]:
+            title = item.get("title", "")
+            content = item.get("content", "")
+
+            # Try to find Dow Jones, Nasdaq, S&P500 mentions
+            # Look for patterns like "道琼斯涨X%" or "纳斯达克跌X%"
+            import re
+            dow_match = re.search(r'道琼斯.*?([+-]?\d+\.?\d*)%', content)
+            nasdaq_match = re.search(r'纳斯达克.*?([+-]?\d+\.?\d*)%', content)
+            sp_match = re.search(r'标普.*?([+-]?\d+\.?\d*)%', content)
+
+            if dow_match and "dow" not in markets:
+                markets["dow"] = {"name": "道琼斯", "change_pct": round(float(dow_match.group(1)), 2)}
+            if nasdaq_match and "nasdaq" not in markets:
+                markets["nasdaq"] = {"name": "纳斯达克", "change_pct": round(float(nasdaq_match.group(1)), 2)}
+            if sp_match and "sp500" not in markets:
+                markets["sp500"] = {"name": "标普500", "change_pct": round(float(sp_match.group(1)), 2)}
+
+    except Exception as e:
+        logger.warning(f"Failed to parse US markets from news: {e}")
+
+    return markets
+
+
+def _fetch_asia_markets() -> dict:
+    """获取韩/日股市走势 (通过新闻搜索)."""
+    markets = {}
+
+    # Get today's date for fresh news
+    today = datetime.now()
+    date_str = today.strftime("%Y年%m月%d日")
+
+    # Search for Japan and Korea market news with date
+    data = _call_news_search_api(f"{date_str} 日本股市 日经225 韩国KOSPI 今日收盘")
+    try:
+        import re
+        inner_data = (data.get("data") or {}).get("data", {}) if isinstance(data.get("data"), dict) else {}
+        llm_response = inner_data.get("llmSearchResponse", {})
+        news_list = llm_response.get("data", [])
+
+        for item in news_list[:5]:
+            content = item.get("content", "")
+
+            # Look for Nikkei (日经) and KOSPI (韩国/综合) mentions
+            nikkei_match = re.search(r'日经.*?([+-]?\d+\.?\d*)%', content)
+            kospi_match = re.search(r'韩国.*?([+-]?\d+\.?\d*)%', content)
+
+            if nikkei_match and "nikkei" not in markets:
+                markets["nikkei"] = {"name": "日经225", "change_pct": round(float(nikkei_match.group(1)), 2)}
+            if kospi_match and "kospi" not in markets:
+                markets["kospi"] = {"name": "韩国KOSPI", "change_pct": round(float(kospi_match.group(1)), 2)}
+
+    except Exception as e:
+        logger.warning(f"Failed to parse Asia markets from news: {e}")
+
+    return markets
+
+
+def _search_global_news() -> list[dict]:
+    """搜索国际局势新闻 (使用 news-search API)."""
+    # Get today's date for fresh news
+    today = datetime.now()
+    date_str = today.strftime("%Y年%m月%d日")
+
+    news_items = []
+    keywords = [
+        f"{date_str} 美联储议息",
+        f"{date_str} 国际局势",
+        f"{date_str} 隔夜美股",
+    ]
+
+    for keyword in keywords:
+        time.sleep(1.5)  # Rate limit protection
+        data = _call_news_search_api(keyword)
+        try:
+            # Parse news-search response format
+            # data.data.data.llmSearchResponse.data[]
+            inner_data = (data.get("data") or {}).get("data", {}) if isinstance(data.get("data"), dict) else {}
+            llm_response = inner_data.get("llmSearchResponse", {})
+            news_list = llm_response.get("data", [])
+
+            for item in news_list[:3]:
+                title = item.get("title", "")
+                content = item.get("content", "")
+                if title and len(title) > 10:
+                    # Extract first 200 chars of content as summary
+                    summary = content[:200] + "..." if len(content) > 200 else content
+                    news_items.append({
+                        "title": title[:100],
+                        "summary": summary,
+                        "source": item.get("source", "东方财富"),
+                        "time": item.get("date", ""),
+                        "url": item.get("jumpUrl", ""),
+                    })
+        except (KeyError, TypeError) as e:
+            logger.warning(f"Failed to parse news for '{keyword}': {e}")
+
+    # Deduplicate
+    seen = set()
+    unique_news = []
+    for item in news_items:
+        if item["title"] not in seen:
+            seen.add(item["title"])
+            unique_news.append(item)
+            if len(unique_news) >= 6:
+                break
+
+    return unique_news
+
+    # 去重并限制数量
+    seen = set()
+    unique_news = []
+    for item in news_items:
+        if item["title"] not in seen:
+            seen.add(item["title"])
+            unique_news.append(item)
+            if len(unique_news) >= 6:
+                break
+
+    return unique_news
+
+
+def generate_morning_briefing() -> dict | None:
+    """Generate morning briefing with overnight US/Asia market movements.
+
+    Output: src/data/morning_briefing.json
+
+    Returns:
+        The generated briefing dict, or None on failure.
+    """
+    logger.info("Generating morning briefing...")
+
+    try:
+        # 1. 获取美股走势
+        us_markets = _fetch_us_markets()
+
+        # 2. 获取韩/日股市
+        asia_markets = _fetch_asia_markets()
+
+        # 3. 搜索国际局势新闻
+        global_news = _search_global_news()
+
+        # 4. 构建 briefing
+        briefing = {
+            "generated_at": datetime.now().isoformat(),
+            "us_markets": us_markets,
+            "asia_markets": asia_markets,
+            "global_news": global_news,
+        }
+
+        # 5. 写入文件 (原子写入)
+        tmp = MORNING_BRIEFING_PATH.with_suffix(".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(briefing, f, ensure_ascii=False, indent=2)
+        tmp.replace(MORNING_BRIEFING_PATH)
+
+        logger.info(f"Morning briefing written to {MORNING_BRIEFING_PATH.name}")
+        return briefing
+
+    except Exception as e:
+        logger.error(f"Morning briefing generation failed: {e}")
+        return None
+
+
+def _read_morning_briefing() -> dict | None:
+    """Read morning briefing from file."""
+    return _read_json(MORNING_BRIEFING_PATH)
 
 
 def _detect_market(signals: list[dict], watchlist: dict) -> str:
@@ -297,7 +574,8 @@ def _build_stats(
 
 def _build_llm_prompt(stats: dict, per_stock: list[dict], l1_displays: list[str],
                       l2_digest_map: dict | None = None,
-                      trade_plans: dict | None = None) -> list[dict]:
+                      trade_plans: dict | None = None,
+                      include_morning_briefing: bool = True) -> list[dict]:
     """Construct messages for LLM daily report generation."""
     system = """你是一位资深量化工程师，专注 A 股和港股。根据今日 L2 策略信号、微观结构数据和告警数据，生成简洁的持仓信号日报。
 
@@ -345,6 +623,37 @@ def _build_llm_prompt(stats: dict, per_stock: list[dict], l1_displays: list[str]
     watching = [ps for ps in per_stock if ps["type"] != "holding"]
 
     lines = []
+
+    # ── Morning briefing (隔夜外盘背景) ──
+    if include_morning_briefing:
+        morning = _read_morning_briefing()
+        if morning:
+            us = morning.get("us_markets", {})
+            asia = morning.get("asia_markets", {})
+            news = morning.get("global_news", [])
+
+            us_lines = []
+            for key, name in [("dow", "道琼斯"), ("nasdaq", "纳斯达克"), ("sp500", "标普500")]:
+                m = us.get(key, {})
+                if m.get("change_pct"):
+                    us_lines.append(f"{name} {m['change_pct']:+.2f}%")
+
+            asia_lines = []
+            for key, name in [("nikkei", "日经"), ("kospi", "KOSPI")]:
+                m = asia.get(key, {})
+                if m.get("change_pct"):
+                    asia_lines.append(f"{name} {m['change_pct']:+.2f}%")
+
+            if us_lines:
+                lines.append("## 隔夜外盘")
+                lines.append(f"- 美股: {', '.join(us_lines)}")
+            if asia_lines:
+                lines.append(f"- 亚太: {', '.join(asia_lines)}")
+            if news:
+                lines.append("## 国际要闻")
+                for item in news[:3]:
+                    lines.append(f"- {item.get('title', '')[:60]}")
+            lines.append("")
 
     # ── Fix 5: Portfolio summary ──
     if holdings:
@@ -713,7 +1022,8 @@ def generate_daily_summary(date_str: str | None = None) -> dict | None:
     from dotenv import load_dotenv
     load_dotenv(PROJECT_ROOT / ".env")
 
-    messages = _build_llm_prompt(stats, per_stock, l1_displays, l2_digest_map, trade_plans)
+    messages = _build_llm_prompt(stats, per_stock, l1_displays, l2_digest_map, trade_plans,
+                                  include_morning_briefing=True)
     report = None
     try:
         client = LLMClientFactory.create_client()

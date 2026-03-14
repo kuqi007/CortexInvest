@@ -2009,6 +2009,7 @@ def run():
     sent_open_today = False
     sent_close_today = False
     sent_summary_today = False
+    sent_morning_briefing_today = False
     mainline_checked_today = False
     latest_quotes: dict | None = None       # last merged quotes (for close summary)
     latest_hkd_cny_rate: float | None = None
@@ -2024,6 +2025,7 @@ def run():
             sent_open_today = False
             sent_close_today = False
             sent_summary_today = False
+            sent_morning_briefing_today = False
             mainline_checked_today = False
             latest_quotes = None
             latest_hkd_cny_rate = None
@@ -2200,6 +2202,20 @@ def run():
                         logger.warning(f"sector index computation failed: {e}")
                 import threading
                 threading.Thread(target=_run_sector_indices, daemon=True, name="sector-indices").start()
+
+        # ── Morning briefing generation (8:25-8:35 before A-share open) ──
+        if not sent_morning_briefing_today:
+            now_t = datetime.now()
+            hhmm = now_t.hour * 100 + now_t.minute
+            if now_t.weekday() < 5 and 825 <= hhmm <= 835:
+                sent_morning_briefing_today = True
+                logger.info("Triggering morning briefing generation...")
+                try:
+                    from src.tools.daily_summary_generator import generate_morning_briefing
+                    generate_morning_briefing()
+                    logger.info("Morning briefing generated")
+                except Exception as e:
+                    logger.error(f"Morning briefing generation failed: {e}")
 
         # ── Daily summary generation (16:05-16:15 after HK close) ──
         if not sent_summary_today:

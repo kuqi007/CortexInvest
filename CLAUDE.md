@@ -336,14 +336,15 @@ JSON 同时存储三种视图：`watchlist`（统一）、`holdings`（仅持仓
 | `signal_rules.json` | 信号规则配置 |
 | `l2_strategy_config.json` | L2 策略参数 |
 | `sector_config.json` | 板块告警规则 + 轮动配置（indices 已迁移到 DB tags） |
+| `morning_briefing.json` | 早间市场简报（8:30 自动生成，外盘走势 + 国际新闻） |
+| `daily_summary.json` | 每日信号日报（16:05 自动生成，综合分析） |
 
 **不需要提交的（临时/派生）**:
 
 | 文件 | 说明 |
 |------|------|
 | `sim_trading.db-shm` / `sim_trading.db-wal` | SQLite WAL 临时文件 |
-| `daily_summary.json` | 每日报告（收盘后生成，可重新生成） |
-| `archive/` | 历史归档目录（每日 08:00 归档 market_data + l2_signals + daily_summary，90 天自动清理） |
+| `archive/` | 历史归档目录（每日 08:00 归档 market_data + l2_signals + daily_summary + morning_briefing，90 天自动清理） |
 
 ### Simulated Trading (`src/sim_trading/`)
 
@@ -524,6 +525,27 @@ tail -f logs/l2_daemon.log | grep rt_sim   # 观察 v3 RT 日志
 - 要求自然引用具体数字（"大单净买0.19亿, tick偏买12.4%"），禁止模糊表述
 
 **手动重新生成**: `poetry run python -c "from src.tools.daily_summary_generator import generate_daily_summary; generate_daily_summary()"`
+
+### Morning Briefing (`src/tools/daily_summary_generator.py`)
+
+早间市场简报，8:30 自动生成（A股开盘前），写入 `src/data/morning_briefing.json`。
+
+**数据源**:
+- 美股走势：道琼斯、纳斯达克、标普500（东方财富 API）
+- 亚太股市：日经225、韩国KOSPI（东方财富 API）
+- 国际要闻：美联储、国际局势等关键词新闻搜索
+
+**触发时间**: 8:25-8:35（工作日），由 `stock_notifier.py` 在主循环中调用 `generate_morning_briefing()`
+
+**AI 读取规则**: 给投资建议前必须读取市场背景文件：
+```python
+morning = json.loads(Path("src/data/morning_briefing.json").read_text())
+summary = json.loads(Path("src/data/daily_summary.json").read_text())
+# 使用 morning['us_markets'] 获取隔夜外盘
+# 使用 morning['global_news'] 获取国际要闻
+```
+
+**手动重新生成**: `poetry run python -c "from src.tools.daily_summary_generator import generate_morning_briefing; generate_morning_briefing()"`
 
 ### 交易计划系统 (`src/data/trade_plans.json`)
 
