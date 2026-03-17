@@ -495,13 +495,27 @@ class DeltaAlertEngine:
             self._notified[symbol] = {"price": price, "change_pct": change_pct}
             kind = "threshold" if "threshold" in reasons else "big_move"
 
-            sign = "+" if change_pct >= 0 else ""
-            title = f"{name} {sign}{change_pct:.1f}%"
+            # 如果是再次触发（价格回落），显示回落幅度而不是当日涨幅
+            is_retrigger = prev is not None
+            if is_retrigger and prev.get("price"):
+                delta_from_prev = (price - prev["price"]) / prev["price"] * 100
+                if delta_from_prev < -1:  # 回落超过1%显示"回落"
+                    alert_pct = delta_from_prev
+                    direction = "回落"
+                else:
+                    alert_pct = change_pct
+                    direction = "涨幅" if change_pct >= 0 else "跌幅"
+            else:
+                alert_pct = change_pct
+                direction = "涨幅" if change_pct >= 0 else "跌幅"
+
+            sign = "+" if alert_pct >= 0 else ""
+            title = f"{name} {direction} {sign}{alert_pct:.1f}%"
             message = f"{price:.2f}"
             if "threshold" in reasons:
                 message += " !"
 
-            stealth_extra = f"{change_pct:+.1f}%"
+            stealth_extra = f"{alert_pct:+.1f}%"
             if "threshold" in reasons:
                 stealth_extra += " threshold"
 
@@ -511,9 +525,9 @@ class DeltaAlertEngine:
                 "message": message,
                 "_kind": kind,
                 "_level": level,
-                "_change_pct": change_pct,
+                "_change_pct": alert_pct,
                 "_price": price,
-                "_stealth": _notify_line(name, change_pct, stealth_extra),
+                "_stealth": _notify_line(name, alert_pct, stealth_extra),
             })
 
         # ── Portfolio summary ──
@@ -1136,9 +1150,15 @@ def write_alert_events(alerts: list[dict]):
         elif kind == "trade_plan":
             display = a.get("display", a.get("message", ""))
         else:
-            direction = "涨幅" if change_pct > 0 else "跌幅"
-            p = a.get("_price", 0)
-            display = f"{symbol} {name} {direction} {abs(change_pct):.1f}% 现价{p:.2f}" if p else f"{symbol} {name} {direction} {abs(change_pct):.1f}%"
+            # title 已包含方向（回落/涨幅/跌幅），直接用 title 构建 display
+            title = a.get("title", "")
+            if title and ("回落" in title or "涨幅" in title or "跌幅" in title):
+                # title 格式: "股票名 方向 X%"，直接用
+                display = f"{symbol} {title} 现价{a.get('_price', 0):.2f}"
+            else:
+                direction = "涨幅" if change_pct > 0 else "跌幅"
+                p = a.get("_price", 0)
+                display = f"{symbol} {name} {direction} {abs(change_pct):.1f}% 现价{p:.2f}" if p else f"{symbol} {name} {direction} {abs(change_pct):.1f}%"
 
         message = a.get("_stealth", a.get("message", ""))
         rows.append((ts_base + i, today, t, symbol, kind, a.get("_level", 2),
