@@ -1684,7 +1684,7 @@ class TradePlanEngine:
                     event_type = "sell_triggered"
                 alert = self._make_alert(
                     plan_id, plan, order["id"], f"{prefix}: {label}",
-                    price, name, change, event_type=event_type, shares=shares,
+                    price, name, change, event_type=event_type, shares=shares, side=side,
                 )
                 alerts.append(alert)
                 order["triggered"] = True
@@ -1855,13 +1855,18 @@ class TradePlanEngine:
 
     def _make_alert(self, plan_id: str, plan: dict, cond_id: str,
                     label: str, price: float, name: str, change: float,
-                    event_type: str = "", shares: int = 0) -> dict:
+                    event_type: str = "", shares: int = 0, side: str = "sell") -> dict:
         """Create alert dict compatible with write_alert_events + stealth_dispatch."""
         symbol = plan.get("symbol", "")
         plan_name = plan.get("name", plan_id)
 
-        if shares > 0:
-            action_text = f"买入 {shares} 股 @ {price:.2f}"
+        # Use label's side info if present (e.g., "卖出 100股: 止盈"), otherwise construct from side
+        if "买入" in label:
+            action_text = f"买入 {shares} 股 @ {price:.2f}" if shares > 0 else f"@ {price:.2f}"
+        elif "卖出" in label:
+            action_text = f"卖出 {shares} 股 @ {price:.2f}" if shares > 0 else f"@ {price:.2f}"
+        elif shares > 0:
+            action_text = f"{'买入' if side == 'buy' else '卖出'} {shares} 股 @ {price:.2f}"
         elif event_type == "sl_triggered":
             action_text = f"止损 @ {price:.2f}"
         else:
