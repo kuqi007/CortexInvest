@@ -1830,6 +1830,156 @@ class TestT3Cooldown:
 
 
 # ---------------------------------------------------------------------------
+# Dip-buy T3 exit price check - must be 2% lower than T3 sell price
+# ---------------------------------------------------------------------------
+
+
+class TestDipBuyT3ExitPriceCheck:
+    """dip-buy re-entry requires price < T3_sell_price * 0.98.
+
+    防止T3卖出后立即以更高价接回。
+    """
+
+    def test_dipbuy_blocked_when_price_above_t3_exit(self):
+        """当前价 >= T3卖出价*0.98 时，dip-buy 应被阻止。"""
+        from .realtime_engine import RealtimeSimEngine
+        from .db import _db_path_override
+        import src.sim_trading.db as db_mod
+        import os
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp.close()
+        old = db_mod._db_path_override
+        db_mod._db_path_override = tmp.name
+        try:
+            from .db import init_db
+            init_db()
+
+            rules = json.loads(RULES_PATH.read_text())
+            # Enable dip_buy
+            rules["dip_buy"] = {
+                "enabled": True,
+                "drawdown_pct": 8.0,
+                "lookback_days": 20,
+                "min_score": 30,
+                "min_ma_score": 5,
+                "position_pct": 0.15,
+                "stop_loss_atr_mult": 3.0,
+                "window_start": "09:45",
+                "window_end": "14:30",
+                "max_per_day": 1,
+            }
+
+            # Mock daily tracker
+            mock_tracker = MagicMock()
+            mock_tracker.get_recent_high.return_value = 110.0  # 20日高点
+            mock_tracker.score.return_value = {"total": 50, "ma": 10, "atr": 4.0, "action": "BUY"}
+
+            engine = RealtimeSimEngine(rules, daily_tracker=mock_tracker, futu_trade=False)
+
+            # Simulate T3 sell at price 100
+            engine._t3_exit_price["HK00700"] = 100.0
+            engine._last_exit_ts["HK00700"] = int(time.time() * 1000) - 3 * 60 * 60 * 1000  # 3h ago (cooldown passed)
+
+            # Current price = 99 (>= 100 * 0.98 = 98), should be blocked
+            prices = {"HK00700": 99.0}
+            market = {"HK00700": {"name": "腾讯", "amount": 1e9}}
+
+            # Mock broker with no positions
+            engine._broker = MagicMock()
+            engine._broker.positions = {}
+            engine._broker.cash = 1000000
+            engine._new_positions_today = 0
+
+            # Call dip-buy evaluation
+            with patch("src.sim_trading.realtime_engine.datetime") as mock_dt:
+                mock_instance = MagicMock()
+                mock_instance.hour = 13
+                mock_instance.minute = 0
+                mock_dt.now.return_value = mock_instance
+
+                engine._evaluate_dip_buy("2026-03-17", prices, market)
+
+            # Trade should NOT be executed (blocked by T3 exit price check)
+            engine._broker.open_position.assert_not_called()
+
+        finally:
+            db_mod._db_path_override = old
+            os.unlink(tmp.name)
+
+    def test_dipbuy_allowed_when_price_below_t3_exit(self):
+        """当前价 < T3卖出价*0.98 时，dip-buy 应允许。"""
+        from .realtime_engine import RealtimeSimEngine
+        from .db import _db_path_override
+        import src.sim_trading.db as db_mod
+        import os
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp.close()
+        old = db_mod._db_path_override
+        db_mod._db_path_override = tmp.name
+        try:
+            from .db import init_db
+            init_db()
+
+            rules = json.loads(RULES_PATH.read_text())
+            rules["dip_buy"] = {
+                "enabled": True,
+                "drawdown_pct": 8.0,
+                "lookback_days": 20,
+                "min_score": 30,
+                "min_ma_score": 5,
+                "position_pct": 0.15,
+                "stop_loss_atr_mult": 3.0,
+                "window_start": "09:45",
+                "window_end": "14:30",
+                "max_per_day": 1,
+            }
+
+            # Mock daily tracker - price 95, high 110 => drawdown = (95-110)/110 = -13.6% >= 8%
+            mock_tracker = MagicMock()
+            mock_tracker.get_recent_high.return_value = 110.0
+            mock_tracker.score.return_value = {"total": 50, "ma": 10, "atr": 4.0, "action": "BUY"}
+
+            engine = RealtimeSimEngine(rules, daily_tracker=mock_tracker, futu_trade=False)
+
+            # Simulate T3 sell at price 100
+            engine._t3_exit_price["HK00700"] = 100.0
+            engine._last_exit_ts["HK00700"] = int(time.time() * 1000) - 3 * 60 * 60 * 1000  # 3h ago
+
+            # Current price = 95 (< 100 * 0.98 = 98), should be allowed
+            prices = {"HK00700": 95.0}
+            market = {"HK00700": {"name": "腾讯", "amount": 1e9}}
+
+            # Mock broker
+            engine._broker = MagicMock()
+            engine._broker.positions = {}
+            engine._broker.cash = 1000000
+            engine._new_positions_today = 0
+            engine._pos_mgr = MagicMock()
+            engine._pos_mgr._align_lot.return_value = 100
+
+            # Mock engine trade execution
+            engine._engine = MagicMock()
+            engine._engine.execute_trade.return_value = {"exec_price": 95.0, "filled": True}
+
+            with patch("src.sim_trading.realtime_engine.datetime") as mock_dt:
+                mock_instance = MagicMock()
+                mock_instance.hour = 13
+                mock_instance.minute = 0
+                mock_dt.now.return_value = mock_instance
+
+                engine._evaluate_dip_buy("2026-03-17", prices, market)
+
+            # Trade SHOULD be executed
+            engine._broker.open_position.assert_called_once()
+
+        finally:
+            db_mod._db_path_override = old
+            os.unlink(tmp.name)
+
+
+# ---------------------------------------------------------------------------
 # Continuous Trading Hours Check - skip T3 during pre-open auction
 # ---------------------------------------------------------------------------
 
