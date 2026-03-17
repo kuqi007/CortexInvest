@@ -1717,6 +1717,194 @@ class TestT3EntryTimeZeroGuard:
 
 
 # ---------------------------------------------------------------------------
+# T3 Cooldown - prevents repeated T3 triggers within 5 minutes
+# ---------------------------------------------------------------------------
+
+
+class TestT3Cooldown:
+    """T3 cooldown: 5分钟内同一股票不重复触发T3。
+
+    防止同一股票短时间多个T3信号导致过度交易。
+    """
+
+    def test_t3_cooldown_blocks_repeated_signals(self):
+        """5分钟内同一股票的T3信号应被冷却跳过。"""
+        from .realtime_engine import RealtimeSimEngine
+        from .db import _db_path_override
+        import src.sim_trading.db as db_mod
+        import os
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp.close()
+        old = db_mod._db_path_override
+        db_mod._db_path_override = tmp.name
+        try:
+            # Init DB
+            from .db import init_db
+            init_db()
+
+            # Create engine with mock broker
+            rules = json.loads(RULES_PATH.read_text())
+            mock_broker = MagicMock()
+            mock_broker.positions = {"HK00700": MagicMock()}  # Has position
+            mock_broker.positions["HK00700"].entry_day_index = 0
+            mock_broker.positions["HK00700"].entry_time = int(time.time() * 1000) - 3600000  # 1 hour ago
+            mock_broker.positions["HK00700"].entry_price = 550.0
+
+            engine = RealtimeSimEngine(rules, daily_tracker=None, futu_trade=False)
+            engine._broker = mock_broker
+
+            # First T3 signal - should process and set cooldown
+            sig1 = {
+                "code": "HK00700",
+                "strategy": "large_order_reversal",
+                "ts": int(time.time() * 1000),
+                "detail": {"direction": "bearish"},
+            }
+            engine._process_signal_v2(sig1, "10:30", {"HK00700": 558.0}, {"HK00700": {}})
+
+            # Check cooldown is set
+            assert "HK00700" in engine._t3_cooldown
+            first_cooldown = engine._t3_cooldown["HK00700"]
+
+            # Second T3 signal within 5 minutes - should be skipped due to cooldown
+            sig2 = {
+                "code": "HK00700",
+                "strategy": "large_order_reversal",
+                "ts": int(time.time() * 1000),
+                "detail": {"direction": "bearish"},
+            }
+            engine._process_signal_v2(sig2, "10:31", {"HK00700": 558.0}, {"HK00700": {}})
+
+            # Cooldown timestamp should NOT be updated (still the first one)
+            assert engine._t3_cooldown["HK00700"] == first_cooldown
+
+        finally:
+            db_mod._db_path_override = old
+            os.unlink(tmp.name)
+
+    def test_t3_cooldown_allows_after_5min(self):
+        """5分钟后的T3信号应正常处理。"""
+        from .realtime_engine import RealtimeSimEngine
+        from .db import _db_path_override
+        import src.sim_trading.db as db_mod
+        import os
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp.close()
+        old = db_mod._db_path_override
+        db_mod._db_path_override = tmp.name
+        try:
+            from .db import init_db
+            init_db()
+
+            rules = json.loads(RULES_PATH.read_text())
+            mock_broker = MagicMock()
+            mock_broker.positions = {"HK00700": MagicMock()}
+            mock_broker.positions["HK00700"].entry_day_index = 0
+            mock_broker.positions["HK00700"].entry_time = int(time.time() * 1000) - 3600000  # 1 hour ago
+            mock_broker.positions["HK00700"].entry_price = 550.0
+
+            engine = RealtimeSimEngine(rules, daily_tracker=None, futu_trade=False)
+            engine._broker = mock_broker
+
+            # Set cooldown to 6 minutes ago
+            old_cooldown = int(time.time() * 1000) - (6 * 60 * 1000)
+            engine._t3_cooldown["HK00700"] = old_cooldown
+
+            # Signal after cooldown - should process and update cooldown
+            sig = {
+                "code": "HK00700",
+                "strategy": "large_order_reversal",
+                "ts": int(time.time() * 1000),
+                "detail": {"direction": "bearish"},
+            }
+            engine._process_signal_v2(sig, "10:35", {"HK00700": 558.0}, {"HK00700": {}})
+
+            # Cooldown should be updated to new timestamp (signal was processed)
+            assert engine._t3_cooldown["HK00700"] > old_cooldown
+
+        finally:
+            db_mod._db_path_override = old
+            os.unlink(tmp.name)
+
+
+# ---------------------------------------------------------------------------
+# Continuous Trading Hours Check - skip T3 during pre-open auction
+# ---------------------------------------------------------------------------
+
+
+class TestIsContinuousTrading:
+    """_is_continuous_trading() returns True only during continuous trading.
+
+    HK: 09:30-12:00, 13:00-16:00
+    A股: 09:30-11:30, 13:00-15:00
+    """
+
+    def test_continuous_trading_hk_morning(self):
+        """港股上午连续交易时段 (09:30-12:00) 应返回 True。"""
+        from .realtime_engine import RealtimeSimEngine
+
+        rules = json.loads(RULES_PATH.read_text())
+        engine = RealtimeSimEngine(rules)
+
+        # Mock time to 10:30
+        with patch("src.sim_trading.realtime_engine.datetime") as mock_dt:
+            mock_instance = MagicMock()
+            mock_instance.hour = 10
+            mock_instance.minute = 30
+            mock_dt.now.return_value = mock_instance
+
+            assert engine._is_continuous_trading() is True
+
+    def test_continuous_trading_hk_afternoon(self):
+        """港股下午连续交易时段 (13:00-16:00) 应返回 True。"""
+        from .realtime_engine import RealtimeSimEngine
+
+        rules = json.loads(RULES_PATH.read_text())
+        engine = RealtimeSimEngine(rules)
+
+        with patch("src.sim_trading.realtime_engine.datetime") as mock_dt:
+            mock_instance = MagicMock()
+            mock_instance.hour = 14
+            mock_instance.minute = 30
+            mock_dt.now.return_value = mock_instance
+
+            assert engine._is_continuous_trading() is True
+
+    def test_pre_open_auction_hk(self):
+        """港股竞价时段 (09:00-09:30) 应返回 False。"""
+        from .realtime_engine import RealtimeSimEngine
+
+        rules = json.loads(RULES_PATH.read_text())
+        engine = RealtimeSimEngine(rules)
+
+        # 09:15 - during pre-open
+        with patch("src.sim_trading.realtime_engine.datetime") as mock_dt:
+            mock_instance = MagicMock()
+            mock_instance.hour = 9
+            mock_instance.minute = 15
+            mock_dt.now.return_value = mock_instance
+
+            assert engine._is_continuous_trading() is False
+
+    def test_lunch_break_hk(self):
+        """港股午休时段 (12:00-13:00) 应返回 False。"""
+        from .realtime_engine import RealtimeSimEngine
+
+        rules = json.loads(RULES_PATH.read_text())
+        engine = RealtimeSimEngine(rules)
+
+        with patch("src.sim_trading.realtime_engine.datetime") as mock_dt:
+            mock_instance = MagicMock()
+            mock_instance.hour = 12
+            mock_instance.minute = 30
+            mock_dt.now.return_value = mock_instance
+
+            assert engine._is_continuous_trading() is False
+
+
+# ---------------------------------------------------------------------------
 # FutuPositionSync preserves risk params (SL/TP/entry_time bug regression)
 # ---------------------------------------------------------------------------
 
@@ -1971,3 +2159,126 @@ class TestKlineProvider:
         assert FutuKlineProvider._to_futu_code("600036") == "SH.600036"
         assert FutuKlineProvider._to_futu_code("000792") == "SZ.000792"
         assert FutuKlineProvider._to_futu_code("300260") == "SZ.300260"
+
+
+class TestMakeAlert:
+    """Tests for stock_notifier._make_alert method."""
+
+    def test_make_alert_sell_from_label(self):
+        """Label containing '卖出' should display as sell, not buy."""
+        from src.tools.stock_notifier import TradePlanEngine
+        import datetime
+
+        # Create a mock TradePlanEngine
+        engine = TradePlanEngine.__new__(TradePlanEngine)
+
+        plan = {"symbol": "603163", "name": "圣晖集成"}
+        label = "卖出 100股: 止盈1——125减半"
+
+        result = engine._make_alert(
+            plan_id="test_plan",
+            plan=plan,
+            cond_id="cond1",
+            label=label,
+            price=125.22,
+            name="圣晖集成",
+            change=8.6,
+            event_type="sell_triggered",
+            shares=100,
+            side="sell",
+        )
+
+        # Should show "卖出" not "买入"
+        assert "卖出" in result["display"]
+        assert "买入" not in result["display"]
+        assert "止盈1" in result["display"]
+
+    def test_make_alert_buy_from_label(self):
+        """Label containing '买入' should display as buy."""
+        from src.tools.stock_notifier import TradePlanEngine
+
+        engine = TradePlanEngine.__new__(TradePlanEngine)
+
+        plan = {"symbol": "000792", "name": "盐湖股份"}
+        label = "买入 200股: 反弹买入"
+
+        result = engine._make_alert(
+            plan_id="test_plan",
+            plan=plan,
+            cond_id="cond1",
+            label=label,
+            price=18.50,
+            name="盐湖股份",
+            change=-5.0,
+            event_type="buy_triggered",
+            shares=200,
+            side="buy",
+        )
+
+        assert "买入" in result["display"]
+        assert "反弹买入" in result["display"]
+
+    def test_make_alert_fallback_to_side(self):
+        """When label doesn't contain side, use side parameter."""
+        from src.tools.stock_notifier import TradePlanEngine
+
+        engine = TradePlanEngine.__new__(TradePlanEngine)
+
+        plan = {"symbol": "HK09988", "name": "阿里巴巴"}
+        label = "移动止损触发"
+
+        # Test sell fallback
+        result = engine._make_alert(
+            plan_id="test_plan",
+            plan=plan,
+            cond_id="cond1",
+            label=label,
+            price=150.0,
+            name="阿里巴巴",
+            change=-3.0,
+            event_type="sell_triggered",
+            shares=100,
+            side="sell",
+        )
+
+        assert "卖出" in result["display"]
+
+        # Test buy fallback
+        result = engine._make_alert(
+            plan_id="test_plan",
+            plan=plan,
+            cond_id="cond1",
+            label=label,
+            price=150.0,
+            name="阿里巴巴",
+            change=-3.0,
+            event_type="buy_triggered",
+            shares=100,
+            side="buy",
+        )
+
+        assert "买入" in result["display"]
+
+    def test_make_alert_sl_triggered(self):
+        """Stop loss event should show '止损'."""
+        from src.tools.stock_notifier import TradePlanEngine
+
+        engine = TradePlanEngine.__new__(TradePlanEngine)
+
+        plan = {"symbol": "600519", "name": "贵州茅台"}
+        label = "止损条件"
+
+        result = engine._make_alert(
+            plan_id="test_plan",
+            plan=plan,
+            cond_id="cond1",
+            label=label,
+            price=1600.0,
+            name="贵州茅台",
+            change=-8.0,
+            event_type="sl_triggered",
+            shares=0,
+            side="sell",
+        )
+
+        assert "止损" in result["display"]
