@@ -332,6 +332,24 @@ def resolve_level(entry: dict) -> int:
     return 3
 
 
+def is_hk_stock(symbol: str) -> bool:
+    """判断是否为港股"""
+    return symbol.startswith("HK")
+
+
+def adjust_policy_for_market(policy: dict, symbol: str) -> dict:
+    """根据市场调整阈值，港股弹性大使用更宽松的阈值"""
+    if not is_hk_stock(symbol):
+        return policy
+    # 港股: trigger 放宽到 8%, delta 放宽到 6%
+    adjusted = dict(policy)
+    if policy.get("trigger_pct"):
+        adjusted["trigger_pct"] = max(policy["trigger_pct"], 8)
+    if policy.get("delta_pct"):
+        adjusted["delta_pct"] = max(policy["delta_pct"], 6)
+    return adjusted
+
+
 def get_policy(level: int, settings: dict) -> dict:
     """获取级别策略，合并用户覆盖"""
     base = dict(NOTIFY_POLICIES.get(level, NOTIFY_POLICIES[4]))
@@ -447,8 +465,10 @@ class DeltaAlertEngine:
                 if below is not None and price <= below:
                     threshold_hit = True
 
-            trigger_pct = policy["trigger_pct"]
-            delta_pct = policy["delta_pct"]
+            # 根据市场调整阈值（港股弹性大，使用更宽松的阈值）
+            market_policy = adjust_policy_for_market(policy, symbol)
+            trigger_pct = market_policy["trigger_pct"]
+            delta_pct = market_policy["delta_pct"]
 
             if prev is None:
                 # ── First notification ──
