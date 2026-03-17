@@ -69,6 +69,24 @@ do_start() {
   # 检查 terminal-notifier 依赖
   _check_terminal_notifier
 
+  # 生成早间简报（如果今天还没生成）
+  MORNING_FILE="$DIR/src/data/morning_briefing.json"
+  TODAY_STR=$(date +%Y-%m-%d)
+  if [ -f "$MORNING_FILE" ]; then
+    LAST_DATE=$(grep -o '"generated_at": "[^"]*"' "$MORNING_FILE" | head -1 | sed 's/"generated_at": "\([^T]*\)T.*/\1/')
+    if [ "$LAST_DATE" != "$TODAY_STR" ]; then
+      echo "早间简报是 $LAST_DATE，今天是 $TODAY_STR，正在生成..."
+      cd "$DIR"
+      poetry run python -c "from src.tools.daily_summary_generator import generate_morning_briefing; generate_morning_briefing()" >> "$DIR/logs/morning_briefing.log" 2>&1
+      echo "早间简报生成完成"
+    fi
+  else
+    echo "早间简报文件不存在，正在生成..."
+    cd "$DIR"
+    poetry run python -c "from src.tools.daily_summary_generator import generate_morning_briefing; generate_morning_briefing()" >> "$DIR/logs/morning_briefing.log" 2>&1
+    echo "早间简报生成完成"
+  fi
+
   # Poller
   _ensure_no_orphan "$POLLER_PID" "market_data_poller.py"
   if _is_running "$POLLER_PID"; then
