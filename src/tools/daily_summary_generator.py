@@ -18,9 +18,13 @@ import requests
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
+from dotenv import load_dotenv
 
 # ── Project root & import path ──
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
+# Load .env at module level
+load_dotenv(PROJECT_ROOT / ".env")
 import sys
 sys.path.insert(0, str(PROJECT_ROOT))
 
