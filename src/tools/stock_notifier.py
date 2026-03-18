@@ -128,6 +128,32 @@ def _archive_and_reset(today):
 # 1. Trading hours (extended for HK)
 # ══════════════════════════════════════════
 
+def is_in_auction_period() -> bool:
+    """检查是否在集合竞价时段，竞价时段不发送 alert。
+
+    A股: 09:15-09:25 开盘集合竞价
+    港股: 09:00-09:20 开市前时段竞价
+
+    这段时间价格波动大且不稳定，不适合发告警。
+    """
+    now = datetime.now()
+    t = now.hour * 100 + now.minute
+
+    # A股 开盘集合竞价 (09:15-09:25)
+    if 915 <= t <= 925:
+        from src.tools.trading_calendar import is_trading_day
+        if is_trading_day("CN"):
+            return True
+
+    # 港股 开市前时段竞价 (09:00-09:20)
+    if 900 <= t <= 920:
+        from src.tools.trading_calendar import is_trading_day
+        if is_trading_day("HK"):
+            return True
+
+    return False
+
+
 def is_any_market_open(has_hk: bool = False) -> bool:
     """Check if any watched market is currently in trading hours.
 
@@ -404,6 +430,10 @@ class DeltaAlertEngine:
 
         Returns list of alert dicts, each with _level for dispatch routing.
         """
+        # 集合竞价时段不发送告警
+        if is_in_auction_period():
+            return []
+
         self._reload_alerts()
         config = self.config
         watchlist = config.get("watchlist", {})
@@ -2256,11 +2286,14 @@ def run():
                     latest_hkd_cny_rate = market.get("hkdCnyRate")
 
                 if trading and quotes:
+                    # 集合竞价时段不发送告警（价格不稳定）
+                    in_auction = is_in_auction_period()
+
                     hkd_cny_rate = market.get("hkdCnyRate")
-                    all_alerts = engine.check(quotes, hkd_cny_rate)
+                    all_alerts = [] if in_auction else engine.check(quotes, hkd_cny_rate)
 
                     # ── L2 strategy signals (from daemon) ──
-                    l2_alerts = check_l2_signals()
+                    l2_alerts = [] if in_auction else check_l2_signals()
                     if l2_alerts:
                         for a in l2_alerts:
                             if "_level" not in a:
@@ -2274,7 +2307,7 @@ def run():
                         all_alerts.extend(l2_notify)
 
                     # ── Trade plan conditions ──
-                    plan_alerts = plan_engine.check(quotes)
+                    plan_alerts = [] if in_auction else plan_engine.check(quotes)
                     if plan_alerts:
                         write_alert_events(plan_alerts)
                         all_alerts.extend(plan_alerts)
@@ -2290,13 +2323,14 @@ def run():
                             logger.warning(f"indicator_cache refresh failed: {_ie}")
 
                     # ── 注册表形态引擎（统一驱动，隔离异常）──
-                    for _eng in _pattern_engines:
-                        try:
-                            _eng_alerts = _eng.check(quotes)
-                            if _eng_alerts:
-                                all_alerts.extend(_eng_alerts)
-                        except Exception as _e:
-                            logger.warning(f"{type(_eng).__name__} check failed: {_e}")
+                    if not in_auction:
+                        for _eng in _pattern_engines:
+                            try:
+                                _eng_alerts = _eng.check(quotes)
+                                if _eng_alerts:
+                                    all_alerts.extend(_eng_alerts)
+                            except Exception as _e:
+                                logger.warning(f"{type(_eng).__name__} check failed: {_e}")
 
                     if all_alerts:
                         print()
