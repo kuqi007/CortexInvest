@@ -131,22 +131,22 @@ def _archive_and_reset(today):
 def is_in_auction_period() -> bool:
     """检查是否在集合竞价时段，竞价时段不发送 alert。
 
-    A股: 09:15-09:25 开盘集合竞价
-    港股: 09:00-09:20 开市前时段竞价
+    A股: 09:15-09:25 开盘集合竞价，09:25后开始告警
+    港股: 09:00-09:20 开市前时段竞价，09:20后开始告警
 
     这段时间价格波动大且不稳定，不适合发告警。
     """
     now = datetime.now()
     t = now.hour * 100 + now.minute
 
-    # A股 开盘集合竞价 (09:15-09:25)
-    if 915 <= t <= 925:
+    # A股 开盘集合竞价 (09:15-09:24)
+    if 915 <= t < 925:
         from src.tools.trading_calendar import is_trading_day
         if is_trading_day("CN"):
             return True
 
-    # 港股 开市前时段竞价 (09:00-09:20)
-    if 900 <= t <= 920:
+    # 港股 开市前时段竞价 (09:00-09:19)
+    if 900 <= t < 920:
         from src.tools.trading_calendar import is_trading_day
         if is_trading_day("HK"):
             return True
