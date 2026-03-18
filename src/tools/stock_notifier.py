@@ -530,7 +530,8 @@ class DeltaAlertEngine:
             if is_retrigger and prev.get("price"):
                 delta_from_prev = (price - prev["price"]) / prev["price"] * 100
                 if delta_from_prev < -1:  # 回落超过1%显示"回落"
-                    alert_pct = delta_from_prev
+                    # 回落已经是负数，用绝对值显示
+                    alert_pct = abs(delta_from_prev)
                     direction = "回落"
                 else:
                     alert_pct = change_pct
@@ -539,7 +540,11 @@ class DeltaAlertEngine:
                 alert_pct = change_pct
                 direction = "涨幅" if change_pct >= 0 else "跌幅"
 
-            sign = "+" if alert_pct >= 0 else ""
+            # 回落不需要 +/- 号（本身就是下跌）
+            if direction == "回落":
+                sign = ""
+            else:
+                sign = "+" if alert_pct >= 0 else ""
             title = f"{name} {direction} {sign}{alert_pct:.1f}%"
             message = f"{price:.2f}"
             if "threshold" in reasons:
