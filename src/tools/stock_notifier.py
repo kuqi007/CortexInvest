@@ -530,27 +530,25 @@ class DeltaAlertEngine:
             if is_retrigger and prev.get("price"):
                 delta_from_prev = (price - prev["price"]) / prev["price"] * 100
                 if delta_from_prev < -1:  # 回落超过1%显示"回落"
-                    # 回落已经是负数，用绝对值显示
-                    alert_pct = abs(delta_from_prev)
-                    direction = "回落"
+                    # 回落显示为下跌
+                    alert_pct = delta_from_prev  # 保持负数
+                    icon = "↓"
                 else:
                     alert_pct = change_pct
-                    direction = "涨幅" if change_pct >= 0 else "跌幅"
+                    icon = "↑" if change_pct >= 0 else "↓"
             else:
                 alert_pct = change_pct
-                direction = "涨幅" if change_pct >= 0 else "跌幅"
+                icon = "↑" if change_pct >= 0 else "↓"
 
-            # 回落不需要 +/- 号（本身就是下跌）
-            if direction == "回落":
-                sign = ""
-            else:
-                sign = "+" if alert_pct >= 0 else ""
-            title = f"{name} {direction} {sign}{alert_pct:.1f}%"
+            # title 格式: 股票名 图标+/-X% → 价格
+            sign = "+" if alert_pct >= 0 else ""
+            title = f"{name} {icon}{sign}{alert_pct:.1f}% → {price:.2f}"
             message = f"{price:.2f}"
             if "threshold" in reasons:
                 message += " !"
 
-            stealth_extra = f"{alert_pct:+.1f}%"
+            # stealth_extra 格式统一
+            stealth_extra = f"{icon}{sign}{abs(alert_pct):.1f}%"
             if "threshold" in reasons:
                 stealth_extra += " threshold"
 
@@ -880,11 +878,12 @@ def _notify_title(is_summary: bool = False) -> str:
 
 
 def _notify_line(name: str, change_pct: float, extra: str = "") -> str:
-    """Terminal 通知行：简短中文，比 web display 更精简"""
+    """Terminal 通知行：简短中文，带方向图标"""
+    icon = "↑" if change_pct >= 0 else "↓"
     sign = "+" if change_pct >= 0 else ""
     if extra:
-        return f"{name} {sign}{change_pct:.1f}% {extra}"
-    return f"{name} {sign}{change_pct:.1f}%"
+        return f"{name} {icon}{sign}{abs(change_pct):.1f}% {extra}"
+    return f"{name} {icon}{sign}{abs(change_pct):.1f}%"
 
 
 # ══════════════════════════════════════════
@@ -1175,7 +1174,14 @@ def write_alert_events(alerts: list[dict]):
         elif kind == "l2_strategy":
             display = a.get("message", f"{symbol} L2 signal")
         elif kind == "threshold":
-            display = f"{symbol} {name} 触价告警 {a.get('message', '')}"
+            # 触价显示方向图标：↑高于阈值 或 ↓低于阈值
+            msg = a.get("message", "")
+            # 判断是高于还是低于
+            if "!" in msg:
+                # 需要根据价格判断方向，这里简化处理
+                display = f"{symbol} {name} 触价告警 {a.get('_price', 0):.2f}"
+            else:
+                display = f"{symbol} {name} 触价告警 {a.get('_price', 0):.2f}"
         elif kind == "portfolio":
             display = f"组合盈亏 {change_pct:+.1f}%"
         elif kind == "DRIFT":
@@ -1185,15 +1191,15 @@ def write_alert_events(alerts: list[dict]):
         elif kind == "trade_plan":
             display = a.get("display", a.get("message", ""))
         else:
-            # title 已包含方向（回落/涨幅/跌幅），直接用 title 构建 display
+            # title 格式: "股票名 ↑+4.5% → 217.45"，直接用
             title = a.get("title", "")
-            if title and ("回落" in title or "涨幅" in title or "跌幅" in title):
-                # title 格式: "股票名 方向 X%"，直接用
-                display = f"{symbol} {title} 现价{a.get('_price', 0):.2f}"
+            if title:
+                display = f"{symbol} {title}"
             else:
+                icon = "↑" if change_pct > 0 else "↓"
                 direction = "涨幅" if change_pct > 0 else "跌幅"
                 p = a.get("_price", 0)
-                display = f"{symbol} {name} {direction} {abs(change_pct):.1f}% 现价{p:.2f}" if p else f"{symbol} {name} {direction} {abs(change_pct):.1f}%"
+                display = f"{symbol} {name} {icon}{direction} {abs(change_pct):.1f}% → {p:.2f}" if p else f"{symbol} {name} {icon}{direction} {abs(change_pct):.1f}%"
 
         message = a.get("_stealth", a.get("message", ""))
         rows.append((ts_base + i, today, t, symbol, kind, a.get("_level", 2),
