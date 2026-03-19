@@ -33,6 +33,13 @@ interface DailySummary {
   report: string;
 }
 
+interface MorningBriefing {
+  generated_at: string;
+  us_markets: Record<string, { name: string; change_pct: number }>;
+  asia_markets: Record<string, { name: string; change_pct: number }>;
+  global_news: { title: string; summary: string; source: string; time: string; url: string }[];
+}
+
 const LEVEL_COLORS: Record<number, string> = {
   1: D.yellow,
   2: D.orange,
@@ -602,6 +609,8 @@ export default function AlertsPage() {
   const { status: tradingStatus } = useTradingStatus();
   const [summary, setSummary] = useState<DailySummary | null>(null);
   const [summaryOpen, setSummaryOpen] = useState(true);
+  const [briefing, setBriefing] = useState<MorningBriefing | null>(null);
+  const [briefingOpen, setBriefingOpen] = useState(true);
   const [showL3, setShowL3] = useState(false);
   const [viewMode, setViewMode] = useState<"grouped" | "detail">("grouped");
   const [expandedStocks, setExpandedStocks] = useState<Set<string>>(new Set());
@@ -618,11 +627,22 @@ export default function AlertsPage() {
     }
   }, []);
 
+  const fetchBriefing = useCallback(async () => {
+    try {
+      const res = await fetch("/api/morning-briefing", { cache: "no-store" });
+      const data = await res.json();
+      setBriefing(data.generated_at ? data : null);
+    } catch {
+      // briefing fetch failure is non-critical
+    }
+  }, []);
+
   useEffect(() => {
+    fetchBriefing();
     fetchSummary();
     const timer = setInterval(fetchSummary, 30_000);
     return () => clearInterval(timer);
-  }, [fetchSummary]);
+  }, [fetchBriefing, fetchSummary]);
 
   // Level counts (memoized to avoid re-filtering on every render)
   const { l1Count, l2Count, l3Count } = useMemo(() => {
@@ -699,6 +719,94 @@ export default function AlertsPage() {
           lineHeight: 1.6,
         }}
       >
+        {/* ── Morning Briefing Card ── */}
+        {briefing && (
+          <div
+            style={{
+              border: `1px solid ${D.cyan}44`,
+              borderRadius: 4,
+              marginBottom: 12,
+              background: "#21222c",
+            }}
+          >
+            <div
+              onClick={() => setBriefingOpen(!briefingOpen)}
+              style={{
+                padding: "6px 12px",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                userSelect: "none",
+                borderBottom: briefingOpen ? `1px solid ${D.cyan}33` : "none",
+              }}
+            >
+              <span style={{ color: D.cyan, fontSize: 11, width: "2ch" }}>
+                {briefingOpen ? "\u25be" : "\u25b8"}
+              </span>
+              <span style={{ color: D.cyan, fontWeight: 700 }}>
+                # ── 早间简报 {briefing.generated_at?.slice(0, 10)}
+              </span>
+              <span style={{ color: D.comment, fontSize: 11, marginLeft: 8 }}>
+                {Object.keys(briefing.us_markets).length > 0 && (
+                  <span>
+                    美股:{" "}
+                    {Object.values(briefing.us_markets).map((m, i) => (
+                      <span key={i} style={{ color: m.change_pct >= 0 ? D.green : D.red }}>
+                        {m.name}{m.change_pct >= 0 ? "+" : ""}{m.change_pct}%{" "}
+                      </span>
+                    ))}
+                  </span>
+                )}
+              </span>
+              {briefing.global_news.length > 0 && (
+                <span style={{ color: D.comment, fontSize: 11 }}>
+                  {briefing.global_news.length} 条新闻
+                </span>
+              )}
+            </div>
+
+            {briefingOpen && (
+              <div style={{ padding: "8px 12px 12px", lineHeight: 1.7 }}>
+                {/* Market summary */}
+                <div style={{ display: "flex", gap: 16, marginBottom: 8, flexWrap: "wrap" }}>
+                  <div style={{ color: D.comment, fontSize: 11 }}>
+                    美股:{" "}
+                    {Object.values(briefing.us_markets).map((m, i) => (
+                      <span key={i} style={{ color: m.change_pct >= 0 ? D.green : D.red }}>
+                        {m.name}{m.change_pct >= 0 ? "+" : ""}{m.change_pct}%{" "}
+                      </span>
+                    ))}
+                  </div>
+                  {Object.keys(briefing.asia_markets).length > 0 && (
+                    <div style={{ color: D.comment, fontSize: 11 }}>
+                      亚股:{" "}
+                      {Object.values(briefing.asia_markets).map((m, i) => (
+                        <span key={i} style={{ color: m.change_pct >= 0 ? D.green : D.red }}>
+                          {m.name}{m.change_pct >= 0 ? "+" : ""}{m.change_pct}%{" "}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* News */}
+                {briefing.global_news.length > 0 && (
+                  <div>
+                    <div style={{ color: D.purple, fontSize: 11, marginBottom: 4 }}>重要新闻:</div>
+                    {briefing.global_news.slice(0, 5).map((n, i) => (
+                      <div key={i} style={{ color: D.fg, fontSize: 11, marginBottom: 4, paddingLeft: 8 }}>
+                        <span style={{ color: D.comment }}>[{n.source}]</span>{" "}
+                        <span style={{ color: D.yellow }}>{n.title.replace(/^.*?：/, "").slice(0, 60)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ── Daily Summary Card ── */}
         {summary && (
           <div
