@@ -12,7 +12,7 @@ interface DailySummary {
   date: string;
   generatedAt: number;
   market: string;
-  stats: {
+  stats?: {
     totalSignals: number;
     totalAlerts: number;
     l1Count: number;
@@ -22,7 +22,7 @@ interface DailySummary {
     upCount: number;
     downCount: number;
   };
-  perStock: {
+  perStock?: {
     code: string;
     name: string;
     change: number;
@@ -30,14 +30,13 @@ interface DailySummary {
     direction: string;
     keySignals: string[];
   }[];
-  report: string;
-}
-
-interface MorningBriefing {
-  generated_at: string;
-  us_markets: Record<string, { name: string; change_pct: number }>;
-  asia_markets: Record<string, { name: string; change_pct: number }>;
-  global_news: { title: string; summary: string; source: string; time: string; url: string }[];
+  report?: string;
+  morning?: {
+    generated_at: string;
+    us_markets: Record<string, { name: string; change_pct: number }>;
+    asia_markets: Record<string, { name: string; change_pct: number }>;
+    global_news: { title: string; summary: string; source: string; time: string; url: string }[];
+  } | null;
 }
 
 const LEVEL_COLORS: Record<number, string> = {
@@ -68,7 +67,7 @@ type ParsedAlert = {
   detail: string;
 };
 
-type AlertParser = (e: AlertEvent, d: string, sym: string, shortCode: string) => ParsedAlert | null;
+type AlertParser = (e: AlertEvent, d: string, sym: string, shortCode: string, services?: { id: string; name?: string }[]) => ParsedAlert | null;
 
 // ── 各 kind 的解析函数 ────────────────────────────────────────────────────────
 // 新增形态只需：① 写一个函数，② 在 KIND_PARSERS 里加一行，完成。
@@ -93,15 +92,18 @@ function parseL2Strategy(e: AlertEvent, d: string, _sym: string, shortCode: stri
 }
 
 function parseBigMove(_e: AlertEvent, d: string, _sym: string, shortCode: string): ParsedAlert | null {
-  const m = d.match(/^(?:HK|KR)?\d+\s+(.+?)\s+(涨幅|跌幅)\s+([\d.]+)%(?:\s+现价([\d.]+))?/);
+  // display 格式: "600673 东阳光 ↓-4.0% → 34.24" 或 "HK07709 ＸＬ二南方海力士 ↓-2.4% → 34.56"
+  const m = d.match(/^(?:HK|KR)?\d+\s+(.+?)\s+([↑↓][+-]?[\d.]+%)/);
   if (!m) return null;
+  const pctStr = m[2]; // e.g. "↓-4.0%"
+  const isUp = pctStr.startsWith("↑");
   return {
     stockName: m[1].trim(),
     stockCode: shortCode,
-    signal: m[2] === "涨幅" ? "大涨" : "大跌",
-    signalColor: m[2] === "涨幅" ? D.red : D.green,
-    price: m[4] || "",
-    detail: `${m[2]}${m[3]}%`,
+    signal: isUp ? "大涨" : "大跌",
+    signalColor: isUp ? D.red : D.green,
+    price: d.match(/→\s*([\d.]+)/)?.[1] || "",
+    detail: pctStr,
   };
 }
 
@@ -189,13 +191,13 @@ function parsePortfolio(_e: AlertEvent, d: string, _sym: string, _shortCode: str
   return { stockName: "组合", stockCode: "", signal: "组合P&L", signalColor: D.purple, price: "", detail: d };
 }
 
-function parseTradePlan(e: AlertEvent, d: string, _sym: string, shortCode: string): ParsedAlert | null {
+function parseTradePlan(e: AlertEvent, d: string, _sym: string, shortCode: string, services?: { id: string; name?: string }[]): ParsedAlert | null {
   // 两种格式:
-  // 1. "📋 五一视界 回踩分批建仓 | 主力成本区+MA20 | 买入 200 股 @ 55.00" (新格式)
-  // 2. "HK06651 五一视界 跌幅 11.6%" (旧格式 fallback)
+  // 1. "📋 澜起科技持有策略 | 卖出 100股: 止盈1——200卖100股(1/3) | 卖出 100 股 @ 200.00" (plan name only)
+  // 2. "📋 五一视界 回踩分批建仓 | ... | 买入 200 股 @ 55.00" (has stock name in plan name)
+  // 3. "HK06651 五一视界 跌幅 11.6%" (旧格式 fallback)
   let planName = "", label = "", priceStr = "";
   if (d.includes("📋")) {
-    // 新格式
     const parts = d.replace(/^📋\s*/, "").split(/\s*\|\s*/);
     planName = parts[0] || "";
     label = parts[1] || "";
@@ -203,15 +205,20 @@ function parseTradePlan(e: AlertEvent, d: string, _sym: string, shortCode: strin
     const priceMatch = action.match(/@\s*([\d.]+)/);
     priceStr = priceMatch ? priceMatch[1] : "";
   } else {
-    // 旧格式 fallback: "HK06651 五一视界 跌幅 11.6%"
     const priceMatch = d.match(/现价([\d.]+)/);
     priceStr = priceMatch ? priceMatch[1] : "";
-    // 提取股票名 (跳过 code)
     const parts = d.split(/\s+/);
     planName = parts.length > 1 ? parts.slice(1).join(" ").split(/\s/)[0] : "";
   }
+  // 尝试从 services 查找股票名称（用于 HK plan，plan name 不等于股票名）
+  let stockName = planName.split(/\s+/)[0] || "";
+  const sym = e.symbol || "";
+  if (!stockName || stockName === "持有策略" || stockName === "建仓策略") {
+    const svc = services?.find((s) => s.id === sym);
+    if (svc?.name) stockName = svc.name;
+  }
   return {
-    stockName: planName.split(/\s+/)[0] || "",
+    stockName,
     stockCode: shortCode,
     signal: label || "交易计划",
     signalColor: D.purple,
@@ -235,14 +242,14 @@ const KIND_PARSERS: Record<string, AlertParser> = {
 };
 
 // ── 统一入口 ──────────────────────────────────────────────────────────────────
-function parseAlert(e: AlertEvent): ParsedAlert {
+function parseAlert(e: AlertEvent, services?: { id: string; name?: string }[]): ParsedAlert {
   const d = e.display || "";
   const sym = e.symbol || "";
   const shortCode = sym.startsWith("tag:") ? sym.replace("tag:", "") : sym.replace(/^(?:HK|KR)/, "");
 
   const parser = KIND_PARSERS[e.kind];
   if (parser) {
-    const result = parser(e, d, sym, shortCode);
+    const result = parser(e, d, sym, shortCode, services);
     if (result) return result;
   }
 
@@ -436,11 +443,11 @@ type StockGroup = {
   latestTime: string;
 };
 
-function buildGroups(events: AlertEvent[]): StockGroup[] {
+function buildGroups(events: AlertEvent[], services?: { id: string; name?: string }[]): StockGroup[] {
   const map = new Map<string, StockGroup>();
   // Process in chronological order so latest overwrites
   for (const e of events) {
-    const parsed = parseAlert(e);
+    const parsed = parseAlert(e, services);
     const key = e.symbol || parsed.stockCode || "unknown";
     let group = map.get(key);
     if (!group) {
@@ -491,6 +498,10 @@ function buildGroups(events: AlertEvent[]): StockGroup[] {
 
 function GroupedRow({ group, expanded, onToggle }: { group: StockGroup; expanded: boolean; onToggle: () => void }) {
   const isHighPriority = group.maxLevel <= 1;
+  // Timeline dots: chronological order, show first 10 + overflow
+  const MAX_DOTS = 10;
+  const dotsToShow = group.timeline.slice(0, MAX_DOTS);
+  const overflow = group.timeline.length - MAX_DOTS;
   return (
     <div>
       <div
@@ -533,31 +544,26 @@ function GroupedRow({ group, expanded, onToggle }: { group: StockGroup; expanded
             )}
           </span>
         )}
-        {/* Signal: 只显示最新信号，去掉聚合噪音 */}
-        <span style={{ marginLeft: 8, flex: 1, display: "flex", gap: 4, overflow: "hidden" }}>
-          {group.signals[0] && (
+        {/* Timeline dots: chronological sequence of events */}
+        <span style={{ marginLeft: 8, flex: 1, display: "flex", gap: 3, alignItems: "center", overflow: "hidden", minWidth: 0 }}>
+          {dotsToShow.map((ev, i) => (
             <span
-              key={group.signals[0].signal}
+              key={`${ev.time}-${i}`}
+              title={`${ev.time} ${ev.signal} ${ev.changePct >= 0 ? "+" : ""}${ev.changePct.toFixed(1)}%`}
               style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 3,
-                background: group.signals[0].color + "22",
-                color: group.signals[0].color,
-                padding: "1px 6px",
-                borderRadius: 3,
-                fontSize: 10,
-                fontWeight: 600,
-                whiteSpace: "nowrap",
-                border: `1px solid ${group.signals[0].color}44`,
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: ev.signalColor,
+                flexShrink: 0,
+                display: "inline-block",
+                opacity: ev.level === 1 ? 1 : ev.level === 2 ? 0.75 : 0.45,
               }}
-            >
-              {group.signals[0].signal}
-            </span>
-          )}
-          {group.signals.length > 1 && (
-            <span style={{ color: D.comment, fontSize: 10, flexShrink: 0 }}>
-              +{group.signals.length - 1}
+            />
+          ))}
+          {overflow > 0 && (
+            <span style={{ color: D.comment, fontSize: 9, flexShrink: 0 }}>
+              +{overflow}
             </span>
           )}
         </span>
@@ -609,8 +615,6 @@ export default function AlertsPage() {
   const { status: tradingStatus } = useTradingStatus();
   const [summary, setSummary] = useState<DailySummary | null>(null);
   const [summaryOpen, setSummaryOpen] = useState(true);
-  const [briefing, setBriefing] = useState<MorningBriefing | null>(null);
-  const [briefingOpen, setBriefingOpen] = useState(true);
   const [showL3, setShowL3] = useState(false);
   const [viewMode, setViewMode] = useState<"grouped" | "detail">("grouped");
   const [expandedStocks, setExpandedStocks] = useState<Set<string>>(new Set());
@@ -621,28 +625,18 @@ export default function AlertsPage() {
       const sData = await res.json();
       const s = sData.data;
       const today = new Date().toISOString().slice(0, 10);
-      setSummary(s && s.date === today ? s : null);
+      // Show if: has report (post-market) OR has morning data (pre-market)
+      setSummary(s && (s.report || s.morning) && s.date === today ? s : s && !s.report && s.morning ? s : null);
     } catch {
       // summary fetch failure is non-critical
     }
   }, []);
 
-  const fetchBriefing = useCallback(async () => {
-    try {
-      const res = await fetch("/api/morning-briefing", { cache: "no-store" });
-      const data = await res.json();
-      setBriefing(data.generated_at ? data : null);
-    } catch {
-      // briefing fetch failure is non-critical
-    }
-  }, []);
-
   useEffect(() => {
-    fetchBriefing();
     fetchSummary();
     const timer = setInterval(fetchSummary, 30_000);
     return () => clearInterval(timer);
-  }, [fetchBriefing, fetchSummary]);
+  }, [fetchSummary]);
 
   // Level counts (memoized to avoid re-filtering on every render)
   const { l1Count, l2Count, l3Count } = useMemo(() => {
@@ -670,7 +664,7 @@ export default function AlertsPage() {
     });
   }, [events, showL3]);
   const sorted = useMemo(() => [...filtered].reverse(), [filtered]);
-  const groups = useMemo(() => buildGroups(filtered), [filtered]);
+  const groups = useMemo(() => buildGroups(filtered, services), [filtered, services]);
 
   const toggleStock = useCallback((key: string) => {
     setExpandedStocks((prev) => {
@@ -719,95 +713,7 @@ export default function AlertsPage() {
           lineHeight: 1.6,
         }}
       >
-        {/* ── Morning Briefing Card ── */}
-        {briefing && (
-          <div
-            style={{
-              border: `1px solid ${D.cyan}44`,
-              borderRadius: 4,
-              marginBottom: 12,
-              background: "#21222c",
-            }}
-          >
-            <div
-              onClick={() => setBriefingOpen(!briefingOpen)}
-              style={{
-                padding: "6px 12px",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                userSelect: "none",
-                borderBottom: briefingOpen ? `1px solid ${D.cyan}33` : "none",
-              }}
-            >
-              <span style={{ color: D.cyan, fontSize: 11, width: "2ch" }}>
-                {briefingOpen ? "\u25be" : "\u25b8"}
-              </span>
-              <span style={{ color: D.cyan, fontWeight: 700 }}>
-                # ── 早间简报 {briefing.generated_at?.slice(0, 10)}
-              </span>
-              <span style={{ color: D.comment, fontSize: 11, marginLeft: 8 }}>
-                {Object.keys(briefing.us_markets).length > 0 && (
-                  <span>
-                    美股:{" "}
-                    {Object.values(briefing.us_markets).map((m, i) => (
-                      <span key={i} style={{ color: m.change_pct >= 0 ? D.green : D.red }}>
-                        {m.name}{m.change_pct >= 0 ? "+" : ""}{m.change_pct}%{" "}
-                      </span>
-                    ))}
-                  </span>
-                )}
-              </span>
-              {briefing.global_news.length > 0 && (
-                <span style={{ color: D.comment, fontSize: 11 }}>
-                  {briefing.global_news.length} 条新闻
-                </span>
-              )}
-            </div>
-
-            {briefingOpen && (
-              <div style={{ padding: "8px 12px 12px", lineHeight: 1.7 }}>
-                {/* Market summary */}
-                <div style={{ display: "flex", gap: 16, marginBottom: 8, flexWrap: "wrap" }}>
-                  <div style={{ color: D.comment, fontSize: 11 }}>
-                    美股:{" "}
-                    {Object.values(briefing.us_markets).map((m, i) => (
-                      <span key={i} style={{ color: m.change_pct >= 0 ? D.green : D.red }}>
-                        {m.name}{m.change_pct >= 0 ? "+" : ""}{m.change_pct}%{" "}
-                      </span>
-                    ))}
-                  </div>
-                  {Object.keys(briefing.asia_markets).length > 0 && (
-                    <div style={{ color: D.comment, fontSize: 11 }}>
-                      亚股:{" "}
-                      {Object.values(briefing.asia_markets).map((m, i) => (
-                        <span key={i} style={{ color: m.change_pct >= 0 ? D.green : D.red }}>
-                          {m.name}{m.change_pct >= 0 ? "+" : ""}{m.change_pct}%{" "}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* News */}
-                {briefing.global_news.length > 0 && (
-                  <div>
-                    <div style={{ color: D.purple, fontSize: 11, marginBottom: 4 }}>重要新闻:</div>
-                    {briefing.global_news.slice(0, 5).map((n, i) => (
-                      <div key={i} style={{ color: D.fg, fontSize: 11, marginBottom: 4, paddingLeft: 8 }}>
-                        <span style={{ color: D.comment }}>[{n.source}]</span>{" "}
-                        <span style={{ color: D.yellow }}>{n.title.replace(/^.*?：/, "").slice(0, 60)}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── Daily Summary Card ── */}
+        {/* ── Daily Summary / Morning Briefing Card (unified) ── */}
         {summary && (
           <div
             style={{
@@ -834,11 +740,33 @@ export default function AlertsPage() {
                 {summaryOpen ? "\u25be" : "\u25b8"}
               </span>
               <span style={{ color: D.purple, fontWeight: 700 }}>
-                # ── 信号日报 {summary.date}
+                {summary.report
+                  ? `# ── 信号日报 ${summary.date}`
+                  : `# ── 早间简报 ${summary.morning?.generated_at?.slice(0, 10) ?? summary.date}`}
               </span>
               {st && (
                 <span style={{ color: D.comment, fontSize: 11 }}>
                   ({st.totalSignals} signals)
+                </span>
+              )}
+              {/* Morning briefing badge (pre-market mode) */}
+              {!summary.report && summary.morning && (
+                <span style={{ color: D.cyan, fontSize: 11 }}>
+                  {Object.keys(summary.morning.us_markets ?? {}).length > 0 && (
+                    <span>
+                      美股:{" "}
+                      {Object.values(summary.morning.us_markets).map((m, i) => (
+                        <span key={i} style={{ color: m.change_pct >= 0 ? D.green : D.red }}>
+                          {m.name}{m.change_pct >= 0 ? "+" : ""}{m.change_pct}%{" "}
+                        </span>
+                      ))}
+                    </span>
+                  )}
+                </span>
+              )}
+              {!summary.report && summary.morning && (
+                <span style={{ color: D.comment, fontSize: 11 }}>
+                  {summary.morning.global_news?.length ?? 0} 条新闻
                 </span>
               )}
               {/* Stats chips */}
@@ -857,10 +785,48 @@ export default function AlertsPage() {
               )}
             </div>
 
-            {/* Collapsible report content */}
+            {/* Collapsible content */}
             {summaryOpen && (
               <div style={{ padding: "8px 12px 12px", lineHeight: 1.7 }}>
-                <TerminalMarkdown text={summary.report} />
+                {summary.report ? (
+                  // Post-market: full LLM report
+                  <TerminalMarkdown text={summary.report} />
+                ) : summary.morning ? (
+                  // Pre-market: morning briefing only
+                  <div>
+                    <div style={{ display: "flex", gap: 16, marginBottom: 8, flexWrap: "wrap" }}>
+                      <div style={{ color: D.comment, fontSize: 11 }}>
+                        美股:{" "}
+                        {Object.values(summary.morning.us_markets).map((m, i) => (
+                          <span key={i} style={{ color: m.change_pct >= 0 ? D.green : D.red }}>
+                            {m.name}{m.change_pct >= 0 ? "+" : ""}{m.change_pct}%{" "}
+                          </span>
+                        ))}
+                      </div>
+                      {Object.keys(summary.morning.asia_markets).length > 0 && (
+                        <div style={{ color: D.comment, fontSize: 11 }}>
+                          亚股:{" "}
+                          {Object.values(summary.morning.asia_markets).map((m, i) => (
+                            <span key={i} style={{ color: m.change_pct >= 0 ? D.green : D.red }}>
+                              {m.name}{m.change_pct >= 0 ? "+" : ""}{m.change_pct}%{" "}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    {summary.morning.global_news.length > 0 && (
+                      <div>
+                        <div style={{ color: D.purple, fontSize: 11, marginBottom: 4 }}>重要新闻:</div>
+                        {summary.morning.global_news.slice(0, 5).map((n, i) => (
+                          <div key={i} style={{ color: D.fg, fontSize: 11, marginBottom: 4, paddingLeft: 8 }}>
+                            <span style={{ color: D.comment }}>[{n.source}]</span>{" "}
+                            <span style={{ color: D.yellow }}>{n.title.replace(/^.*?：/, "").slice(0, 60)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
               </div>
             )}
           </div>
@@ -893,7 +859,7 @@ export default function AlertsPage() {
           ))
         ) : (
           sorted.map((e, i) => {
-            const parsed = parseAlert(e);
+            const parsed = parseAlert(e, services);
             const chgColor = e.change_pct > 0 ? D.red : e.change_pct < 0 ? D.green : D.comment;
             const isHighPriority = (e.level ?? 2) <= 1;
 
