@@ -498,85 +498,81 @@ function buildGroups(events: AlertEvent[], services?: { id: string; name?: strin
 
 function GroupedRow({ group, expanded, onToggle }: { group: StockGroup; expanded: boolean; onToggle: () => void }) {
   const isHighPriority = group.maxLevel <= 1;
-  // Timeline dots: chronological order, show first 10 + overflow
+  // Use latest event as the "summary" row — same columns as detail rows
+  const latest = group.timeline[0];
   const MAX_DOTS = 10;
   const dotsToShow = group.timeline.slice(0, MAX_DOTS);
   const overflow = group.timeline.length - MAX_DOTS;
   return (
     <div>
+      {/* Grouped header row — same column layout as detail rows */}
       <div
         onClick={onToggle}
         style={{
           display: "flex",
           alignItems: "center",
-          padding: "5px 6px",
+          padding: "4px 6px",
           borderBottom: "1px solid #191a21",
           background: isHighPriority ? "#44475a" : "transparent",
           borderLeft: isHighPriority ? `3px solid ${D.yellow}` : "3px solid transparent",
           cursor: "pointer",
           gap: 4,
+          fontSize: 12,
         }}
       >
         {/* Expand arrow */}
-        <span style={{ color: D.comment, width: 16, flexShrink: 0, fontSize: 10 }}>
+        <span style={{ color: D.comment, flexShrink: 0, width: 16, fontSize: 10 }}>
           {expanded ? "\u25be" : "\u25b8"}
         </span>
         {/* Level badge */}
-        <span style={{ color: LEVEL_COLORS[group.maxLevel] || D.comment, flexShrink: 0, width: 24, fontWeight: 700, fontSize: 11 }}>
+        <span style={{ color: LEVEL_COLORS[group.maxLevel] || D.comment, flexShrink: 0, width: 28, fontWeight: 700, fontSize: 11 }}>
           L{group.maxLevel}
         </span>
+        {/* Time — latest event time */}
+        <span style={{ color: D.comment, flexShrink: 0, width: 72 }}>{group.latestTime}</span>
+        {/* Signal — latest event signal */}
+        <span style={{ color: latest?.signalColor || D.comment, flexShrink: 0, width: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 600 }}>
+          {latest?.signal || "—"}
+        </span>
         {/* Stock code */}
-        <span style={{ color: D.cyan, flexShrink: 0, width: 64, fontWeight: 600 }}>
+        <span style={{ color: D.cyan, flexShrink: 0, width: 72, overflow: "hidden", whiteSpace: "nowrap", fontWeight: 600 }}>
           {group.stockCode}
         </span>
-        {/* Stock name */}
-        <span style={{ color: D.fg, flexShrink: 0, width: 90, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {group.stockName}
-        </span>
-        {/* Price + change% */}
-        {group.price && (
-          <span style={{ flexShrink: 0, width: 110, display: "flex", gap: 4, fontSize: 11 }}>
-            <span style={{ color: D.fg }}>{group.price}</span>
-            {group.changePct !== 0 && (
-              <span style={{ color: group.changePct > 0 ? D.red : D.green, fontWeight: 600 }}>
-                {group.changePct > 0 ? "+" : ""}{group.changePct.toFixed(1)}%
-              </span>
-            )}
+        {/* Price */}
+        <span style={{ color: D.fg, flexShrink: 0, width: 60, textAlign: "right" }}>{group.price || "—"}</span>
+        {/* Change% */}
+        {group.changePct != null ? (
+          <span style={{ color: group.changePct > 0 ? D.red : D.green, flexShrink: 0, width: 52, textAlign: "right", fontWeight: 600 }}>
+            {group.changePct >= 0 ? "+" : ""}{group.changePct.toFixed(1)}%
           </span>
+        ) : (
+          <span style={{ flexShrink: 0, width: 52 }} />
         )}
-        {/* Timeline dots: chronological sequence of events */}
-        <span style={{ marginLeft: 8, flex: 1, display: "flex", gap: 3, alignItems: "center", overflow: "hidden", minWidth: 0 }}>
-          {dotsToShow.map((ev, i) => (
-            <span
-              key={`${ev.time}-${i}`}
-              title={`${ev.time} ${ev.signal} ${ev.changePct >= 0 ? "+" : ""}${ev.changePct.toFixed(1)}%`}
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: "50%",
-                background: ev.signalColor,
-                flexShrink: 0,
-                display: "inline-block",
-                opacity: ev.level === 1 ? 1 : ev.level === 2 ? 0.75 : 0.45,
-              }}
-            />
-          ))}
-          {overflow > 0 && (
-            <span style={{ color: D.comment, fontSize: 9, flexShrink: 0 }}>
-              +{overflow}
-            </span>
-          )}
-        </span>
-        {/* Total count */}
-        <span style={{ color: D.comment, flexShrink: 0, fontSize: 10, marginLeft: 4 }}>
-          {group.totalCount}条
-        </span>
-        {/* Latest time */}
-        <span style={{ color: D.comment, flexShrink: 0, width: 56, textAlign: "right", fontSize: 11 }}>
-          {group.latestTime}
+        {/* Name + dots */}
+        <span style={{ color: D.comment, flex: 1, display: "flex", alignItems: "center", gap: 6, overflow: "hidden" }}>
+          <span style={{ color: D.fg, flexShrink: 0 }}>{group.stockName}</span>
+          <span style={{ display: "flex", gap: 2, alignItems: "center", flexShrink: 0 }}>
+            {dotsToShow.map((ev, i) => (
+              <span
+                key={`${ev.time}-${i}`}
+                title={`${ev.time} ${ev.signal} ${ev.changePct >= 0 ? "+" : ""}${ev.changePct.toFixed(1)}%`}
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: "50%",
+                  background: ev.signalColor,
+                  flexShrink: 0,
+                  display: "inline-block",
+                  opacity: ev.level === 1 ? 1 : ev.level === 2 ? 0.75 : 0.45,
+                }}
+              />
+            ))}
+            {overflow > 0 && <span style={{ color: D.comment, fontSize: 9 }}>+{overflow}</span>}
+          </span>
+          <span style={{ fontSize: 10, flexShrink: 0 }}>({group.totalCount}条)</span>
         </span>
       </div>
-      {/* Expanded timeline — aligned with column header */}
+      {/* Expanded timeline rows */}
       {expanded && (
         <div style={{ background: "#1a1b26", borderLeft: "3px solid #44475a" }}>
           {[...group.timeline].reverse().map((ev, i) => (
@@ -591,7 +587,7 @@ function GroupedRow({ group, expanded, onToggle }: { group: StockGroup; expanded
                 gap: 4,
               }}
             >
-              {/* Expand arrow placeholder */}
+              {/* Expand placeholder */}
               <span style={{ color: D.comment, width: 16, flexShrink: 0, fontSize: 10 }}>&#9656;</span>
               {/* Level */}
               <span style={{ color: LEVEL_COLORS[ev.level] || D.comment, flexShrink: 0, width: 28, fontSize: 10, fontWeight: 600 }}>
@@ -604,9 +600,13 @@ function GroupedRow({ group, expanded, onToggle }: { group: StockGroup; expanded
               {/* Stock code */}
               <span style={{ color: D.cyan, flexShrink: 0, width: 72, overflow: "hidden", whiteSpace: "nowrap" }}>{group.stockCode}</span>
               {/* Price */}
-              {ev.price ? <span style={{ color: D.fg, flexShrink: 0, width: 60, textAlign: "right" }}>{ev.price}</span> : <span style={{ width: 60 }} />}
+              {ev.price ? <span style={{ color: D.fg, flexShrink: 0, width: 60, textAlign: "right" }}>{ev.price}</span> : <span style={{ flexShrink: 0, width: 60 }} />}
               {/* Change% */}
-              {ev.changePct != null ? <span style={{ color: ev.changePct > 0 ? D.red : D.green, flexShrink: 0, width: 52, textAlign: "right" }}>{ev.changePct >= 0 ? "+" : ""}{ev.changePct.toFixed(1)}%</span> : <span style={{ width: 52 }} />}
+              {ev.changePct != null ? (
+                <span style={{ color: ev.changePct > 0 ? D.red : D.green, flexShrink: 0, width: 52, textAlign: "right" }}>{ev.changePct >= 0 ? "+" : ""}{ev.changePct.toFixed(1)}%</span>
+              ) : (
+                <span style={{ flexShrink: 0, width: 52 }} />
+              )}
               {/* Name + Detail */}
               <span style={{ color: D.comment, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {group.stockName} {ev.detail}
@@ -622,34 +622,9 @@ function GroupedRow({ group, expanded, onToggle }: { group: StockGroup; expanded
 export default function AlertsPage() {
   const { alertEvents: events, loading, fetchError, services } = useMetrics();
   const { status: tradingStatus } = useTradingStatus();
-  const [summary, setSummary] = useState<DailySummary | null>(null);
-  const [summaryOpen, setSummaryOpen] = useState(true);
   const [showL3, setShowL3] = useState(false);
   const [viewMode, setViewMode] = useState<"grouped" | "detail">("grouped");
   const [expandedStocks, setExpandedStocks] = useState<Set<string>>(new Set());
-
-  const fetchSummary = useCallback(async () => {
-    try {
-      const res = await fetch("/api/summary", { cache: "no-store" });
-      const sData = await res.json();
-      const s = sData.data;
-      const today = new Date().toISOString().slice(0, 10);
-      // Show if: has report (post-market, date match) OR has morning data (pre-market)
-      // When morning exists but daily_summary is stale (yesterday), still show morning
-      if (!s) { setSummary(null); return; }
-      if (s.report && s.date === today) { setSummary(s); return; }
-      if (s.morning) { setSummary(s); return; }
-      setSummary(null);
-    } catch {
-      // summary fetch failure is non-critical
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchSummary();
-    const timer = setInterval(fetchSummary, 30_000);
-    return () => clearInterval(timer);
-  }, [fetchSummary]);
 
   // Level counts (memoized to avoid re-filtering on every render)
   const { l1Count, l2Count, l3Count } = useMemo(() => {
@@ -687,7 +662,7 @@ export default function AlertsPage() {
     });
   }, []);
 
-  const st = summary?.stats;
+  const st = null;
 
   return (
     <div
@@ -726,125 +701,6 @@ export default function AlertsPage() {
           lineHeight: 1.6,
         }}
       >
-        {/* ── Daily Summary / Morning Briefing Card (unified) ── */}
-        {summary && (
-          <div
-            style={{
-              border: `1px solid ${D.purple}44`,
-              borderRadius: 4,
-              marginBottom: 12,
-              background: "#21222c",
-            }}
-          >
-            {/* Header row — always visible */}
-            <div
-              onClick={() => setSummaryOpen(!summaryOpen)}
-              style={{
-                padding: "6px 12px",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                userSelect: "none",
-                borderBottom: summaryOpen ? `1px solid ${D.purple}33` : "none",
-              }}
-            >
-              <span style={{ color: D.purple, fontSize: 11, width: "2ch" }}>
-                {summaryOpen ? "\u25be" : "\u25b8"}
-              </span>
-              <span style={{ color: D.purple, fontWeight: 700 }}>
-                {summary.date === new Date().toISOString().slice(0, 10) && summary.report
-                  ? `# ── 信号日报 ${summary.date}`
-                  : `# ── 早间简报 ${summary.morning?.generated_at?.slice(0, 10) ?? summary.date}`}
-              </span>
-              {st && (
-                <span style={{ color: D.comment, fontSize: 11 }}>
-                  ({st.totalSignals} signals)
-                </span>
-              )}
-              {/* Morning briefing badge (pre-market mode) */}
-              {summary.date !== new Date().toISOString().slice(0, 10) && summary.morning && (
-                <span style={{ color: D.cyan, fontSize: 11 }}>
-                  {Object.keys(summary.morning.us_markets ?? {}).length > 0 && (
-                    <span>
-                      美股:{" "}
-                      {Object.values(summary.morning.us_markets).map((m, i) => (
-                        <span key={i} style={{ color: m.change_pct >= 0 ? D.green : D.red }}>
-                          {m.name}{m.change_pct >= 0 ? "+" : ""}{m.change_pct}%{" "}
-                        </span>
-                      ))}
-                    </span>
-                  )}
-                </span>
-              )}
-              {summary.date !== new Date().toISOString().slice(0, 10) && summary.morning && (
-                <span style={{ color: D.comment, fontSize: 11 }}>
-                  {summary.morning.global_news?.length ?? 0} 条新闻
-                </span>
-              )}
-              {/* Stats chips — only when showing today's report */}
-              {st && summary.date === new Date().toISOString().slice(0, 10) && (
-                <span style={{ color: D.comment, fontSize: 11, marginLeft: "auto" }}>
-                  L1:{st.l1Count}
-                  {" | "}
-                  <span style={{ color: D.green }}>bull:{st.bullish}</span>
-                  {" "}
-                  <span style={{ color: D.red }}>bear:{st.bearish}</span>
-                  {" | "}
-                  <span style={{ color: D.green }}>up:{st.upCount}</span>
-                  {" "}
-                  <span style={{ color: D.red }}>down:{st.downCount}</span>
-                </span>
-              )}
-            </div>
-
-            {/* Collapsible content */}
-            {summaryOpen && (
-              <div style={{ padding: "8px 12px 12px", lineHeight: 1.7 }}>
-                {summary.date === new Date().toISOString().slice(0, 10) && summary.report ? (
-                  // Post-market: today's LLM report
-                  <TerminalMarkdown text={summary.report} />
-                ) : summary.morning ? (
-                  // Pre-market: morning briefing only
-                  <div>
-                    <div style={{ display: "flex", gap: 16, marginBottom: 8, flexWrap: "wrap" }}>
-                      <div style={{ color: D.comment, fontSize: 11 }}>
-                        美股:{" "}
-                        {Object.values(summary.morning.us_markets).map((m, i) => (
-                          <span key={i} style={{ color: m.change_pct >= 0 ? D.green : D.red }}>
-                            {m.name}{m.change_pct >= 0 ? "+" : ""}{m.change_pct}%{" "}
-                          </span>
-                        ))}
-                      </div>
-                      {Object.keys(summary.morning.asia_markets).length > 0 && (
-                        <div style={{ color: D.comment, fontSize: 11 }}>
-                          亚股:{" "}
-                          {Object.values(summary.morning.asia_markets).map((m, i) => (
-                            <span key={i} style={{ color: m.change_pct >= 0 ? D.green : D.red }}>
-                              {m.name}{m.change_pct >= 0 ? "+" : ""}{m.change_pct}%{" "}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    {summary.morning.global_news.length > 0 && (
-                      <div>
-                        <div style={{ color: D.purple, fontSize: 11, marginBottom: 4 }}>重要新闻:</div>
-                        {summary.morning.global_news.slice(0, 5).map((n, i) => (
-                          <div key={i} style={{ color: D.fg, fontSize: 11, marginBottom: 4, paddingLeft: 8 }}>
-                            <span style={{ color: D.comment }}>[{n.source}]</span>{" "}
-                            <span style={{ color: D.yellow }}>{n.title.replace(/^.*?：/, "").slice(0, 60)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ) : null}
-              </div>
-            )}
-          </div>
-        )}
-
         {fetchError && (
           <div style={{ color: D.red, marginBottom: 8, fontWeight: 500 }}>
             [ERROR] alert events fetch failed: {fetchError}
@@ -855,7 +711,7 @@ export default function AlertsPage() {
           <div style={{ color: D.comment }}>Loading...</div>
         )}
 
-        {!loading && !fetchError && sorted.length === 0 && !summary && (
+        {!loading && !fetchError && sorted.length === 0 && (
           <div style={{ color: D.comment, padding: "16px 0" }}>
             # No alert events today. Events reset daily at 08:00.
           </div>
@@ -863,7 +719,7 @@ export default function AlertsPage() {
 
         {viewMode === "grouped" ? (
           <>
-            {/* Column header — matches detail view column layout */}
+            {/* Column header — matches both grouped header and detail rows */}
             <div style={{ display: "flex", alignItems: "center", padding: "3px 6px", borderBottom: `1px solid ${D.comment}44`, gap: 4, fontSize: 10, color: D.comment }}>
               <span style={{ flexShrink: 0, width: 16 }} />
               <span style={{ flexShrink: 0, width: 28 }}>级别</span>
@@ -872,7 +728,7 @@ export default function AlertsPage() {
               <span style={{ flexShrink: 0, width: 72 }}>代码</span>
               <span style={{ flexShrink: 0, width: 60, textAlign: "right" }}>价格</span>
               <span style={{ flexShrink: 0, width: 52, textAlign: "right" }}>涨跌</span>
-              <span style={{ flex: 1 }}>名称+详情</span>
+              <span style={{ flex: 1 }}>名称</span>
             </div>
             {groups.map((g) => (
             <GroupedRow
