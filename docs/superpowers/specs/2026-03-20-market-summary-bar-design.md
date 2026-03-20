@@ -198,10 +198,12 @@ MarketSummaryBar 组件（A 股 tab / HK tab）
 
 ## 8. 实现步骤
 
-1. **Poller**：在 eastmoney 批量请求中追加创业板(`399006`)、科创50(`000688`) 的实时行情，提取 `price` 和 `change_pct` 写入 `marketTurnover` 新增字段（恒生科技和恒生指数由 Futu enricher 负责，见步骤2）
-2. **Futu enricher**：在 `futu_enricher.py` 的 `get_market_snapshot` 调用中追加指数代码 `HK.800000`（恒生）和 `HK.HSTECH`（恒生科技），提取 `last_price`、`change_ratio`、`turnover`，写入 `marketTurnover` 新增字段
+1. **Poller**：在 eastmoney 批量请求中追加创业板(`399006`)、科创50(`000688`) 的实时行情，提取 `price` 和 `change_pct` 写入 `marketTurnover` 新增字段（恒生/恒生科技由 Futu enricher 负责，见步骤2）
+2. **Futu enricher**：在 `futu_enricher.py` 的 `get_market_snapshot` 调用中追加指数代码 `HK800000`（恒生）和 `HKHSTECH`（恒生科技），提取 `last_price`、`change_ratio`、`turnover`，**写入 `marketTurnover` 而非 services 列表**。
+
+> **注**：`to_futu_code("HK800000")` → `"HK.800000"` 正确，无需修改代码转换逻辑。指数行不写入 `result[code]`，而是提取 `last_price`、`change_ratio`、`turnover` 写入 `marketTurnover` 的 `hkIndex`、`hkIndexPct`、`hkTurnover` 字段。
 3. **API route**：`marketTurnover` 透传，不变
-4. **TypeScript**：更新 `MarketTurnover` 类型，新增 6 个可选字段
+4. **TypeScript**：更新 `MarketTurnover` 类型，新增 7 个可选字段（chiNext/chiNextPct/kc50/kc50Pct/hkTech/hkTechPct/hkTurnover）
 5. **MarketSummaryBar 组件**：新建 `web/app/components/MarketSummaryBar.tsx`，实现 A/HK 两套渲染逻辑
 6. **page.tsx**：删除内嵌大盘行，插入新组件
 7. **watching/page.tsx**：同样插入 `MarketSummaryBar`
@@ -213,3 +215,5 @@ MarketSummaryBar 组件（A 股 tab / HK tab）
 - 不影响现有持仓/自选表格逻辑
 - 科创50/创业板开市后才有数据，盘前显示 `—`
 - 港股不显示 AMO（无全市场成交额数据源）
+- **Futu 不可用时**：大盘区指数显示 `—`，不影响个股行情（个股走 eastmoney/sina fallback）
+- **午休处理**：A 股 11:30–13:00、港股 12:00–13:00 期间指数保持显示（不归零），与现有个股行情行为一致
