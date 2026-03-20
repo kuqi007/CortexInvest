@@ -576,7 +576,7 @@ function GroupedRow({ group, expanded, onToggle }: { group: StockGroup; expanded
           {group.latestTime}
         </span>
       </div>
-      {/* Expanded timeline */}
+      {/* Expanded timeline — aligned with column header */}
       {expanded && (
         <div style={{ background: "#1a1b26", borderLeft: "3px solid #44475a" }}>
           {[...group.timeline].reverse().map((ev, i) => (
@@ -585,22 +585,31 @@ function GroupedRow({ group, expanded, onToggle }: { group: StockGroup; expanded
               style={{
                 display: "flex",
                 alignItems: "baseline",
-                padding: "2px 6px 2px 24px",
+                padding: "2px 6px 2px 20px",
                 borderBottom: "1px solid #15161e",
                 fontSize: 12,
                 gap: 4,
               }}
             >
-              <span style={{ color: D.comment, fontSize: 9, flexShrink: 0, width: 10 }}>&#9679;</span>
-              <span style={{ color: D.comment, width: 56, flexShrink: 0 }}>{ev.time}</span>
-              <span style={{ color: LEVEL_COLORS[ev.level] || D.comment, width: 22, flexShrink: 0, fontSize: 10, fontWeight: 600 }}>
+              {/* Expand arrow placeholder */}
+              <span style={{ color: D.comment, width: 16, flexShrink: 0, fontSize: 10 }}>&#9656;</span>
+              {/* Level */}
+              <span style={{ color: LEVEL_COLORS[ev.level] || D.comment, flexShrink: 0, width: 28, fontSize: 10, fontWeight: 600 }}>
                 L{ev.level}
               </span>
-              <span style={{ color: ev.signalColor, width: 96, flexShrink: 0, fontWeight: 600 }}>{ev.signal}</span>
-              {ev.price && <span style={{ color: D.fg, width: 56, flexShrink: 0, textAlign: "right" }}>{ev.price}</span>}
-              {ev.changePct ? <span style={{ color: ev.changePct > 0 ? D.red : D.green, width: 52, flexShrink: 0, textAlign: "right" }}>{ev.changePct >= 0 ? "+" : ""}{ev.changePct.toFixed(1)}%</span> : null}
+              {/* Time */}
+              <span style={{ color: D.comment, flexShrink: 0, width: 72 }}>{ev.time}</span>
+              {/* Signal */}
+              <span style={{ color: ev.signalColor, flexShrink: 0, width: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 600 }}>{ev.signal}</span>
+              {/* Stock code */}
+              <span style={{ color: D.cyan, flexShrink: 0, width: 72, overflow: "hidden", whiteSpace: "nowrap" }}>{group.stockCode}</span>
+              {/* Price */}
+              {ev.price ? <span style={{ color: D.fg, flexShrink: 0, width: 60, textAlign: "right" }}>{ev.price}</span> : <span style={{ width: 60 }} />}
+              {/* Change% */}
+              {ev.changePct != null ? <span style={{ color: ev.changePct > 0 ? D.red : D.green, flexShrink: 0, width: 52, textAlign: "right" }}>{ev.changePct >= 0 ? "+" : ""}{ev.changePct.toFixed(1)}%</span> : <span style={{ width: 52 }} />}
+              {/* Name + Detail */}
               <span style={{ color: D.comment, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {ev.detail}
+                {group.stockName} {ev.detail}
               </span>
             </div>
           ))}
@@ -625,8 +634,12 @@ export default function AlertsPage() {
       const sData = await res.json();
       const s = sData.data;
       const today = new Date().toISOString().slice(0, 10);
-      // Show if: has report (post-market) OR has morning data (pre-market)
-      setSummary(s && (s.report || s.morning) && s.date === today ? s : s && !s.report && s.morning ? s : null);
+      // Show if: has report (post-market, date match) OR has morning data (pre-market)
+      // When morning exists but daily_summary is stale (yesterday), still show morning
+      if (!s) { setSummary(null); return; }
+      if (s.report && s.date === today) { setSummary(s); return; }
+      if (s.morning) { setSummary(s); return; }
+      setSummary(null);
     } catch {
       // summary fetch failure is non-critical
     }
@@ -740,7 +753,7 @@ export default function AlertsPage() {
                 {summaryOpen ? "\u25be" : "\u25b8"}
               </span>
               <span style={{ color: D.purple, fontWeight: 700 }}>
-                {summary.report
+                {summary.date === new Date().toISOString().slice(0, 10) && summary.report
                   ? `# ── 信号日报 ${summary.date}`
                   : `# ── 早间简报 ${summary.morning?.generated_at?.slice(0, 10) ?? summary.date}`}
               </span>
@@ -750,7 +763,7 @@ export default function AlertsPage() {
                 </span>
               )}
               {/* Morning briefing badge (pre-market mode) */}
-              {!summary.report && summary.morning && (
+              {summary.date !== new Date().toISOString().slice(0, 10) && summary.morning && (
                 <span style={{ color: D.cyan, fontSize: 11 }}>
                   {Object.keys(summary.morning.us_markets ?? {}).length > 0 && (
                     <span>
@@ -764,13 +777,13 @@ export default function AlertsPage() {
                   )}
                 </span>
               )}
-              {!summary.report && summary.morning && (
+              {summary.date !== new Date().toISOString().slice(0, 10) && summary.morning && (
                 <span style={{ color: D.comment, fontSize: 11 }}>
                   {summary.morning.global_news?.length ?? 0} 条新闻
                 </span>
               )}
-              {/* Stats chips */}
-              {st && (
+              {/* Stats chips — only when showing today's report */}
+              {st && summary.date === new Date().toISOString().slice(0, 10) && (
                 <span style={{ color: D.comment, fontSize: 11, marginLeft: "auto" }}>
                   L1:{st.l1Count}
                   {" | "}
@@ -788,8 +801,8 @@ export default function AlertsPage() {
             {/* Collapsible content */}
             {summaryOpen && (
               <div style={{ padding: "8px 12px 12px", lineHeight: 1.7 }}>
-                {summary.report ? (
-                  // Post-market: full LLM report
+                {summary.date === new Date().toISOString().slice(0, 10) && summary.report ? (
+                  // Post-market: today's LLM report
                   <TerminalMarkdown text={summary.report} />
                 ) : summary.morning ? (
                   // Pre-market: morning briefing only
@@ -849,16 +862,40 @@ export default function AlertsPage() {
         )}
 
         {viewMode === "grouped" ? (
-          groups.map((g) => (
+          <>
+            {/* Column header — matches detail view column layout */}
+            <div style={{ display: "flex", alignItems: "center", padding: "3px 6px", borderBottom: `1px solid ${D.comment}44`, gap: 4, fontSize: 10, color: D.comment }}>
+              <span style={{ flexShrink: 0, width: 16 }} />
+              <span style={{ flexShrink: 0, width: 28 }}>级别</span>
+              <span style={{ flexShrink: 0, width: 72 }}>时间</span>
+              <span style={{ flexShrink: 0, width: 100 }}>信号</span>
+              <span style={{ flexShrink: 0, width: 72 }}>代码</span>
+              <span style={{ flexShrink: 0, width: 60, textAlign: "right" }}>价格</span>
+              <span style={{ flexShrink: 0, width: 52, textAlign: "right" }}>涨跌</span>
+              <span style={{ flex: 1 }}>名称+详情</span>
+            </div>
+            {groups.map((g) => (
             <GroupedRow
               key={g.symbol || g.stockCode}
               group={g}
               expanded={expandedStocks.has(g.symbol || g.stockCode)}
               onToggle={() => toggleStock(g.symbol || g.stockCode)}
             />
-          ))
+          ))}
+          </>
         ) : (
-          sorted.map((e, i) => {
+          <>
+            {/* Column header */}
+            <div style={{ display: "flex", alignItems: "center", padding: "3px 6px", borderBottom: `1px solid ${D.comment}44`, gap: 4, fontSize: 10, color: D.comment }}>
+              <span style={{ flexShrink: 0, width: 72 }}>时间</span>
+              <span style={{ flexShrink: 0, width: 28 }}>级别</span>
+              <span style={{ flexShrink: 0, width: 100 }}>信号</span>
+              <span style={{ flexShrink: 0, width: 72 }}>代码</span>
+              <span style={{ flexShrink: 0, width: 60, textAlign: "right" }}>价格</span>
+              <span style={{ flexShrink: 0, width: 52, textAlign: "right" }}>涨跌</span>
+              <span style={{ flex: 1 }}>名称+详情</span>
+            </div>
+            {sorted.map((e, i) => {
             const parsed = parseAlert(e, services);
             const chgColor = e.change_pct > 0 ? D.red : e.change_pct < 0 ? D.green : D.comment;
             const isHighPriority = (e.level ?? 2) <= 1;
@@ -903,7 +940,8 @@ export default function AlertsPage() {
                 </span>
               </div>
             );
-          })
+          })}
+          </>
         )}
 
       </div>

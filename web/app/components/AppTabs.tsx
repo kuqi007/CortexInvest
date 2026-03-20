@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ReactNode } from "react";
 
-export type AppTabKey = "holdings" | "watching" | "alerts" | "sim" | "sector" | "manage";
+export type AppTabKey = "holdings" | "watching" | "alerts" | "daily" | "sim" | "sector" | "manage";
 
 type TabItem = { key: AppTabKey; label: string; href: string };
 
@@ -9,6 +9,7 @@ const TAB_ITEMS: TabItem[] = [
   { key: "holdings", label: "holdings", href: "/" },
   { key: "watching", label: "watching", href: "/watching" },
   { key: "alerts", label: "alerts", href: "/alerts" },
+  { key: "daily", label: "daily", href: "/daily" },
   { key: "sim", label: "sim", href: "/sim" },
   { key: "sector", label: "sector", href: "/sector" },
   { key: "manage", label: "manage", href: "/manage" },
