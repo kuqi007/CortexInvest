@@ -40,6 +40,127 @@ CONFIG_PATH = PROJECT_ROOT / "src" / "data" / "monitor_config.json"
 OUTPUT_PATH = PROJECT_ROOT / "src" / "data" / "market_data.json"
 DB_PATH = PROJECT_ROOT / "src" / "data" / "sim_trading.db"
 
+# ── AMO History (模块级状态，poll_once 之间保持) ──
+# _amo_history[code] = [amount_n, ..., amount_1]  # 最近的 N 天成交额(元)，最多12天
+_amo_history: dict[str, list[float]] = {}
+# market_amo_history[date_str] = total_amount(亿元)
+_market_amo_history: list[tuple[str, float]] = []  # [(date, amount), ...]
+
+_AMO_DAYS_1 = 6   # AMO1 短周期
+_AMO_DAYS_2 = 12  # AMO2 中周期
+AMO_MIN_AMOUNT = 1_000_000  # 最小成交额(元)，低于此值不计入 AMO
+
+
+def _load_amo_history_from_db(codes: list[str]) -> dict[str, list[float]]:
+    """从 daily_kline 加载历史成交额(amount = volume × close × 100)，最多12天。
+
+    注意：daily_kline.volume 的单位是"手"（1手=100股），但实时API的 vol 是"股"。
+    为保持单位一致，所有历史成交额都用 vol × close × 100（元）计算，
+    与实时 amount = vol(股) × price（元） 的单位相同。
+
+    Returns: {code: [most_recent_amount, ..., oldest_amount]}  单位：元
+    """
+    history: dict[str, list[float]] = {}
+    if not codes:
+        return history
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        placeholders = ",".join("?" * len(codes))
+        rows = conn.execute(
+            f"""
+            SELECT code, date, volume, close
+            FROM daily_kline
+            WHERE code IN ({placeholders})
+            ORDER BY date DESC
+            LIMIT 500
+            """,
+            codes,
+        ).fetchall()
+        conn.close()
+
+        # 按 code 分组，每个取最多12条（最近12天）
+        by_code: dict[str, list[tuple[str, float]]] = {}
+        for code, date, volume, close in rows:
+            if code not in by_code:
+                by_code[code] = []
+            # daily_kline.volume 单位是"手"（1手=100股），×100 转为股再乘价格
+            if volume and close and volume > 0 and close > 0:
+                amount = volume * close * 100  # 元
+                by_code[code].append((date, amount))
+
+        # 排序并取最近12天
+        for code, items in by_code.items():
+            items.sort(key=lambda x: x[0], reverse=True)
+            history[code] = [amt for _, amt in items[:_AMO_DAYS_2]]
+    except Exception as e:
+        logger.warning(f"load_amo_history_from_db 失败: {e}")
+    return history
+
+
+
+def _update_amo_for_stock(code: str, amount_today: float) -> tuple[float, float]:
+    """更新单只股票的 AMO 历史，返回 (amo1, amo2)。
+
+    _amo_history[code][0] = 今天（从DB加载，或本次盘中插入），
+    [1:] = 历史数据（由远及近）。
+
+    AMO1 = 今天 / 前5天均值；AMO2 = 今天 / 前11天均值。
+    """
+    global _amo_history
+    if code not in _amo_history:
+        _amo_history[code] = []
+
+    # 只在今天不在 DB 历史时插入（盘中实时更新）
+    if amount_today >= AMO_MIN_AMOUNT:
+        if not _amo_history[code] or _amo_history[code][0] != amount_today:
+            _amo_history[code].insert(0, amount_today)
+
+    # keep max 12 days
+    if len(_amo_history[code]) > _AMO_DAYS_2:
+        _amo_history[code] = _amo_history[code][: _AMO_DAYS_2]
+
+    # 计算 AMO：只用历史数据 [1:] 算均值
+    hist = _amo_history[code]
+    hist_past = hist[1:]  # 排除今天
+    n = len(hist_past)
+    if n == 0:
+        return 1.0, 1.0
+    avg5 = sum(hist_past[:_AMO_DAYS_1]) / min(n, _AMO_DAYS_1)
+    avg12 = sum(hist_past) / max(n, 1)
+    avg5 = max(avg5, 1)
+    avg12 = max(avg12, 1)
+    return amount_today / avg5, amount_today / avg12
+
+
+# ── 大盘 AMO（两市合计成交额，单位：亿元 × 1e8 = 元）──
+_market_amo_12d: list[float] = []  # 最近12天每日两市合计成交额(元)
+
+
+def _update_market_amo(total_yi: float):
+    """更新大盘 AMO 历史。total_yi: 两市合计成交额（亿元）。"""
+    global _market_amo_12d
+    amount_yuan = total_yi * 1e8
+    if not _market_amo_12d or _market_amo_12d[0] != amount_yuan:
+        _market_amo_12d.insert(0, amount_yuan)
+        if len(_market_amo_12d) > _AMO_DAYS_2:
+            _market_amo_12d = _market_amo_12d[: _AMO_DAYS_2]
+
+
+def _get_market_amo1() -> float:
+    hist = _market_amo_12d
+    if len(hist) < 2:
+        return 1.0
+    avg6 = sum(hist[1:_AMO_DAYS_1 + 1]) / min(len(hist) - 1, _AMO_DAYS_1)
+    return hist[0] / max(avg6, 1)
+
+
+def _get_market_amo2() -> float:
+    hist = _market_amo_12d
+    if len(hist) < 2:
+        return 1.0
+    avg12 = sum(hist[1:]) / max(len(hist) - 1, 1)
+    return hist[0] / max(avg12, 1)
+
 
 def load_watchlist_from_db() -> tuple[dict, dict]:
     """从 DB 读取 watchlist 和 settings，单一数据源。
@@ -333,12 +454,19 @@ def poll_once() -> bool:
     即使个股行情抓取失败，也尝试写入大盘数据（成交额/汇率），
     确保 dashboard 至少能看到市场概览。
     """
+    global _amo_history, _market_amo_history
     watchlist, settings = load_watchlist_from_db()
     symbols = list(watchlist.keys())
 
     if not symbols:
         logger.warning("watchlist 为空，跳过本轮")
         return False
+
+    # ── AMO 历史初始化（首次运行时从 DB 加载）──
+    if not _amo_history:
+        _amo_history = _load_amo_history_from_db(symbols)
+        loaded = len(_amo_history)
+        logger.info(f"AMO历史加载: {loaded} 只股票，{_AMO_DAYS_2} 天历史")
 
     # 分离 KR 股票（Yahoo Finance），其余走东方财富/新浪
     kr_symbols = [s for s in symbols if is_kr_symbol(s)]
@@ -365,6 +493,11 @@ def poll_once() -> bool:
         existing["settings"] = settings
         existing["_source"] = {"primary": "unavailable", "is_fallback": True, "futu_connected": False}
         if turnover:
+            # 市场 AMO 计算：成交额(亿元) × 1e8 = 元
+            total_yi = float(turnover.get("total", 0))
+            _update_market_amo(total_yi)
+            turnover["amo1"] = round(_get_market_amo1(), 3)
+            turnover["amo2"] = round(_get_market_amo2(), 3)
             existing["marketTurnover"] = turnover
         tmp = OUTPUT_PATH.with_suffix(".tmp")
         with open(tmp, "w", encoding="utf-8") as f:
@@ -378,6 +511,22 @@ def poll_once() -> bool:
     _backfill_missing_names(stocks, watchlist)
 
     services = build_services(stocks, watchlist)
+
+    # ── AMO 计算：每只股票 amount = vol × close（个股），更新历史后算 AMO1/AMO2 ──
+    for svc in services:
+        code = svc["id"]
+        vol = svc.get("vol", 0) or 0
+        price = svc.get("price", 0) or 0
+        # 成交额 = 成交量 × 当前价（近似，实际应为均价，此处用现价估算，单位：元）
+        amount_today = vol * price
+        if amount_today > AMO_MIN_AMOUNT:
+            amo1, amo2 = _update_amo_for_stock(code, amount_today)
+            svc["amo1"] = round(amo1, 3)
+            svc["amo2"] = round(amo2, 3)
+        else:
+            # 成交额太小（ETF/极低流动性），AMO 置 1（无量价参考价值）
+            svc["amo1"] = 1.0
+            svc["amo2"] = 1.0
 
     # 新浪降级时继承旧数据中的量比/换手率（新浪不提供这两个字段）
     if is_sina_fallback:
@@ -428,6 +577,13 @@ def poll_once() -> bool:
                 services.append(old_svc)
     except Exception:
         pass
+
+    # ── 市场 AMO：成交额(亿元) × 1e8 = 元 ──
+    if turnover:
+        total_yi = float(turnover.get("total", 0))
+        _update_market_amo(total_yi)
+        turnover["amo1"] = round(_get_market_amo1(), 3)
+        turnover["amo2"] = round(_get_market_amo2(), 3)
 
     payload = {
         "services": services,

@@ -304,6 +304,7 @@ def merge_data(market: dict, config: dict) -> dict:
             "prev_close": svc.get("prevClose", 0),
             "high": svc.get("high", 0),
             "low": svc.get("low", 0),
+            "amo1": svc.get("amo1"),
         }
 
     # Inject technical indicators from L2 daemon
@@ -2159,6 +2160,151 @@ class WatchDriftPatternEngine(PatternEngine):
 
 
 # ══════════════════════════════════════════
+# 6c. PanicSellEngine — 放量下跌恐慌盘检测
+# ══════════════════════════════════════════
+
+class PanicSellEngine(PatternEngine):
+    """检测大盘放量下跌 + 个股恐慌盘砸出，触发 L1/L2 告警。
+
+    双重确认：
+      大盘: AMO1(两市) > market_amo1_min  AND  (上证跌幅>=drop_pct OR 深证跌幅>=drop_pct)
+      个股: AMO1(持仓股) > stock_amo1_min  AND  该股跌幅 >= stock_drop_pct
+
+    市场先行逻辑：大盘条件不满足时不检测个股。
+    每日每只股票最多告警1次（cooldown_hours=24）。
+    """
+
+    def __init__(self, config_path: Path | None = None):
+        # 默认阈值
+        self._market_amo1_min = 1.3
+        self._market_drop_pct = 1.0
+        self._stock_amo1_min = 2.0
+        self._stock_drop_pct = 2.0
+        self._cooldown_hours = 24
+
+        # 从 alert_config.json 加载用户自定义阈值（如果存在）
+        if config_path and config_path.exists():
+            try:
+                import json as _j
+                cfg = _j.loads(config_path.read_text("utf-8"))
+                self._market_amo1_min = cfg.get("panic_market_amo1_min", self._market_amo1_min)
+                self._market_drop_pct = cfg.get("panic_market_drop_pct", self._market_drop_pct)
+                self._stock_amo1_min = cfg.get("panic_stock_amo1_min", self._stock_amo1_min)
+                self._stock_drop_pct = cfg.get("panic_stock_drop_pct", self._stock_drop_pct)
+                self._cooldown_hours = cfg.get("panic_cooldown_hours", self._cooldown_hours)
+            except Exception:
+                pass
+
+        # cooldown: {(date_str, symbol): last_alert_ts_ms}
+        self._cooldown: dict[tuple[str, str], int] = {}
+        self._watchlist: dict = {}
+
+    def update_config(self, config: dict):
+        self._watchlist = config.get("watchlist", {})
+
+    def reset(self):
+        # 每日 08:00 reset 时不清理 cooldown（已按 date 区分）
+        pass
+
+    def _load_market_amo(self) -> tuple[float | None, float | None, float, float]:
+        """读取 marketTurnover 的 AMO 值和指数涨跌幅。
+
+        Returns: (market_amo1, market_amo2, sh_pct, sz_pct)
+        """
+        market = read_json_safe(MARKET_DATA_PATH)
+        if market is None:
+            return None, None, 0.0, 0.0
+        mt = market.get("marketTurnover") or {}
+        amo1 = mt.get("amo1")
+        amo2 = mt.get("amo2")
+        sh_pct = mt.get("shPct", 0.0) or 0.0
+        sz_pct = mt.get("szPct", 0.0) or 0.0
+        return amo1, amo2, sh_pct, sz_pct
+
+    def _is_cooldown(self, symbol: str) -> bool:
+        today = datetime.now().strftime("%Y-%m-%d")
+        key = (today, symbol)
+        if key in self._cooldown:
+            last = self._cooldown[key]
+            elapsed_h = (time.time() * 1000 - last) / 3_600_000
+            return elapsed_h < self._cooldown_hours
+        return False
+
+    def _mark_alerted(self, symbol: str):
+        today = datetime.now().strftime("%Y-%m-%d")
+        self._cooldown[(today, symbol)] = int(time.time() * 1000)
+
+    def check(self, quotes: dict) -> list[dict]:
+        # 1. 读取大盘 AMO 和指数涨跌幅
+        market_amo1, _, sh_pct, sz_pct = self._load_market_amo()
+        if market_amo1 is None:
+            return []
+
+        # 2. 大盘条件检查
+        market_dropped = sh_pct <= -self._market_drop_pct or sz_pct <= -self._market_drop_pct
+        if not market_dropped:
+            return []  # 大盘未放量下跌，跳过
+
+        if market_amo1 < self._market_amo1_min:
+            return []  # 市场量能不足，跳过
+
+        # 大盘条件满足，检测个股
+        alerts = []
+        today_str = datetime.now().strftime("%Y-%m-%d")
+
+        for symbol, q in quotes.items():
+            # 只看持仓股（type=holding）或 ★星标自选股
+            entry = self._watchlist.get(symbol, {})
+            stype = entry.get("type", "")
+            is_star = entry.get("star", False)
+            if stype != "holding" and not is_star:
+                continue
+
+            # cooldown 检查
+            if self._is_cooldown(symbol):
+                continue
+
+            # 个股 AMO 和涨跌幅
+            # quotes 中的数据来自 market_data.json.services，每个 service 有 amo1
+            # 但 merge_data 构建 quotes 时可能没有带 amo1
+            amo1 = q.get("amo1")
+            if amo1 is None:
+                # fallback：从 market_data.json 直接读
+                market = read_json_safe(MARKET_DATA_PATH)
+                if market:
+                    for svc in market.get("services", []):
+                        if svc.get("id") == symbol:
+                            amo1 = svc.get("amo1")
+                            break
+            if amo1 is None or amo1 < self._stock_amo1_min:
+                continue
+
+            pct = q.get("change_pct", 0) or 0
+            if pct >= -self._stock_drop_pct:
+                continue
+
+            # 触发！
+            self._mark_alerted(symbol)
+            name = q.get("name", symbol)
+            level = 1 if is_star else 2
+
+            alerts.append({
+                "symbol": symbol,
+                "title": f"放量恐慌 {pct:.1f}%",
+                "message": f"[PANIC] {name} AMO1={amo1:.1f}x 跌幅{pct:.1f}%",
+                "display": f"🚨 {name} 放量下跌 | AMO1={amo1:.1f}x | {pct:.1f}% | 大盘AMO={market_amo1:.1f}x",
+                "_kind": "panic_sell",
+                "_level": level,
+                "_change_pct": pct,
+                "_stealth": f"{name} 放量恐慌 跌幅{pct:.1f}%",
+                "amo1": amo1,
+                "market_amo1": market_amo1,
+            })
+
+        return alerts
+
+
+# ══════════════════════════════════════════
 # 7. Main loop
 # ══════════════════════════════════════════
 
@@ -2217,6 +2363,7 @@ def run():
     # ── 注册通用形态引擎（新增形态只需在此 register 一行）──
     register_pattern_engine(GapFadeEngine(config))
     register_pattern_engine(WatchDriftPatternEngine(ALERT_CONFIG_PATH))
+    register_pattern_engine(PanicSellEngine(ALERT_CONFIG_PATH))
     # A股日线技术指标: 不再全局告警，改为交易计划条件单按需检测
     # (TradePlanEngine._get_ashare_indicators 在 15:05-15:20 窗口内自动拉取)
     sent_open_today = False
