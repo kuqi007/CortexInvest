@@ -45,6 +45,15 @@ class MockFutuContext:
                 rows.append(row)
         return (0, _make_snapshot_df(rows))  # RET_OK = 0
 
+    def get_stock_quote(self, codes):
+        """Return stock quote for index codes — used by HK index fetching path."""
+        rows = []
+        for code in codes:
+            row = self.snapshot_data.get(code)
+            if row:
+                rows.append(row)
+        return (0, _make_snapshot_df(rows))
+
     def close(self):
         self.closed = True
 
