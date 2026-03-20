@@ -116,6 +116,8 @@ export interface MarketTurnover {
   chiNextPct?: number; // 创业板涨跌幅
   kc50?: number;       // 科创50点位
   kc50Pct?: number;    // 科创50涨跌幅
+  hkIndex?: number;    // 恒生指数点位
+  hkIndexPct?: number;// 恒生指数涨跌幅
   hkTech?: number;     // 恒生科技点位
   hkTechPct?: number;  // 恒生科技涨跌幅
   hkTurnover?: number; // 港股成交额（HK.800000 turnover）
@@ -201,9 +203,9 @@ MarketSummaryBar 组件（A 股 tab / HK tab）
 1. **Poller**：在 eastmoney 批量请求中追加创业板(`399006`)、科创50(`000688`) 的实时行情，提取 `price` 和 `change_pct` 写入 `marketTurnover` 新增字段（恒生/恒生科技由 Futu enricher 负责，见步骤2）
 2. **Futu enricher**：在 `futu_enricher.py` 的 `get_market_snapshot` 调用中追加指数代码 `HK800000`（恒生）和 `HKHSTECH`（恒生科技），提取 `last_price`、`change_ratio`、`turnover`，**写入 `marketTurnover` 而非 services 列表**。
 
-> **注**：`to_futu_code("HK800000")` → `"HK.800000"` 正确，无需修改代码转换逻辑。指数行不写入 `result[code]`，而是提取 `last_price`、`change_ratio`、`turnover` 写入 `marketTurnover` 的 `hkIndex`、`hkIndexPct`、`hkTurnover` 字段。
+> **注**：`to_futu_code("HK800000")` → `"HK.800000"` 正确，无需修改代码转换逻辑。指数行不写入 `result[code]`，而是提取 `last_price`、`change_ratio`、`turnover` 写入 `marketTurnover` 的 `hkIndex`/`hkIndexPct`（恒生）、`hkTech`/`hkTechPct`（恒生科技）、`hkTurnover` 字段。
 3. **API route**：`marketTurnover` 透传，不变
-4. **TypeScript**：更新 `MarketTurnover` 类型，新增 7 个可选字段（chiNext/chiNextPct/kc50/kc50Pct/hkTech/hkTechPct/hkTurnover）
+4. **TypeScript**：更新 `MarketTurnover` 类型，新增 9 个可选字段（chiNext/chiNextPct/kc50/kc50Pct/hkIndex/hkIndexPct/hkTech/hkTechPct/hkTurnover）
 5. **MarketSummaryBar 组件**：新建 `web/app/components/MarketSummaryBar.tsx`，实现 A/HK 两套渲染逻辑
 6. **page.tsx**：删除内嵌大盘行，插入新组件
 7. **watching/page.tsx**：同样插入 `MarketSummaryBar`
