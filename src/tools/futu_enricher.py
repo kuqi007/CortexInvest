@@ -40,16 +40,20 @@ class FutuL2Enricher:
     用法:
         enricher = FutuL2Enricher()
         # 在 poll_once 中:
-        l2_data = enricher.enrich(services)
+        l2_data, hk_index = enricher.enrich(services)
         # l2_data = {"HK00700": {"mainNetInflow": 6.35e8, ...}, ...}
-        # 如果 Futu 不可用，l2_data = {}
+        # hk_index = {"hkIndex": 20000.0, "hkIndexPct": 1.5, "hkTurnover": 120000000000, ...}
+        # 如果 Futu 不可用，l2_data = {}, hk_index = {}
     """
+
+    INDEX_CODES = ["HK800000", "HKHSTECH"]
 
     def __init__(self, host: str = OPEND_HOST, port: int = OPEND_PORT):
         self._host = host
         self._port = port
         self._ctx = None
         self._last_fail_time: float = 0
+        self._hk_index_data: dict = {}  # 存储港股指数数据
 
     def _is_port_open(self) -> bool:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -90,15 +94,18 @@ class FutuL2Enricher:
                 pass
             self._ctx = None
 
-    def enrich(self, services: list[dict]) -> dict[str, dict]:
+    def enrich(self, services: list[dict]) -> tuple[dict[str, dict], dict]:
         """为 services 列表中的每只股票获取 L2 衍生信号
 
         Returns:
-            {stock_code: {field: value, ...}, ...}
-            失败时返回空 dict，不影响调用方。
+            (l2_extra, hk_index_data) — 失败时返回 ({}, {})
+            l2_extra: {stock_code: {field: value, ...}, ...}
+            hk_index_data: {"hkIndex": float, "hkIndexPct": float, "hkTurnover": float,
+                            "hkTech": float, "hkTechPct": float}
         """
+        self._hk_index_data = {}  # 重置指数数据
         if not self._ensure_connected():
-            return {}
+            return {}, {}
 
         try:
             return self._do_enrich(services)
@@ -107,17 +114,18 @@ class FutuL2Enricher:
             # 连接可能已断开，清理以便下次重连
             self.close()
             self._last_fail_time = time.time()
-            return {}
+            return {}, {}
 
-    def _do_enrich(self, services: list[dict]) -> dict[str, dict]:
+    def _do_enrich(self, services: list[dict]) -> tuple[dict[str, dict], dict]:
         from futu import RET_OK
 
         result = {}
+        self._hk_index_data = {}
 
         # 按股票分组获取数据
         codes = [s["id"] for s in services if s.get("id")]
         if not codes:
-            return {}
+            return {}, {}
 
         # ── 1. Snapshot (HK=完整行情+L2, A股=仅L2衍生) ──
         snapshot_data = self._fetch_snapshot_extra(codes)
@@ -156,7 +164,7 @@ class FutuL2Enricher:
             if entry:
                 result[code] = entry
 
-        return result
+        return result, self._hk_index_data
 
     def _fetch_snapshot_extra(self, codes: list[str]) -> dict[str, dict]:
         """从 snapshot 提取行情数据
@@ -164,13 +172,18 @@ class FutuL2Enricher:
         港股: 完整行情 (price/change/vol/amount/...) + L2 衍生字段，
               直接覆盖新浪/东方财富数据，Futu HK L2 是最可靠数据源。
         A股:  仅 L2 衍生字段 (bidAskRatio, avgPrice, volumeRatio, turnoverRate)。
+        指数:  恒生指数(HK.800000)/恒生科技指数(HK.HSTECH)，写入 self._hk_index_data。
         """
         from futu import RET_OK
 
         futu_codes = [to_futu_code(c) for c in codes]
 
+        # 指数代码单独处理（不走标准 stock 处理逻辑）
+        index_futu_codes = [to_futu_code(c) for c in self.INDEX_CODES]
+        index_futu_set = set(index_futu_codes)
+
         # 港股和 A 股分批（A 股可能没权限）
-        hk = [c for c in futu_codes if c.startswith("HK.")]
+        hk = [c for c in futu_codes if c.startswith("HK.") and c not in index_futu_set]
         a_share = [c for c in futu_codes if not c.startswith("HK.")]
 
         result = {}
@@ -218,6 +231,30 @@ class FutuL2Enricher:
                             result[code] = entry
             except Exception as e:
                 logger.debug(f"HK snapshot 失败: {e}")
+
+        # ── 港股指数: 恒生指数 + 恒生科技指数 ──
+        if index_futu_codes:
+            try:
+                ret, data = self._ctx.get_market_snapshot(index_futu_codes)
+                if ret == RET_OK:
+                    for _, row in data.iterrows():
+                        from_futu = from_futu_code(row["code"])
+                        last_price = row.get("last_price", 0) or 0
+                        change_ratio = row.get("change_ratio", 0) or 0
+                        turnover_val = row.get("turnover", 0) or 0
+                        if from_futu == "HK800000":
+                            self._hk_index_data = {
+                                "hkIndex": round(float(last_price), 2) if last_price else 0,
+                                "hkIndexPct": round(float(change_ratio), 2) if change_ratio else 0,
+                                "hkTurnover": round(float(turnover_val), 2) if turnover_val else 0,
+                            }
+                        elif from_futu == "HKHSTECH":
+                            self._hk_index_data.update({
+                                "hkTech": round(float(last_price), 2) if last_price else 0,
+                                "hkTechPct": round(float(change_ratio), 2) if change_ratio else 0,
+                            })
+            except Exception as e:
+                logger.debug(f"HK index snapshot 失败: {e}")
 
         # ── A股: 仅 L2 衍生字段 ──
         if a_share:

@@ -472,7 +472,10 @@ def poll_once() -> bool:
     kr_symbols = [s for s in symbols if is_kr_symbol(s)]
     em_symbols = [s for s in symbols if not is_kr_symbol(s)]
 
-    stocks, is_sina_fallback = fetch_realtime_with_fallback(em_symbols)
+    # 追加 A 股指数：创业板、科创50
+    INDEX_CODES = ["399006", "000688"]
+    em_with_index = em_symbols + INDEX_CODES
+    stocks, is_sina_fallback = fetch_realtime_with_fallback(em_with_index)
 
     # 追加 Yahoo Finance 数据（KR 股票）
     if kr_symbols:
@@ -485,6 +488,7 @@ def poll_once() -> bool:
     if not stocks:
         # 个股数据失败，但尝试 partial update（保留旧 services，更新成交额）
         logger.warning("个股行情获取失败（东方财富不可达），尝试更新大盘数据")
+        index_results = []  # fetch_realtime_with_fallback 返回空，没有指数数据
         try:
             existing = json.loads(OUTPUT_PATH.read_text(encoding="utf-8"))
         except Exception:
@@ -510,7 +514,11 @@ def poll_once() -> bool:
     # 自动填充缺失的股票名称（只在首次抓到名称时写入，后续 no-op）
     _backfill_missing_names(stocks, watchlist)
 
-    services = build_services(stocks, watchlist)
+    # 指数代码集合（不在 watchlist 中），需要分离出来单独写入 marketTurnover
+    index_codes_set = set(INDEX_CODES)
+    index_results = [s for s in stocks if s.get("code", "") in index_codes_set]
+    stock_results = [s for s in stocks if s.get("code", "") not in index_codes_set]
+    services = build_services(stock_results, watchlist)
 
     # ── AMO 计算：每只股票 amount = vol × close（个股），更新历史后算 AMO1/AMO2 ──
     for svc in services:
@@ -548,13 +556,19 @@ def poll_once() -> bool:
             pass
 
     # Futu L2 增强（可选，失败时 l2_data = {}，不影响后续）
-    l2_data = _futu_enricher.enrich(services)
+    l2_data, hk_index = _futu_enricher.enrich(services)
     if l2_data:
         for svc in services:
             extra = l2_data.get(svc["id"])
             if extra:
                 svc.update(extra)
         logger.info(f"L2 增强: {len(l2_data)}/{len(services)} 只")
+
+    # 将港股指数数据写入 marketTurnover
+    if hk_index:
+        for k, v in hk_index.items():
+            turnover[k] = v
+        logger.info(f"港股指数: hkIndex={hk_index.get('hkIndex')} hkTech={hk_index.get('hkTech')}")
 
     # 有港股持仓时获取汇率（失败时从旧数据继承）
     has_hk = any(s.startswith("HK") for s in symbols)
@@ -584,6 +598,18 @@ def poll_once() -> bool:
         _update_market_amo(total_yi)
         turnover["amo1"] = round(_get_market_amo1(), 3)
         turnover["amo2"] = round(_get_market_amo2(), 3)
+
+    # 提取指数数据写入 marketTurnover
+    for idx in index_results:
+        code = idx.get("code", "")
+        price = idx.get("price", 0) or 0
+        pct = idx.get("pct", 0) or 0
+        if code == "399006":
+            turnover["chiNext"] = round(price, 2) if price else 0
+            turnover["chiNextPct"] = round(pct, 2) if pct else 0
+        elif code == "000688":
+            turnover["kc50"] = round(price, 2) if price else 0
+            turnover["kc50Pct"] = round(pct, 2) if pct else 0
 
     payload = {
         "services": services,

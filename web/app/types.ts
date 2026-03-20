@@ -94,6 +94,20 @@ export interface MarketTurnover {
   shPct: number;
   szPct: number;
   verdict: string;
+  // A-share new index fields
+  chiNext?: number;      // 创业板点位
+  chiNextPct?: number;  // 创业板涨跌幅
+  kc50?: number;        // 科创50点位
+  kc50Pct?: number;     // 科创50涨跌幅
+  // HK index fields
+  hkIndex?: number;     // 恒生指数点位
+  hkIndexPct?: number; // 恒生指数涨跌幅
+  hkTech?: number;      // 恒生科技点位
+  hkTechPct?: number;  // 恒生科技涨跌幅
+  hkTurnover?: number;  // 港股成交额（HK.800000 turnover）
+  // AMO
+  amo1: number;
+  amo2: number;
 }
 
 export interface AlertEvent {

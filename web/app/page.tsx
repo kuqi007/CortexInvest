@@ -7,6 +7,7 @@ import { useLogEntries } from "./hooks/useCommand";
 import { AppTabs } from "./components/AppTabs";
 import { AppTitleBar } from "./components/AppTitleBar";
 import { MarketSwitch, type MarketTab } from "./components/MarketSwitch";
+import MarketSummaryBar from './components/MarketSummaryBar';
 import { useMetrics } from "./providers/MetricsProvider";
 import { useTradePlans } from "./hooks/useTradePlans";
 import { StockDrawer } from "./components/StockDrawer";
@@ -366,6 +367,11 @@ function Home() {
         <div style={{ height: 8 }} />
         <MarketSwitch activeTab={activeTab} onTabChange={switchTab} />
 
+        {/* 大盘摘要区 */}
+        <div style={{ marginBottom: 6 }}>
+          <MarketSummaryBar marketTurnover={marketTurnover ?? {} as any} market={activeTab === 'A' ? 'A' : 'HK'} />
+        </div>
+
         {loading && (
           <div style={{ color: D.comment, padding: "16px 0" }}>
             <span style={{ color: D.green }}>info</span> Loading metrics
@@ -428,32 +434,6 @@ function Home() {
           </span>
           {"  "}alerts:<span style={{ color: isStale ? D.red : D.green }}>{isStale ? "stale" : "on"}</span>
         </div>
-        {/* FX rate — HK tab only */}
-        {activeTab === "HK" && (
-          <div style={{ color: D.comment, marginBottom: 6 }}>
-            {hkdCnyRate != null
-              ? <span>FX: <span style={{ color: D.fg }}>HKD/CNY {hkdCnyRate.toFixed(4)}</span></span>
-              : <span style={{ color: D.yellow }}>[WARN FX unavailable]</span>
-            }
-          </div>
-        )}
-        {/* market turnover — A-share tab only */}
-        {activeTab === "A" && marketTurnover && (
-          <div style={{ color: D.comment, marginBottom: 6 }}>
-            SH:<span style={{ color: D.fg }}>{marketTurnover.shIndex.toFixed(0)}</span>
-            <span style={{ color: chgColor(marketTurnover.shPct) }}>{` ${marketTurnover.shPct >= 0 ? "+" : ""}${marketTurnover.shPct.toFixed(2)}%`}</span>
-            {"  "}
-            SZ:<span style={{ color: D.fg }}>{marketTurnover.szIndex.toFixed(0)}</span>
-            <span style={{ color: chgColor(marketTurnover.szPct) }}>{` ${marketTurnover.szPct >= 0 ? "+" : ""}${marketTurnover.szPct.toFixed(2)}%`}</span>
-            {"  "}
-            vol:<span style={{ color: marketTurnover.total >= 15000 ? D.red : marketTurnover.total <= 8000 ? D.green : D.fg }}>
-              {(marketTurnover.total / 10000).toFixed(2)}万亿
-            </span>
-            <span style={{ color: D.comment }}>{` (${
-              {extreme_high:"天量",high:"放量",above_avg:"偏强",normal:"正常",below_avg:"偏弱",low:"缩量",extreme_low:"地量"}[marketTurnover.verdict] || ""
-            })`}</span>
-          </div>
-        )}
         {/* tab portfolio summary */}
         {tabHoldings.length > 0 && (
           <div style={{ color: D.comment, marginBottom: 6 }}>

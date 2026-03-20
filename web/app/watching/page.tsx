@@ -13,6 +13,7 @@ import { StockDrawer } from "../components/StockDrawer";
 import { AppTabs } from "../components/AppTabs";
 import { AppTitleBar } from "../components/AppTitleBar";
 import { MarketSwitch, type MarketTab } from "../components/MarketSwitch";
+import MarketSummaryBar from "../components/MarketSummaryBar";
 import { useMetrics } from "../providers/MetricsProvider";
 
 const DEFAULT_POLL_SEC = 30;
@@ -42,7 +43,7 @@ export default function WatchingPage() {
 }
 
 function WatchingContent() {
-  const { services, ts, tick, loading, settings, fetchError, alertEvents, refresh } = useMetrics();
+  const { services, ts, tick, loading, settings, fetchError, alertEvents, refresh, marketTurnover } = useMetrics();
   const { status: tradingStatus } = useTradingStatus();
   const searchParams = useSearchParams();
 
@@ -223,6 +224,10 @@ function WatchingContent() {
       <div style={{ flex: 1, padding: "10px 16px", overflow: "auto", fontSize: 13, lineHeight: 1.55 }}>
         <div style={{ height: 8 }} />
         <MarketSwitch activeTab={activeTab} onTabChange={switchTab} />
+        {/* 大盘摘要区 */}
+        <div style={{ marginBottom: 6 }}>
+          <MarketSummaryBar marketTurnover={marketTurnover ?? {} as any} market={activeTab === 'A' ? 'A' : 'HK'} />
+        </div>
 
         {loading && (
           <div style={{ color: D.comment, padding: "16px 0" }}>
