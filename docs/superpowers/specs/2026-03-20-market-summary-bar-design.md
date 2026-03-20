@@ -57,28 +57,29 @@ SH: 3384.88 +0.16% | SZ: 11351.33 +1.57% | 创业板: 2050.21 +0.83% | 科创50:
 ### 3.2 港股 Tab
 
 ```
-恒生: 24000.33 +0.52% | 恒生科技: 5800.10 -0.31% | 成交额: 200亿
+恒生: 24000.33 +0.52% | 恒生科技: 5800.10 -0.31% | 成交额: 200亿 (参考)
 ```
 
 | 项目 | 数据来源 | 说明 |
 |------|---------|------|
-| 恒生指数 | 现有 `marketTurnover` 中的 HK 相关字段 | 需确认现有数据是否已有 |
-| 恒生科技 | **新增**，代码 `HSTECH`（eastmoney: `116.HSTECH`） | eastmoney 港股接口 |
-| 成交额 | 港股合计成交额 | eastmoney 返回 |
+| 恒生指数 | **新增**，Futu `HK.800000` via `futu_enricher.py` | `last_price` + `change_ratio` |
+| 恒生科技 | **新增**，Futu `HK.HSTECH` via `futu_enricher.py` | `last_price` + `change_ratio` |
+| 成交额 | `HK.800000` 的 `turnover` 字段 | 恒生指数自身成交额，作为参考值 |
 
 **注**：
 - 港股不显示 AMO（无全市场成交额数据源，口径不可比）
-- 港股不保留 FX 汇率行
+- 港股不保留 FX 汇率行（FX 数据仍从 `useMetrics()` 获取，供 P&L 换算用，只是不在摘要区单独显示）
+
+**FX 说明**：删除的是摘要区的 `FX: HKD/CNY` 行，`hkdCnyRate` 数据仍在 `market_data.json` 中，不影响港股盈亏换算。
 
 ## 4. 数据层改动
 
 ### 4.1 Poller（`src/tools/market_data_poller.py`）
 
-**新增指数代码**：
-- A 股：`399006`（创业板）、`000688`（科创50）
-- 港股：`HSTECH`（恒生科技）
+**新增指数代码**（A 股，eastmoney）：
+- `399006`（创业板）、`000688`（科创50）
 
-**实现方式**：在 `fetch_realtime_with_fallback()` 的批量请求列表中追加这 3 个指数代码。Eastmoney 返回后提取 `price`（指数点位）、`change_pct`（涨跌幅），写入 `market_data.json` 的 `marketTurnover` 中新增字段。
+**实现方式**：在 `fetch_realtime_with_fallback()` 的批量请求列表中追加这 2 个指数代码。Eastmoney 返回后提取 `price`（指数点位）、`change_pct`（涨跌幅），写入 `market_data.json` 的 `marketTurnover` 中新增字段。
 
 **字段命名**：
 ```typescript
@@ -117,6 +118,7 @@ export interface MarketTurnover {
   kc50Pct?: number;    // 科创50涨跌幅
   hkTech?: number;     // 恒生科技点位
   hkTechPct?: number;  // 恒生科技涨跌幅
+  hkTurnover?: number; // 港股成交额（HK.800000 turnover）
   //
   amo1: number;     // 不变
   amo2: number;     // 不变
@@ -182,7 +184,8 @@ interface MarketSummaryBarProps {
 
 ```
 Poller (market_data_poller.py)
-  ├── eastmoney 实时行情 → 现有A股持仓 + 新增创业板/科创50/恒生科技
+  ├── eastmoney 实时行情 → 现有A股持仓 + 新增创业板/科创50
+  ├── futu_enricher → HK.800000(恒生) + HK.HSTECH(恒生科技) 行情
   ├── 计算 AMO1/AMO2（已有逻辑，不变）
   └── 写入 market_data.json → marketTurnover
             ↓
@@ -195,17 +198,18 @@ MarketSummaryBar 组件（A 股 tab / HK tab）
 
 ## 8. 实现步骤
 
-1. **Poller**：在 eastmoney 批量请求中追加创业板(`399006`)、科创50(`000688`)、恒生科技(`HSTECH`) 的实时行情，提取 `price` 和 `change_pct` 写入 `marketTurnover` 新增字段
-2. **API route**：`marketTurnover` 透传，不变
-3. **TypeScript**：更新 `MarketTurnover` 类型，新增 6 个可选字段
-4. **MarketSummaryBar 组件**：新建 `web/app/components/MarketSummaryBar.tsx`，实现 A/HK 两套渲染逻辑
-5. **page.tsx**：删除内嵌大盘行，插入新组件
-6. **watching/page.tsx**：同样插入 `MarketSummaryBar`
-7. **E2E 测试**：Playwright 截图验证 A 股/HK 两 tab 的大盘摘要区渲染正确
+1. **Poller**：在 eastmoney 批量请求中追加创业板(`399006`)、科创50(`000688`) 的实时行情，提取 `price` 和 `change_pct` 写入 `marketTurnover` 新增字段（恒生科技和恒生指数由 Futu enricher 负责，见步骤2）
+2. **Futu enricher**：在 `futu_enricher.py` 的 `get_market_snapshot` 调用中追加指数代码 `HK.800000`（恒生）和 `HK.HSTECH`（恒生科技），提取 `last_price`、`change_ratio`、`turnover`，写入 `marketTurnover` 新增字段
+3. **API route**：`marketTurnover` 透传，不变
+4. **TypeScript**：更新 `MarketTurnover` 类型，新增 6 个可选字段
+5. **MarketSummaryBar 组件**：新建 `web/app/components/MarketSummaryBar.tsx`，实现 A/HK 两套渲染逻辑
+6. **page.tsx**：删除内嵌大盘行，插入新组件
+7. **watching/page.tsx**：同样插入 `MarketSummaryBar`
+8. **E2E 测试**：Playwright 截图验证 A 股/HK 两 tab 的大盘摘要区渲染正确
 
 ## 9. 非功能性
 
+- 涨跌颜色：继承现有 Dracula 主题惯例（涨 = `#50fa7b` 绿，跌 = `#ff5555` 红），保持与页面其他部分一致
 - 不影响现有持仓/自选表格逻辑
-- Poller 请求量增加 3 个指数，eastmoney 批量请求无额外延迟
 - 科创50/创业板开市后才有数据，盘前显示 `—`
-- HK AMO 数据因数据源口径问题可能偏低，作为参考值标注 `(参考)`
+- 港股不显示 AMO（无全市场成交额数据源）
