@@ -331,6 +331,22 @@ CREATE TABLE IF NOT EXISTS daily_kline (
     PRIMARY KEY(date, code)
 );
 CREATE INDEX IF NOT EXISTS idx_daily_kline_code ON daily_kline(code);
+
+-- 持仓变更记录
+CREATE TABLE IF NOT EXISTS position_change_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    ts TEXT NOT NULL,
+    source TEXT NOT NULL,
+    shares_from INTEGER,
+    shares_to INTEGER,
+    cost_from REAL,
+    cost_to REAL
+);
+CREATE INDEX IF NOT EXISTS idx_pcl_symbol ON position_change_log(symbol);
+CREATE INDEX IF NOT EXISTS idx_pcl_ts ON position_change_log(ts);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pcl_unique
+    ON position_change_log(symbol, ts, source, shares_from, shares_to, cost_from, cost_to);
 """
 
 
