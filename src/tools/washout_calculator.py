@@ -250,6 +250,26 @@ def calc_rsi(klines: list[dict], periods: tuple[int, ...] = (6, 12, 24)) -> dict
     return result
 
 
+def calc_atr(klines: list[dict], period: int = 14) -> float:
+    """Calculate Average True Range (ATR) using Wilder's smoothing.
+    True Range = max(H-L, |H-PC|, |L-PC|) where PC = prior close.
+    Returns latest ATR value."""
+    if len(klines) < period + 1:
+        return 0.0
+    tr_list = []
+    for i in range(1, len(klines)):
+        high   = klines[i]["high"]
+        low    = klines[i]["low"]
+        prev_close = klines[i - 1]["close"]
+        tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+        tr_list.append(tr)
+    # Wilder's EMA: first = SMA, subsequent = EMA with alpha=1/period
+    atr = sum(tr_list[:period]) / period
+    for i in range(period, len(tr_list)):
+        atr = atr + (tr_list[i] - atr) / period
+    return round(atr, 3)
+
+
 def detect_panic_selling(klines: list[dict], lookback: int = 20) -> dict:
     """Detect panic selling signals: volume spike + sharp drop in recent days."""
     if len(klines) < 5:
@@ -407,14 +427,32 @@ def find_washout_levels(klines: list[dict], lookback: int = 60) -> dict:
     rsi = calc_rsi(klines)
     panic = detect_panic_selling(klines)
 
+    # ── ATR-based support zone (自适应波动率支撑位) ────────────────────
+    # ATR 支撑：从近期低点向上找支撑（当前价下方）
+    # 逻辑：超跌后反弹到支撑位是较好买点；用近10日低点做锚点
+    atr = calc_atr(klines, period=14)
+    recent_low_price_val = recent_low_price if recent_low_price else current_price
+    atr_support_1 = round(recent_low_price_val + 1.5 * atr, 2)  # 保守支撑
+    atr_support_2 = round(recent_low_price_val + 2.0 * atr, 2)  # 激进支撑
+    atr_avg = round((atr_support_1 + atr_support_2) / 2, 2)
+
+    # ATR zone: current price BELOW support = oversold = potential buy zone
+    # 是否在 ATR 超跌区：当前价 < atr_support_1
+    atr_zone_valid = current_price <= atr_support_1
+
     return {
         "code": None,
         "high_date": high_date,
         "high_price": high_price,
         "close_at_high": close_at_high,
-        "target_close": target_close,
-        "target_high": target_high,
+        "target_close": target_close,    # 黄金坑保守
+        "target_high": target_high,       # 黄金坑激进
         "target_avg": target_avg,
+        "atr": atr,
+        "atr_support_1": atr_support_1,   # ATR保守支撑
+        "atr_support_2": atr_support_2,   # ATR激进支撑
+        "atr_avg": atr_avg,
+        "atr_zone_valid": atr_zone_valid,
         "current_price": current_price,
         "current_date": current_date,
         "drop_pct": drop_pct,
@@ -436,6 +474,7 @@ def format_result(code: str, r: dict) -> str:
     if not r:
         return f"[{code}] 无法获取K线数据"
 
+    atr = r.get("atr", 0)
     lines = [
         f"\n{'='*50}",
         f"  股票代码: {code}",
@@ -445,10 +484,15 @@ def format_result(code: str, r: dict) -> str:
         f"  从高点回落: {r['drop_pct']}%",
         f"  距高点天数: {r['days_since_high']}天",
         "",
-        f"  【洗盘底部预测】",
-        f"  ├ 目标区间A (收盘×0.80): {r['target_close']}",
-        f"  ├ 目标区间B (最高×0.75): {r['target_high']}",
+        f"  【策略A：黄金坑（固定20-25%）】",
+        f"  ├ 保守买入 (收盘×0.80): {r['target_close']}",
+        f"  ├ 激进买入 (最高×0.75): {r['target_high']}",
         f"  └ 核心区间: {r['target_close']} ~ {r['target_high']}",
+        "",
+        f"  【策略B：ATR支撑位（自适应波动率）】 ATR(14)={atr}",
+        f"  ├ 保守支撑 (近低+1.5×ATR): {r.get('atr_support_1', 'N/A')}",
+        f"  ├ 激进支撑 (近低+2.0×ATR): {r.get('atr_support_2', 'N/A')}",
+        f"  └ 当前价: {r['current_price']} | 支撑区间: {r.get('atr_support_1', 'N/A')} ~ {r.get('atr_support_2', 'N/A')}",
         "",
     ]
 
@@ -456,24 +500,41 @@ def format_result(code: str, r: dict) -> str:
         lines.append(
             f"  近期最低: {r['recent_low']['date']}  最低价: {r['recent_low']['price']}"
         )
-        zone_str = "✅ 已在区间内" if r["zone_valid"] else "❌ 未到区间"
-        lines.append(f"  区间状态: {zone_str}")
+        # 策略A状态
+        zone_a = "✅ 已在区间内" if r["zone_valid"] else "❌ 未到区间"
+        lines.append(f"  策略A状态: {zone_a}")
+        # 策略B状态
+        if r.get("atr_zone_valid"):
+            lines.append(f"  策略B状态: ✅ 超跌（现价<{r.get('atr_support_1', 'N/A')}）")
+        else:
+            lines.append(f"  策略B状态: ✅ 在支撑区间内（现价{r['current_price']}在支撑上）")
     else:
         lines.append("  近期最低: 数据不足")
 
-    # Signal interpretation
+    # Signal interpretation (策略A = 黄金坑)
     cur = r["current_price"]
     tgt = r["target_avg"]
     lines.append("")
     if cur <= r["target_close"]:
-        lines.append(f"  📌 信号: 【最佳买入区间】现价 {cur} ≤ 目标 {r['target_close']}")
+        lines.append(f"  📌 策略A信号: 【最佳买入区间】现价 {cur} ≤ 目标 {r['target_close']}")
     elif cur <= r["target_high"]:
-        lines.append(f"  📌 信号: 【接近买入区间】现价 {cur} 接近目标 {r['target_high']}")
+        lines.append(f"  📌 策略A信号: 【接近买入区间】现价 {cur} 接近目标 {r['target_high']}")
     elif r["recent_low"]["price"] and r["recent_low"]["price"] <= r["target_high"]:
-        lines.append(f"  📌 信号: 【已超跌】最低 {r['recent_low']['price']} 已跌破目标区间")
+        lines.append(f"  📌 策略A信号: 【已超跌】最低 {r['recent_low']['price']} 已跌破目标区间")
     else:
         pct_to = round((cur - tgt) / tgt * 100, 1)
-        lines.append(f"  📌 信号: 距目标区间 {pct_to}%")
+        lines.append(f"  📌 策略A信号: 距目标区间 {pct_to}%")
+
+    # 策略B信号
+    s1 = r.get("atr_support_1")
+    s2 = r.get("atr_support_2")
+    if s1 and s2:
+        if cur <= s1:
+            lines.append(f"  📌 策略B信号: 【超跌】现价 {cur} < ATR支撑 {s1}")
+        elif cur <= s2:
+            lines.append(f"  📌 策略B信号: 【接近支撑】现价 {cur} 在ATR支撑 {s1}~{s2} 之间")
+        else:
+            lines.append(f"  📌 策略B信号: 距ATR支撑区间尚远")
 
     # ── MA Analysis ────────────────────────────────────────────────────────
     ma = r.get("ma", {})
