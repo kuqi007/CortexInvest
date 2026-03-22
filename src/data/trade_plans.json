@@ -1034,45 +1034,6 @@
       ],
       "scope": "real"
     },
-    "000962_hold": {
-      "name": "东方钽业持有策略",
-      "symbol": "000962",
-      "status": "active",
-      "created_at": "2026-03-10",
-      "orders": [
-        {
-          "id": "sl",
-          "side": "sell",
-          "op": "<=",
-          "price": 48,
-          "shares": 600,
-          "label": "止损-11% 跌破48清仓",
-          "triggered": false,
-          "triggered_at": null
-        },
-        {
-          "id": "tp1",
-          "side": "sell",
-          "op": ">=",
-          "price": 65,
-          "shares": 300,
-          "label": "止盈1——65减半",
-          "triggered": false,
-          "triggered_at": null
-        },
-        {
-          "id": "tp2",
-          "side": "sell",
-          "op": ">=",
-          "price": 75,
-          "shares": 300,
-          "label": "清仓——75清剩余",
-          "triggered": false,
-          "triggered_at": null
-        }
-      ],
-      "scope": "real"
-    },
     "603163_hold": {
       "name": "圣晖集成持有策略",
       "symbol": "603163",
