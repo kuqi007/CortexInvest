@@ -109,10 +109,6 @@ web/screenshots/verify/
 web/tsconfig.tsbuildinfo
 
 
-# Claude Code (runtime/local)
-.claude/
-
 # Daily K-line cache DBs (runtime)
 src/data/daily_kline.db
 src/data/maily_kline.db
-src/data/trading_calendar_cache.json
