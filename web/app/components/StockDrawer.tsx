@@ -1196,6 +1196,9 @@ export function StockDrawer({
             ))}
           </div>
 
+          {/* Section 5: 变更历史 */}
+          <ChangeHistorySection symbol={symbol!} />
+
         </div>
       </div>
 
@@ -1204,6 +1207,116 @@ export function StockDrawer({
     </>
   );
 }
+
+/* ── ChangeHistorySection ── */
+function ChangeHistorySection({ symbol }: { symbol: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [logs, setLogs] = useState<ChangeLogEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const limit = expanded ? 20 : 3;
+
+  useEffect(() => {
+    if (!symbol) return;
+    setLoading(true);
+    fetch(`/api/position-change-log?symbol=${encodeURIComponent(symbol)}&limit=${limit}`)
+      .then((r) => r.json())
+      .then((d) => setLogs(d.results ?? []))
+      .finally(() => setLoading(false));
+  }, [symbol, limit]);
+
+  const sourceColor: Record<string, string> = {
+    manual: D.cyan,
+    import: D.purple,
+    sync: D.yellow,
+    type_change: D.orange,
+  };
+  const sourceLabel: Record<string, string> = {
+    manual: "手动",
+    import: "导入",
+    sync: "同步",
+    type_change: "类型转换",
+  };
+
+  function fmtVal(v: number | null | undefined): string {
+    if (v == null) return "-";
+    return Number.isInteger(v) ? String(v) : v.toFixed(2);
+  }
+
+  return (
+    <div style={{ borderTop: `1px solid ${D.currentLine}`, marginTop: 8, paddingTop: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <div style={{ color: D.comment, fontSize: 11, textTransform: "uppercase", letterSpacing: 1 }}>
+          变更历史 {logs.length > 0 && `(${logs.length})`}
+        </div>
+        {logs.length > 3 && !expanded && (
+          <button
+            onClick={() => setExpanded(true)}
+            style={{
+              fontSize: 11, background: "none",
+              border: `1px solid ${D.cyan}`, color: D.cyan,
+              padding: "2px 10px", cursor: "pointer", borderRadius: 2,
+              fontFamily: "JetBrains Mono, monospace",
+            }}
+          >展开更多</button>
+        )}
+      </div>
+
+      {loading && <div style={{ color: D.comment, fontSize: 11 }}>加载中...</div>}
+
+      {!loading && logs.length === 0 && (
+        <div style={{ color: D.comment, fontSize: 11 }}>暂无变更记录</div>
+      )}
+
+      {logs.map((log) => {
+        const color = sourceColor[log.source] ?? D.comment;
+        const label = sourceLabel[log.source] ?? log.source;
+        const dateStr = log.ts ? new Date(log.ts).toLocaleString("zh-CN", {
+          month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+        }).replace(/\//g, "-") : "-";
+        const sharesStr = `${fmtVal(log.shares_from)} → ${fmtVal(log.shares_to)}股`;
+        const costStr = `${fmtVal(log.cost_from)} → ${fmtVal(log.cost_to)}`;
+
+        return (
+          <div key={log.ts + log.source} style={{
+            display: "flex", gap: 8, fontSize: 12, padding: "4px 0",
+            borderBottom: `1px solid ${D.currentLine}`,
+          }}>
+            <span style={{ color: D.comment, whiteSpace: "nowrap", minWidth: 110 }}>
+              {dateStr}
+            </span>
+            <span style={{
+              display: "inline-block",
+              padding: "1px 6px",
+              borderRadius: 3,
+              fontSize: 10,
+              fontWeight: 700,
+              background: color,
+              color: D.bg,
+            }}>
+              {label}
+            </span>
+            <span style={{ flex: 1, textAlign: "right", color: D.fg }}>
+              {sharesStr}
+            </span>
+            <span style={{ minWidth: 130, textAlign: "right", color: D.fg }}>
+              {costStr}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+type ChangeLogEntry = {
+  ts: string;
+  source: string;
+  shares_from: number | null;
+  shares_to: number | null;
+  cost_from: number | null;
+  cost_to: number | null;
+};
 
 // Re-export shared helpers so existing imports from this file keep working
 export { EditableCell, Toast };
