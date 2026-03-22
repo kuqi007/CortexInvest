@@ -181,11 +181,19 @@ def run():
     # ── State ──
     total_signals = 0
     last_date = datetime.now().date()
+    prev_save_date = None  # Track which date we last saved for daily_pnl
 
     while running:
         # Daily reset
         today = datetime.now().date()
         if today != last_date:
+            # Save previous day's equity to daily_pnl before resetting
+            if rt_enabled and rt_engine and prev_save_date is not None:
+                try:
+                    rt_engine.save_daily_pnl(prev_save_date.strftime("%Y-%m-%d"))
+                except Exception as e:
+                    logger.warning(f"save_daily_pnl error: {e}")
+            prev_save_date = last_date
             last_date = today
             total_signals = 0
             engine.reset_daily()

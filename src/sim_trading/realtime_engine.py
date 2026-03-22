@@ -1343,3 +1343,13 @@ class RealtimeSimEngine:
         self._last_exit_ts.clear()
         self._t3_exit_price.clear()
         logger.info(f"RT v2 daily reset: day_index={self._day_index}")
+
+    def save_daily_pnl(self, date: str | None = None):
+        """Save daily equity snapshot to daily_pnl table via Futu adapter."""
+        if not self._futu_enabled:
+            return
+        try:
+            self._broker._futu_sync.save_daily_pnl(date)
+            logger.info(f"Saved daily PnL for {date or 'today'}")
+        except Exception as e:
+            logger.warning(f"save_daily_pnl error: {e}")
