@@ -69,6 +69,10 @@ class RealtimeSimEngine:
         self._exit_evaluated_today = False
         # Per-tick score cache: {code: score_dict}, cleared each tick
         self._score_cache: dict[str, dict] = {}
+        # T3 cooldown: {code: last_trigger_time_ms}, 5min cooldown per stock
+        self._t3_cooldown: dict[str, int] = {}
+        # T3 exit price for dip-buy re-entry check: {code: exit_price}
+        self._t3_exit_price: dict[str, float] = {}
 
         # ── Futu trade mode ──
         self._futu_enabled = False
@@ -359,6 +363,20 @@ class RealtimeSimEngine:
 
     # ── Price helpers ──
 
+    def _is_continuous_trading(self) -> bool:
+        """判断是否在连续交易时段（排除竞价时段）
+
+        HK 连续交易: 09:30-12:00, 13:00-16:00
+        A-share 连续交易: 09:30-11:30, 13:00-15:00
+        竞价时段（开市前/收市竞价）不处理 T3 信号。
+        """
+        now = datetime.now()
+        t = now.hour * 100 + now.minute
+        # HK continuous trading
+        if (930 <= t <= 1200) or (1300 <= t <= 1600):
+            return True
+        return False
+
     def _read_market_prices(self) -> dict[str, dict]:
         """Read live prices from market_data.json."""
         try:
@@ -499,6 +517,10 @@ class RealtimeSimEngine:
             self._evaluate_dip_buy(today, prices, market)
 
         # 2. Consume new signals from DB — v2 only processes T3 + intraday exceptions
+        # Skip during pre-open / closing auction (09:00-09:30 for HK, 09:15-09:25 for A-share)
+        if not self._is_continuous_trading():
+            return
+
         conn = get_connection()
         rows = conn.execute(
             "SELECT * FROM signals WHERE ts > ? ORDER BY ts",
@@ -904,6 +926,15 @@ class RealtimeSimEngine:
                 logger.info(f"Dip-buy {code}: cooldown active, notify only")
                 continue
 
+            # T3 exit price check: must be lower than T3 sell price by 2%+
+            t3_exit_price = self._t3_exit_price.get(code, 0)
+            if t3_exit_price > 0 and price >= t3_exit_price * 0.98:
+                logger.info(
+                    f"Dip-buy {code}: price {price:.2f} >= T3 exit {t3_exit_price:.2f}*0.98={t3_exit_price*0.98:.2f}, "
+                    f"notify only"
+                )
+                continue
+
             atr = score_result.get("atr", 0) or self._estimate_atr(code, date)
             daily_amount = market.get(code, {}).get("amount", 0)
 
@@ -942,9 +973,24 @@ class RealtimeSimEngine:
             )
             if pos:
                 # SL: entry - ATR * 3 (wider for volatility)
-                pos.stop_loss = round(exec_price - atr * sl_atr_mult, 4)
-                # TP: 20-day high (recovery target)
-                pos.take_profit = round(high_nd, 4)
+                sl = exec_price - atr * sl_atr_mult
+                # Sanity check: SL must be below entry price
+                if sl <= 0 or sl >= exec_price:
+                    sl = exec_price * 0.90
+                    logger.warning(
+                        f"ATR SL invalid for {code}@{exec_price:.2f} (atr={atr:.2f}), "
+                        f"fallback SL={sl:.2f}"
+                    )
+                pos.stop_loss = round(sl, 4)
+                # TP: 20-day high (recovery target), must be above entry
+                tp = round(high_nd, 4)
+                if tp <= exec_price:
+                    tp = exec_price * 1.10
+                    logger.warning(
+                        f"TP invalid for {code}@{exec_price:.2f} (high={high_nd:.2f}), "
+                        f"fallback TP={tp:.2f}"
+                    )
+                pos.take_profit = tp
                 pos.max_hold_days = max_hold
 
                 self._new_positions_today += 1
@@ -1061,10 +1107,17 @@ class RealtimeSimEngine:
         code = signal.get("code", "")
         strategy = signal.get("strategy", "")
         date = signal.get("date", self._current_date)
+        now_ts = int(time.time() * 1000)
 
         # Identify tier
         tier3_strategies = set(self._rules.get("tiers", {}).get("3_correction", {}).keys())
         tier1_strategies = set(self._rules.get("tiers", {}).get("1_independent", {}).keys())
+
+        # T3 cooldown: 5分钟内同一股票不重复触发
+        if strategy in tier3_strategies and code in self._t3_cooldown:
+            if now_ts - self._t3_cooldown[code] < 5 * 60 * 1000:  # 5分钟
+                return  # 冷却中，跳过
+        self._t3_cooldown[code] = now_ts
 
         # ── T3 correction: with cost filter + min_hold ──
         if strategy in tier3_strategies and code in self._broker.positions:
@@ -1159,6 +1212,7 @@ class RealtimeSimEngine:
                 trade["notes"] = f"T3:{strategy}(v2)"
                 self._save_trade(trade)
                 self._last_exit_ts[code] = int(time.time() * 1000)
+                self._t3_exit_price[code] = exec_price  # 记录T3卖出价，用于dip-buy接回检查
                 logger.info(
                     f"RT T3-SELL {code}: @ {exec_price:.2f} "
                     f"PnL={trade['pnl']:+.0f} ({strategy})"
@@ -1287,4 +1341,5 @@ class RealtimeSimEngine:
         self._entry_evaluated_today = False
         self._exit_evaluated_today = False
         self._last_exit_ts.clear()
+        self._t3_exit_price.clear()
         logger.info(f"RT v2 daily reset: day_index={self._day_index}")

@@ -37,18 +37,18 @@ DEFAULT_WEIGHTS = {
     "capital_flow": 20, "volume_price": 15, "support": 10,
 }
 DEFAULT_THRESHOLDS = {
-    "entry_threshold": 70,
-    "exit_threshold": 40,
+    "entry_threshold": 60,
+    "exit_threshold": 46,
     "exit_consecutive_days": 2,
     "max_hold_days": 10,
     "position_pct": 0.25,
     "sl_atr_mult": 2.0,
     "tp_atr_mult": 3.0,
-    "adx_min": 20,          # ADX below this = choppy, don't enter
-    "rr_min": 1.5,          # min reward/risk ratio (TP distance / SL distance)
-    "trailing_atr": 0.0,    # 0 = off; > 0 = trailing stop at entry + N*ATR once profitable
-    "require_bullish_di": 1,  # 1 = only enter when +DI > -DI (bullish trend)
-    "cooldown_days": 5,     # calendar days before re-entering same stock
+    "adx_min": 25,
+    "rr_min": 2.0,
+    "trailing_atr": 3.0,
+    "require_bullish_di": 1,
+    "cooldown_days": 6,
 }
 DEFAULT_COST_MODEL = {
     "commission_rate": 0.0003,

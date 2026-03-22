@@ -376,8 +376,50 @@ def fetch_hkd_cny_rate() -> float | None:
     return None
 
 
-SINA_INDEX_URL = "https://hq.sinajs.cn/list=s_sh000001,s_sz399001"
+SINA_INDEX_URL = "https://hq.sinajs.cn/list=s_sh000001,s_sz399001,s_sz399006,s_sh000688"
 SINA_HEADERS = {"Referer": "https://finance.sina.com.cn"}
+
+
+def fetch_hk_index_data() -> dict:
+    """从腾讯财经获取港股指数（恒生 + 恒生科技），返回 {hkIndex, hkIndexPct, hkTech, hkTechPct, hkTurnover}"""
+    result = {}
+    try:
+        resp = requests.get(
+            "https://qt.gtimg.cn/q=hkHSI,hkHSTECH",
+            timeout=5,
+        )
+        resp.encoding = "gbk"
+    except Exception as e:
+        logger.debug(f"获取港股指数失败: {e}")
+        return result
+
+    for line in resp.text.strip().split("\n"):
+        if "=" not in line or '="";' in line:
+            continue
+        m = line.split("=")
+        if len(m) < 2:
+            continue
+        raw = m[1].strip().strip('"')
+        fields = raw.split("~")
+        if len(fields) < 35:
+            continue
+        try:
+            price = float(fields[3]) if fields[3] else 0
+            chg_ratio = float(fields[32]) if fields[32] else 0
+            # turnover 在字段 36，单位是"万元"，转亿元
+            raw_turnover = float(fields[36]) if fields[36] else 0
+            turnover_yi = raw_turnover / 10000  # 万元 → 亿元
+        except (ValueError, IndexError):
+            continue
+        code_full = fields[2]  # "HSI" 或 "HSTECH"
+        if code_full == "HSI":
+            result["hkIndex"] = round(price, 2) if price else 0
+            result["hkIndexPct"] = round(chg_ratio, 2) if chg_ratio else 0
+            result["hkTurnover"] = round(turnover_yi, 0) if turnover_yi else 0
+        elif code_full == "HSTECH":
+            result["hkTech"] = round(price, 2) if price else 0
+            result["hkTechPct"] = round(chg_ratio, 2) if chg_ratio else 0
+    return result
 
 
 def fetch_market_turnover() -> dict | None:
@@ -405,13 +447,21 @@ def fetch_market_turnover() -> dict | None:
         if len(fields) < 6:
             continue
         # 简化格式: 名称,点位,涨跌点,涨跌幅%,成交量(万手),成交额(万元)
-        key = "sh" if "sh" in code else "sz"
-        result[key] = {
+        # 支持: sh000001(上证), sz399001(深证), sz399006(创业板), sh000688(科创50)
+        entry = {
             "name": fields[0],
             "price": float(fields[1]),
             "pct": float(fields[3]),
             "amount": float(fields[5]) / 10000,  # 万元 → 亿元
         }
+        if code == "sh000001":
+            result["sh"] = entry
+        elif code == "sz399001":
+            result["sz"] = entry
+        elif code == "sz399006":
+            result["chiNext"] = entry
+        elif code == "sh000688":
+            result["kc50"] = entry
 
     if "sh" not in result or "sz" not in result:
         return None
@@ -436,7 +486,7 @@ def fetch_market_turnover() -> dict | None:
     else:
         verdict = "extreme_low"
 
-    return {
+    turnover_dict = {
         "sh": round(sh_yi),
         "sz": round(sz_yi),
         "total": round(total),
@@ -446,6 +496,13 @@ def fetch_market_turnover() -> dict | None:
         "szPct": result["sz"]["pct"],
         "verdict": verdict,
     }
+    if "chiNext" in result:
+        turnover_dict["chiNext"] = round(result["chiNext"]["price"], 2)
+        turnover_dict["chiNextPct"] = round(result["chiNext"]["pct"], 2)
+    if "kc50" in result:
+        turnover_dict["kc50"] = round(result["kc50"]["price"], 2)
+        turnover_dict["kc50Pct"] = round(result["kc50"]["pct"], 2)
+    return turnover_dict
 
 
 def poll_once() -> bool:
@@ -502,6 +559,10 @@ def poll_once() -> bool:
             _update_market_amo(total_yi)
             turnover["amo1"] = round(_get_market_amo1(), 3)
             turnover["amo2"] = round(_get_market_amo2(), 3)
+            # 港股指数兜底
+            hk_idx = fetch_hk_index_data()
+            if hk_idx:
+                turnover.update(hk_idx)
             existing["marketTurnover"] = turnover
         tmp = OUTPUT_PATH.with_suffix(".tmp")
         with open(tmp, "w", encoding="utf-8") as f:
@@ -564,11 +625,19 @@ def poll_once() -> bool:
                 svc.update(extra)
         logger.info(f"L2 增强: {len(l2_data)}/{len(services)} 只")
 
-    # 将港股指数数据写入 marketTurnover
-    if hk_index:
-        for k, v in hk_index.items():
-            turnover[k] = v
-        logger.info(f"港股指数: hkIndex={hk_index.get('hkIndex')} hkTech={hk_index.get('hkTech')}")
+    # 将港股指数数据写入 marketTurnover（优先用 futu，失败时用腾讯兜底）
+    if turnover:  # turnover 为 None 时跳过（fetch_market_turnover 完全失败）
+        hk_idx = hk_index.copy() if hk_index else {}
+        # 腾讯财经兜底获取港股指数
+        if not hk_idx.get("hkIndex"):
+            sina_hk = fetch_hk_index_data()
+            if sina_hk:
+                hk_idx.update(sina_hk)
+                logger.info(f"港股指数(腾讯兜底): hkIndex={sina_hk.get('hkIndex')} hkTech={sina_hk.get('hkTech')}")
+        if hk_idx:
+            for k, v in hk_idx.items():
+                turnover[k] = v
+            logger.info(f"港股指数: hkIndex={hk_idx.get('hkIndex')} hkTech={hk_idx.get('hkTech')}")
 
     # 有港股持仓时获取汇率（失败时从旧数据继承）
     has_hk = any(s.startswith("HK") for s in symbols)

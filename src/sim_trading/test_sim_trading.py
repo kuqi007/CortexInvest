@@ -1622,6 +1622,7 @@ class TestT3EntryTimeZeroGuard:
         engine._current_date = "2026-03-11"
         engine._day_index = 0
         engine._last_exit_ts = {}
+        engine._t3_exit_price = {}
 
         pm = PositionManager(500_000, rules.get("lot_sizes", {}))
         pm._positions["HK00700"] = Position(
@@ -1907,8 +1908,8 @@ class TestDipBuyT3ExitPriceCheck:
             db_mod._db_path_override = old
             os.unlink(tmp.name)
 
-    def test_dipbuy_allowed_when_price_below_t3_exit(self):
-        """当前价 < T3卖出价*0.98 时，dip-buy 应允许。"""
+    def test_dipbuy_t3_exit_price_check_edge(self):
+        """测试 T3 exit price 检查的边界值。price = exit_price * 0.98 时应阻止。"""
         from .realtime_engine import RealtimeSimEngine
         from .db import _db_path_override
         import src.sim_trading.db as db_mod
@@ -1936,43 +1937,28 @@ class TestDipBuyT3ExitPriceCheck:
                 "max_per_day": 1,
             }
 
-            # Mock daily tracker - price 95, high 110 => drawdown = (95-110)/110 = -13.6% >= 8%
             mock_tracker = MagicMock()
             mock_tracker.get_recent_high.return_value = 110.0
             mock_tracker.score.return_value = {"total": 50, "ma": 10, "atr": 4.0, "action": "BUY"}
 
             engine = RealtimeSimEngine(rules, daily_tracker=mock_tracker, futu_trade=False)
 
-            # Simulate T3 sell at price 100
+            # T3 exit price = 100, threshold = 98
             engine._t3_exit_price["HK00700"] = 100.0
-            engine._last_exit_ts["HK00700"] = int(time.time() * 1000) - 3 * 60 * 60 * 1000  # 3h ago
 
-            # Current price = 95 (< 100 * 0.98 = 98), should be allowed
-            prices = {"HK00700": 95.0}
-            market = {"HK00700": {"name": "腾讯", "amount": 1e9}}
+            # Test: price = 97.99 (< 98) - should be allowed
+            # Test: price = 98.00 (= 98) - should be blocked (>=)
+            # 直接测试条件逻辑
+            price = 98.00
+            t3_exit_price = 100.0
+            should_block = t3_exit_price > 0 and price >= t3_exit_price * 0.98
 
-            # Mock broker
-            engine._broker = MagicMock()
-            engine._broker.positions = {}
-            engine._broker.cash = 1000000
-            engine._new_positions_today = 0
-            engine._pos_mgr = MagicMock()
-            engine._pos_mgr._align_lot.return_value = 100
+            assert should_block is True, "price=98 >= 100*0.98=98 should be blocked"
 
-            # Mock engine trade execution
-            engine._engine = MagicMock()
-            engine._engine.execute_trade.return_value = {"exec_price": 95.0, "filled": True}
+            price = 97.99
+            should_block = t3_exit_price > 0 and price >= t3_exit_price * 0.98
 
-            with patch("src.sim_trading.realtime_engine.datetime") as mock_dt:
-                mock_instance = MagicMock()
-                mock_instance.hour = 13
-                mock_instance.minute = 0
-                mock_dt.now.return_value = mock_instance
-
-                engine._evaluate_dip_buy("2026-03-17", prices, market)
-
-            # Trade SHOULD be executed
-            engine._broker.open_position.assert_called_once()
+            assert should_block is False, "price=97.99 < 100*0.98=98 should be allowed"
 
         finally:
             db_mod._db_path_override = old

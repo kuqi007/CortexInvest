@@ -193,12 +193,15 @@ class FutuL2Enricher:
             try:
                 ret, data = self._ctx.get_market_snapshot(hk)
                 if ret == RET_OK:
-                    for _, row in data.iterrows():
-                        code = from_futu_code(row["code"])
+                    # get_market_snapshot 可能返回 DataFrame 或 list[dict]
+                    rows = data.itertuples() if hasattr(data, "iterrows") else data
+                    for row in rows:
+                        row_dict = dict(row._asdict()) if hasattr(row, "_asdict") else row
+                        code = from_futu_code(str(row_dict.get("code", "")))
                         entry = {}
                         # 核心行情字段 — 覆盖新浪/东方财富
-                        price = row.get("last_price")
-                        prev = row.get("prev_close_price")
+                        price = row_dict.get("last_price")
+                        prev = row_dict.get("prev_close_price")
                         if price and price > 0:
                             entry["price"] = round(float(price), 3)
                         if prev and prev > 0:
@@ -211,14 +214,14 @@ class FutuL2Enricher:
                             ("low_price", "low"), ("volume", "vol"),
                             ("turnover", "amount"), ("amplitude", "amp"),
                         ]:
-                            val = row.get(ft_key)
+                            val = row_dict.get(ft_key)
                             if val and val > 0:
                                 entry[svc_key] = round(float(val), 3) if isinstance(val, float) else int(val)
                         # L2 衍生字段
-                        bid_ask = row.get("bid_ask_ratio")
-                        avg = row.get("avg_price")
-                        vol_ratio = row.get("volume_ratio")
-                        turnover_rate = row.get("turnover_rate")
+                        bid_ask = row_dict.get("bid_ask_ratio")
+                        avg = row_dict.get("avg_price")
+                        vol_ratio = row_dict.get("volume_ratio")
+                        turnover_rate = row_dict.get("turnover_rate")
                         if bid_ask and bid_ask != 0:
                             entry["bidAskRatio"] = round(float(bid_ask), 3)
                         if avg and avg != 0:
@@ -233,41 +236,41 @@ class FutuL2Enricher:
                 logger.debug(f"HK snapshot 失败: {e}")
 
         # ── 港股指数: 恒生指数 + 恒生科技指数 ──
+        # get_market_snapshot 不支持指数代码，改用 get_stock_quote
         if index_futu_codes:
             try:
-                ret, data = self._ctx.get_market_snapshot(index_futu_codes)
+                ret, data = self._ctx.get_stock_quote(index_futu_codes)
                 if ret == RET_OK:
-                    for _, row in data.iterrows():
-                        from_futu = from_futu_code(row["code"])
-                        last_price = row.get("last_price", 0) or 0
-                        change_ratio = row.get("change_ratio", 0) or 0
-                        turnover_val = row.get("turnover", 0) or 0
-                        if from_futu == "HK800000":
-                            self._hk_index_data = {
-                                "hkIndex": round(float(last_price), 2) if last_price else 0,
-                                "hkIndexPct": round(float(change_ratio), 2) if change_ratio else 0,
-                                "hkTurnover": round(float(turnover_val), 2) if turnover_val else 0,
-                            }
-                        elif from_futu == "HKHSTECH":
-                            self._hk_index_data.update({
-                                "hkTech": round(float(last_price), 2) if last_price else 0,
-                                "hkTechPct": round(float(change_ratio), 2) if change_ratio else 0,
-                            })
+                    if isinstance(data, list):
+                        for row_dict in data:
+                            self._process_index_row(row_dict)
+                    else:
+                        for row in data.itertuples():
+                            self._process_index_row(row._asdict())
+                    if self._hk_index_data:
+                        logger.info(f"港股指数获取成功: {self._hk_index_data}")
+                else:
+                    logger.debug(f"HK index quote ret={ret}, data={data}")
             except Exception as e:
-                logger.debug(f"HK index snapshot 失败: {e}")
+                logger.debug(f"HK index quote 失败: {e}")
 
         # ── A股: 仅 L2 衍生字段 ──
         if a_share:
             try:
                 ret, data = self._ctx.get_market_snapshot(a_share)
                 if ret == RET_OK:
-                    for _, row in data.iterrows():
-                        code = from_futu_code(row["code"])
+                    if isinstance(data, list):
+                        rows_iter = data
+                    else:
+                        rows_iter = data.itertuples()
+                    for row in rows_iter:
+                        row_dict = dict(row._asdict()) if hasattr(row, "_asdict") else row
+                        code = from_futu_code(str(row_dict.get("code", "")))
                         entry = {}
-                        bid_ask = row.get("bid_ask_ratio")
-                        avg = row.get("avg_price")
-                        vol_ratio = row.get("volume_ratio")
-                        turnover_rate = row.get("turnover_rate")
+                        bid_ask = row_dict.get("bid_ask_ratio")
+                        avg = row_dict.get("avg_price")
+                        vol_ratio = row_dict.get("volume_ratio")
+                        turnover_rate = row_dict.get("turnover_rate")
                         if bid_ask and bid_ask != 0:
                             entry["bidAskRatio"] = round(float(bid_ask), 3)
                         if avg and avg != 0:
@@ -282,6 +285,24 @@ class FutuL2Enricher:
                 logger.debug(f"A股 snapshot 失败: {e}")
 
         return result
+
+    def _process_index_row(self, row: dict):
+        """处理港股指数行，更新 self._hk_index_data"""
+        from_futu = from_futu_code(str(row.get("code", "")))
+        last_price = row.get("last_price") or 0
+        change_ratio = row.get("change_ratio") or 0
+        turnover_val = row.get("turnover") or 0
+        if from_futu == "HK800000":
+            self._hk_index_data = {
+                "hkIndex": round(float(last_price), 2) if last_price else 0,
+                "hkIndexPct": round(float(change_ratio), 2) if change_ratio else 0,
+                "hkTurnover": round(float(turnover_val), 2) if turnover_val else 0,
+            }
+        elif from_futu == "HKHSTECH":
+            self._hk_index_data.update({
+                "hkTech": round(float(last_price), 2) if last_price else 0,
+                "hkTechPct": round(float(change_ratio), 2) if change_ratio else 0,
+            })
 
     def _read_capital_from_l2_signals(self) -> dict[str, dict]:
         """从 l2_strategy_daemon 的 session 产出读取主力资金数据

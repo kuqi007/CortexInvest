@@ -306,6 +306,9 @@ def test_poll_once_extracts_chiNext_kc50_to_turnover(tmp_db, stale_json, tmp_pat
             "sh": 338400, "sz": 1135000, "total": 1473900,
             "shIndex": 3384.88, "szIndex": 11351.33,
             "shPct": 0.16, "szPct": 1.57, "verdict": "above_avg",
+            # Sina fallback now also returns chiNext/kc50
+            "chiNext": 2050.21, "chiNextPct": 0.83,
+            "kc50": 1020.30, "kc50Pct": -0.32,
         }
 
     with patch.object(poller, "DB_PATH", tmp_db), \
