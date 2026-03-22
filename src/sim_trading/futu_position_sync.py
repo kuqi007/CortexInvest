@@ -21,6 +21,18 @@ logger = logging.getLogger("l2_daemon.futu_sync")
 PARAM_VERSION = "live"
 
 
+def _get_watch_row(conn, code: str) -> dict | None:
+    """从 monitor_watchlist 读取单条记录，返回 dict 或 None。"""
+    try:
+        row = conn.execute(
+            "SELECT shares, cost FROM monitor_watchlist WHERE symbol = ?",
+            (code,),
+        ).fetchone()
+        return dict(row) if row else None
+    except Exception:
+        return None
+
+
 class FutuPositionSync:
     """Futu 持仓 → SQLite 同步器。"""
 
@@ -112,6 +124,25 @@ class FutuPositionSync:
                 )
 
             conn.commit()
+
+            # ── 持仓变更记录 ──
+            old_row = _get_watch_row(conn, code)
+            if old_row:
+                old_shares = old_row.get("shares")
+                old_cost = old_row.get("cost")
+                new_shares = fp.quantity
+                new_cost = fp.avg_price if fp.avg_price > 0 else None
+                if old_shares != new_shares or old_cost != new_cost:
+                    now_iso = datetime.now().isoformat(timespec="seconds")
+                    conn.execute("""
+                        INSERT OR IGNORE INTO position_change_log
+                          (symbol, ts, source, shares_from, shares_to, cost_from, cost_to)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (code, now_iso, "sync",
+                           old_shares,
+                           new_shares if new_shares > 0 else None,
+                           old_cost,
+                           new_cost))
         except Exception as e:
             logger.error(f"sync_live_state failed: {e}")
         finally:
