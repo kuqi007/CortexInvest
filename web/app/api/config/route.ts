@@ -676,7 +676,8 @@ export async function POST(request: Request) {
             tags = excluded.tags,
             watch_price = excluded.watch_price,
             watch_price_date = excluded.watch_price_date,
-            updated_at = excluded.updated_at`
+            updated_at = excluded.updated_at,
+            created_at = monitor_watchlist.created_at`
         ).run(code, name, listType, cost, shares, lot, hidden, star, 0, tagsJson, watchPrice, watchPriceDate, nowTs, nowTs);
 
         // 告警写到 alert_config
