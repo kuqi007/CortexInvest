@@ -9,8 +9,8 @@ interface MarketSummaryBarProps {
 
 function chgColor(pct: number | undefined): string {
   if (pct === undefined || pct === null) return '#6272a4';
-  if (pct > 0) return '#50fa7b';
-  if (pct < 0) return '#ff5555';
+  if (pct > 0) return '#ff5555';
+  if (pct < 0) return '#50fa7b';
   return '#6272a4';
 }
 
@@ -40,7 +40,7 @@ function Divider() {
 function ASummary({ mt }: { mt: MarketTurnover }) {
   const { chiNext, chiNextPct, kc50, kc50Pct, shIndex, shPct, szIndex, szPct, total, amo1, amo2 } = mt;
   const amoUp = (amo1 ?? 0) > (amo2 ?? 0);
-  const amoColor = amoUp ? '#50fa7b' : '#ff5555';
+  const amoColor = amoUp ? '#ff5555' : '#50fa7b';
   const amoArrow = amoUp ? '↑' : '↓';
 
   return (
@@ -51,22 +51,26 @@ function ASummary({ mt }: { mt: MarketTurnover }) {
     }}>
       <span>
         <span style={{ color: '#6272a4' }}>SH </span>
-        <span style={{ color: chgColor(shPct) }}>{fmtIdx(shIndex, 2)} {fmtPct(shPct)}</span>
+        <span>{fmtIdx(shIndex, 2)} </span>
+        <span style={{ color: chgColor(shPct) }}>{fmtPct(shPct)}</span>
       </span>
       <Divider />
       <span>
         <span style={{ color: '#6272a4' }}>SZ </span>
-        <span style={{ color: chgColor(szPct) }}>{fmtIdx(szIndex, 2)} {fmtPct(szPct)}</span>
+        <span>{fmtIdx(szIndex, 2)} </span>
+        <span style={{ color: chgColor(szPct) }}>{fmtPct(szPct)}</span>
       </span>
       <Divider />
       <span>
         <span style={{ color: '#6272a4' }}>创业板 </span>
-        <span style={{ color: chgColor(chiNextPct) }}>{fmtIdx(chiNext, 2)} {fmtPct(chiNextPct)}</span>
+        <span>{fmtIdx(chiNext, 2)} </span>
+        <span style={{ color: chgColor(chiNextPct) }}>{fmtPct(chiNextPct)}</span>
       </span>
       <Divider />
       <span>
         <span style={{ color: '#6272a4' }}>科创50 </span>
-        <span style={{ color: chgColor(kc50Pct) }}>{fmtIdx(kc50, 2)} {fmtPct(kc50Pct)}</span>
+        <span>{fmtIdx(kc50, 2)} </span>
+        <span style={{ color: chgColor(kc50Pct) }}>{fmtPct(kc50Pct)}</span>
       </span>
       <Divider />
       <span>
@@ -96,12 +100,14 @@ function HKSummary({ mt }: { mt: MarketTurnover }) {
     }}>
       <span>
         <span style={{ color: '#6272a4' }}>恒生 </span>
-        <span style={{ color: chgColor(hkIndexPct) }}>{fmtIdx(hkIndex, 2)} {fmtPct(hkIndexPct)}</span>
+        <span>{fmtIdx(hkIndex, 2)} </span>
+        <span style={{ color: chgColor(hkIndexPct) }}>{fmtPct(hkIndexPct)}</span>
       </span>
       <Divider />
       <span>
         <span style={{ color: '#6272a4' }}>恒生科技 </span>
-        <span style={{ color: chgColor(hkTechPct) }}>{fmtIdx(hkTech, 2)} {fmtPct(hkTechPct)}</span>
+        <span>{fmtIdx(hkTech, 2)} </span>
+        <span style={{ color: chgColor(hkTechPct) }}>{fmtPct(hkTechPct)}</span>
       </span>
       <Divider />
       <span>

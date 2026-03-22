@@ -332,6 +332,13 @@ CREATE TABLE IF NOT EXISTS daily_kline (
 );
 CREATE INDEX IF NOT EXISTS idx_daily_kline_code ON daily_kline(code);
 
+-- 大盘 AMO 历史（两市合计成交额，供 AMO1/AMO2 比值计算）
+CREATE TABLE IF NOT EXISTS market_amo_history (
+    date TEXT PRIMARY KEY,
+    total_yuan REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_amo_history_date ON market_amo_history(date);
+
 -- 持仓变更记录
 CREATE TABLE IF NOT EXISTS position_change_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

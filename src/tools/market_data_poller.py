@@ -24,6 +24,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 # 东方财富 push API 公开 token（所有 quant 库共用）
 EM_UT = "fa5fd1943c7b386f172d6893dbfba10b"
 
+from src.sim_trading.db import init_db
 from src.tools.futu_enricher import FutuL2Enricher
 from src.tools.stock_monitor import (
     fetch_realtime_eastmoney, fetch_realtime_sina,
@@ -39,6 +40,9 @@ _futu_enricher = FutuL2Enricher()
 CONFIG_PATH = PROJECT_ROOT / "src" / "data" / "monitor_config.json"
 OUTPUT_PATH = PROJECT_ROOT / "src" / "data" / "market_data.json"
 DB_PATH = PROJECT_ROOT / "src" / "data" / "sim_trading.db"
+
+# 确保数据库 schema 包含所有表（包括新增的 market_amo_history）
+init_db()
 
 # ── AMO History (模块级状态，poll_once 之间保持) ──
 # _amo_history[code] = [amount_n, ..., amount_1]  # 最近的 N 天成交额(元)，最多12天
@@ -133,13 +137,45 @@ def _update_amo_for_stock(code: str, amount_today: float) -> tuple[float, float]
 
 
 # ── 大盘 AMO（两市合计成交额，单位：亿元 × 1e8 = 元）──
-_market_amo_12d: list[float] = []  # 最近12天每日两市合计成交额(元)
+_market_amo_12d: list[float] = []  # 最近12天每日两市合计成交额(元)，内存缓存
+
+
+def _load_market_amo_from_db() -> list[float]:
+    """从 SQLite 加载最近最多12天的大盘成交额历史，格式同 _market_amo_12d。"""
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        rows = conn.execute(
+            "SELECT total_yuan FROM market_amo_history ORDER BY date DESC LIMIT 12"
+        ).fetchall()
+        conn.close()
+        if not rows:
+            return []
+        # 倒序（最旧的在前，最新的在后），与 _market_amo_12d 顺序一致
+        return [float(r[0]) for r in reversed(rows)]
+    except Exception:
+        return []
+
+
+def _save_market_amo_to_db(date_str: str, total_yuan: float):
+    """Upsert 今日大盘成交额到 SQLite。"""
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        conn.execute(
+            "INSERT OR REPLACE INTO market_amo_history (date, total_yuan) VALUES (?, ?)",
+            (date_str, total_yuan),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning(f"大盘AMO写入SQLite失败: {e}")
 
 
 def _update_market_amo(total_yi: float):
-    """更新大盘 AMO 历史。total_yi: 两市合计成交额（亿元）。"""
+    """更新大盘 AMO 历史（内存缓存 + SQLite 持久化）。total_yi: 两市合计成交额（亿元）。"""
     global _market_amo_12d
     amount_yuan = total_yi * 1e8
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    _save_market_amo_to_db(today_str, amount_yuan)
     if not _market_amo_12d or _market_amo_12d[0] != amount_yuan:
         _market_amo_12d.insert(0, amount_yuan)
         if len(_market_amo_12d) > _AMO_DAYS_2:
@@ -150,7 +186,7 @@ def _get_market_amo1() -> float:
     hist = _market_amo_12d
     if len(hist) < 2:
         return 1.0
-    avg6 = sum(hist[1:_AMO_DAYS_1 + 1]) / min(len(hist) - 1, _AMO_DAYS_1)
+    avg6 = sum(hist[1 : _AMO_DAYS_1 + 1]) / min(len(hist) - 1, _AMO_DAYS_1)
     return hist[0] / max(avg6, 1)
 
 
@@ -511,7 +547,14 @@ def poll_once() -> bool:
     即使个股行情抓取失败，也尝试写入大盘数据（成交额/汇率），
     确保 dashboard 至少能看到市场概览。
     """
-    global _amo_history, _market_amo_history
+    global _amo_history, _market_amo_history, _market_amo_12d
+
+    # 启动时从 SQLite 恢复大盘 AMO 历史（丢失会导致 AMO1/AMO2=1.0）
+    if not _market_amo_12d:
+        _market_amo_12d = _load_market_amo_from_db()
+        if _market_amo_12d:
+            logger.info(f"大盘AMO历史恢复: {len(_market_amo_12d)}天")
+
     watchlist, settings = load_watchlist_from_db()
     symbols = list(watchlist.keys())
 
@@ -669,16 +712,17 @@ def poll_once() -> bool:
         turnover["amo2"] = round(_get_market_amo2(), 3)
 
     # 提取指数数据写入 marketTurnover
-    for idx in index_results:
-        code = idx.get("code", "")
-        price = idx.get("price", 0) or 0
-        pct = idx.get("pct", 0) or 0
-        if code == "399006":
-            turnover["chiNext"] = round(price, 2) if price else 0
-            turnover["chiNextPct"] = round(pct, 2) if pct else 0
-        elif code == "000688":
-            turnover["kc50"] = round(price, 2) if price else 0
-            turnover["kc50Pct"] = round(pct, 2) if pct else 0
+    if turnover:
+        for idx in index_results:
+            code = idx.get("code", "")
+            price = idx.get("price", 0) or 0
+            pct = idx.get("pct", 0) or 0
+            if code == "399006":
+                turnover["chiNext"] = round(price, 2) if price else 0
+                turnover["chiNextPct"] = round(pct, 2) if pct else 0
+            elif code == "000688":
+                turnover["kc50"] = round(price, 2) if price else 0
+                turnover["kc50Pct"] = round(pct, 2) if pct else 0
 
     payload = {
         "services": services,
