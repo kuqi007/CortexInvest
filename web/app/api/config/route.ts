@@ -205,6 +205,23 @@ function ensureMonitorTables(db: MonitorDb) {
   if (!tagMetaCols.has("parent")) {
     db.exec(`ALTER TABLE tag_meta ADD COLUMN parent TEXT`);
   }
+  // 持仓变更记录表
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS position_change_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      symbol TEXT NOT NULL,
+      ts TEXT NOT NULL,
+      source TEXT NOT NULL,
+      shares_from INTEGER,
+      shares_to INTEGER,
+      cost_from REAL,
+      cost_to REAL
+    );
+    CREATE INDEX IF NOT EXISTS idx_pcl_symbol ON position_change_log(symbol);
+    CREATE INDEX IF NOT EXISTS idx_pcl_ts ON position_change_log(ts);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_pcl_unique
+      ON position_change_log(symbol, ts, source, shares_from, shares_to, cost_from, cost_to);
+  `);
 }
 
 function readConfigFromDb(db: MonitorDb, ensureSchema = true): MonitorConfig {
@@ -619,6 +636,27 @@ export async function POST(request: Request) {
         const tagsJson = JSON.stringify(tags);
         const watchPrice = data?.watch_price != null ? Number(data.watch_price) : readMarketPrice(code);
         const watchPriceDate = watchPrice != null ? todayStr() : null;
+
+        // ── 持仓变更记录（add 也可能触发 ON CONFLICT 更新）──
+        const oldRow = readWatchRow(db, code);
+        if (oldRow) {
+          const oldShares = oldRow.shares;
+          const oldCost = oldRow.cost;
+          const newShares = shares;
+          const newCost = cost;
+          if (oldShares !== newShares || oldCost !== newCost) {
+            const nowIso = new Date().toISOString();
+            db.prepare(`
+              INSERT OR IGNORE INTO position_change_log
+                (symbol, ts, source, shares_from, shares_to, cost_from, cost_to)
+              VALUES (?, ?, ?, ?, ?, ?, ?)
+            `).run(code, nowIso, "import",
+              oldShares != null ? oldShares : null,
+              newShares != null ? newShares : null,
+              oldCost != null ? oldCost : null,
+              newCost != null ? newCost : null);
+          }
+        }
 
         db.prepare(
           `INSERT INTO monitor_watchlist(
