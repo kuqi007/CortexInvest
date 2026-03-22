@@ -723,6 +723,27 @@ export async function POST(request: Request) {
         }
 
         const nowTs = Math.floor(Date.now() / 1000);
+
+        // ── 持仓变更记录 ──
+        const oldShares = existing.shares;
+        const oldCost = existing.cost;
+        const newShares = shares;
+        const newCost = cost;
+        const sharesChanged = oldShares !== newShares;
+        const costChanged = oldCost !== newCost;
+        if (sharesChanged || costChanged) {
+          const nowIso = new Date().toISOString();
+          db.prepare(`
+            INSERT OR IGNORE INTO position_change_log
+              (symbol, ts, source, shares_from, shares_to, cost_from, cost_to)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+          `).run(code, nowIso, "manual",
+            oldShares != null ? oldShares : null,
+            newShares != null ? newShares : null,
+            oldCost != null ? oldCost : null,
+            newCost != null ? newCost : null);
+        }
+
         db.prepare(
           `UPDATE monitor_watchlist
            SET list_type = ?, cost = ?, shares = ?, lot = ?, hidden = ?, star = ?, dip_buy = ?,
