@@ -1009,6 +1009,27 @@ export function StockDrawer({
                   转自选
                 </button>
               )}
+              {/* hide / unhide — only for holdings */}
+              {service?.type === "holding" && (
+                <button
+                  onClick={() => saveData({ hidden: !service?.hidden })}
+                  title={service?.hidden ? "取消隐藏" : "隐藏（不通知）"}
+                  style={{
+                    background: service?.hidden ? D.currentLine : "transparent",
+                    border: `1px solid ${service?.hidden ? D.comment : D.purple}`,
+                    color: service?.hidden ? D.comment : D.purple,
+                    cursor: "pointer",
+                    fontSize: 11,
+                    padding: "2px 10px",
+                    borderRadius: 3,
+                    fontFamily: "JetBrains Mono, monospace",
+                    userSelect: "none",
+                    opacity: service?.hidden ? 0.6 : 0.9,
+                  }}
+                >
+                  {service?.hidden ? "取消隐藏" : "隐藏"}
+                </button>
+              )}
               {/* delete */}
               <button
                 onClick={async () => {

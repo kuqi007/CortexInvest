@@ -529,7 +529,7 @@ function Home() {
                   {secTitle("hidden", hiddenList.length, hiddenOpen, setHiddenOpen, 0.6)}
                   {hiddenOpen && (
                     <>
-                      {hiddenList.map((s) => <HoldRow key={s.id} s={s} />)}
+                      {holdHeader}{hiddenList.map((s) => <HoldRow key={s.id} s={s} />)}
                     </>
                   )}
                 </>
