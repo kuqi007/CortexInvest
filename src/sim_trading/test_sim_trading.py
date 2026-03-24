@@ -1765,8 +1765,8 @@ class TestT3Cooldown:
             engine._process_signal_v2(sig1, "10:30", {"HK00700": 558.0}, {"HK00700": {}})
 
             # Check cooldown is set
-            assert "HK00700" in engine._t3_cooldown
-            first_cooldown = engine._t3_cooldown["HK00700"]
+            assert ("HK00700", "large_order_reversal") in engine._t3_cooldown
+            first_cooldown = engine._t3_cooldown[("HK00700", "large_order_reversal")]
 
             # Second T3 signal within 5 minutes - should be skipped due to cooldown
             sig2 = {
@@ -1778,7 +1778,7 @@ class TestT3Cooldown:
             engine._process_signal_v2(sig2, "10:31", {"HK00700": 558.0}, {"HK00700": {}})
 
             # Cooldown timestamp should NOT be updated (still the first one)
-            assert engine._t3_cooldown["HK00700"] == first_cooldown
+            assert engine._t3_cooldown[("HK00700", "large_order_reversal")] == first_cooldown
 
         finally:
             db_mod._db_path_override = old
@@ -1811,7 +1811,7 @@ class TestT3Cooldown:
 
             # Set cooldown to 6 minutes ago
             old_cooldown = int(time.time() * 1000) - (6 * 60 * 1000)
-            engine._t3_cooldown["HK00700"] = old_cooldown
+            engine._t3_cooldown[("HK00700", "large_order_reversal")] = old_cooldown
 
             # Signal after cooldown - should process and update cooldown
             sig = {
@@ -1823,7 +1823,74 @@ class TestT3Cooldown:
             engine._process_signal_v2(sig, "10:35", {"HK00700": 558.0}, {"HK00700": {}})
 
             # Cooldown should be updated to new timestamp (signal was processed)
-            assert engine._t3_cooldown["HK00700"] > old_cooldown
+            assert engine._t3_cooldown[("HK00700", "large_order_reversal")] > old_cooldown
+
+        finally:
+            db_mod._db_path_override = old
+            os.unlink(tmp.name)
+
+    def test_t3_cooldown_per_strategy_allows_different_strategies(self):
+        """Two different T3 strategies for the same stock should each get their own cooldown.
+
+        This is the key fix: previously _t3_cooldown was keyed by code only (not code+strategy),
+        so two different T3 strategies (e.g. large_order_reversal and volume_price_divergence)
+        firing for the same stock within seconds would share one cooldown entry and the second
+        strategy would incorrectly slip through. With (code, strategy) tuple keying, each
+        strategy has its own independent 5-minute cooldown.
+        """
+        from .realtime_engine import RealtimeSimEngine
+        from .db import _db_path_override
+        import src.sim_trading.db as db_mod
+        import os
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp.close()
+        old = db_mod._db_path_override
+        db_mod._db_path_override = tmp.name
+        try:
+            from .db import init_db
+            init_db()
+
+            rules = json.loads(RULES_PATH.read_text())
+            mock_broker = MagicMock()
+            mock_broker.positions = {"HK00700": MagicMock()}
+            mock_broker.positions["HK00700"].entry_day_index = 0
+            mock_broker.positions["HK00700"].entry_time = int(time.time() * 1000) - 3600000  # 1 hour ago
+            mock_broker.positions["HK00700"].entry_price = 550.0
+
+            engine = RealtimeSimEngine(rules, daily_tracker=None, futu_trade=False)
+            engine._broker = mock_broker
+
+            # First T3 signal: large_order_reversal
+            sig1 = {
+                "code": "HK00700",
+                "strategy": "large_order_reversal",
+                "ts": int(time.time() * 1000),
+                "detail": {"direction": "bearish"},
+            }
+            engine._process_signal_v2(sig1, "10:30", {"HK00700": 558.0}, {"HK00700": {}})
+
+            # Verify large_order_reversal cooldown is set
+            assert ("HK00700", "large_order_reversal") in engine._t3_cooldown
+
+            # Second T3 signal: different strategy volume_price_divergence, same stock, immediate
+            # Should NOT be blocked by large_order_reversal's cooldown (different strategy key)
+            sig2 = {
+                "code": "HK00700",
+                "strategy": "volume_price_divergence",
+                "ts": int(time.time() * 1000),
+                "detail": {"direction": "bearish"},
+            }
+            engine._process_signal_v2(sig2, "10:30", {"HK00700": 558.0}, {"HK00700": {}})
+
+            # Both strategy cooldowns should exist independently
+            assert ("HK00700", "large_order_reversal") in engine._t3_cooldown
+            assert ("HK00700", "volume_price_divergence") in engine._t3_cooldown
+
+            # large_order_reversal cooldown should NOT have been overwritten by sig2
+            lor_cooldown_after = engine._t3_cooldown[("HK00700", "large_order_reversal")]
+            sig1_cooldown = engine._t3_cooldown[("HK00700", "large_order_reversal")]
+            assert lor_cooldown_after == sig1_cooldown  # unchanged
 
         finally:
             db_mod._db_path_override = old

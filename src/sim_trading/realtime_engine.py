@@ -69,8 +69,8 @@ class RealtimeSimEngine:
         self._exit_evaluated_today = False
         # Per-tick score cache: {code: score_dict}, cleared each tick
         self._score_cache: dict[str, dict] = {}
-        # T3 cooldown: {code: last_trigger_time_ms}, 5min cooldown per stock
-        self._t3_cooldown: dict[str, int] = {}
+        # T3 cooldown: {(code, strategy): last_trigger_time_ms}, 5min cooldown per stock+strategy
+        self._t3_cooldown: dict[tuple[str, str], int] = {}
         # T3 exit price for dip-buy re-entry check: {code: exit_price}
         self._t3_exit_price: dict[str, float] = {}
 
@@ -1113,13 +1113,14 @@ class RealtimeSimEngine:
         tier3_strategies = set(self._rules.get("tiers", {}).get("3_correction", {}).keys())
         tier1_strategies = set(self._rules.get("tiers", {}).get("1_independent", {}).keys())
 
-        # T3 cooldown: 5分钟内同一股票不重复触发
-        if strategy in tier3_strategies and code in self._t3_cooldown:
-            if now_ts - self._t3_cooldown[code] < 5 * 60 * 1000:  # 5分钟
+        # T3 cooldown: 5分钟内同一(股票, 策略)不重复触发
+        if strategy in tier3_strategies and (code, strategy) in self._t3_cooldown:
+            if now_ts - self._t3_cooldown[(code, strategy)] < 5 * 60 * 1000:  # 5分钟
                 return  # 冷却中，跳过
-        self._t3_cooldown[code] = now_ts
+        self._t3_cooldown[(code, strategy)] = now_ts
 
         # ── T3 correction: with cost filter + min_hold ──
+        # Re-check position exists after cooldown check (gap-free guard)
         if strategy in tier3_strategies and code in self._broker.positions:
             self._handle_t3_with_filters(signal, prices, market, date)
             return
