@@ -112,3 +112,10 @@ web/tsconfig.tsbuildinfo
 # Daily K-line cache DBs (runtime)
 src/data/daily_kline.db
 src/data/maily_kline.db
+
+# Crash/backup DB remnants (runtime, not tracked)
+src/data/sim_trading.db.broken
+src/data/sim_trading.db.crashed
+src/data/sim_trading.db.local_backup
+src/data/*.db-shm
+src/data/*.db-wal
