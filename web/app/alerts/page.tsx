@@ -210,12 +210,26 @@ function parseTradePlan(e: AlertEvent, d: string, _sym: string, shortCode: strin
     const parts = d.split(/\s+/);
     planName = parts.length > 1 ? parts.slice(1).join(" ").split(/\s/)[0] : "";
   }
-  // 尝试从 services 查找股票名称（用于 HK plan，plan name 不等于股票名）
+  // 从 plan name 中提取股票名称（去掉"持有策略"/"建仓仓"等后缀）
   let stockName = planName.split(/\s+/)[0] || "";
   const sym = e.symbol || "";
-  if (!stockName || stockName === "持有策略" || stockName === "建仓策略") {
+  // 去掉"持有策略"、"建仓策略"等后缀，看剩下的部分是否需要查 services
+  const nameWithoutSuffix = stockName
+    .replace(/持有策略$/, "")
+    .replace(/建仓策略$/, "")
+    .replace(/左侧试探$/, "")
+    .replace(/右侧确认$/, "");
+  // 如果名称以 HK/KR 开头或纯数字（股票代码），则查 services 获取真实名称
+  const needsLookup = !nameWithoutSuffix ||
+    /^(?:HK|KR|\d{5,})$/.test(nameWithoutSuffix) ||
+    /^\d{6}$/.test(nameWithoutSuffix); // A 股如 600xxx
+  if (needsLookup) {
     const svc = services?.find((s) => s.id === sym);
     if (svc?.name) stockName = svc.name;
+    else if (nameWithoutSuffix && !/^(?:HK|KR|\d{5,})$/.test(nameWithoutSuffix) && nameWithoutSuffix !== stockName)
+      stockName = nameWithoutSuffix;
+  } else {
+    stockName = nameWithoutSuffix;
   }
   return {
     stockName,

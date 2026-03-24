@@ -1015,16 +1015,16 @@ export function StockDrawer({
                   onClick={() => saveData({ hidden: !service?.hidden })}
                   title={service?.hidden ? "取消隐藏" : "隐藏（不通知）"}
                   style={{
-                    background: service?.hidden ? D.currentLine : "transparent",
-                    border: `1px solid ${service?.hidden ? D.comment : D.purple}`,
-                    color: service?.hidden ? D.comment : D.purple,
+                    background: service?.hidden ? "rgba(155, 77, 207, 0.3)" : "transparent",
+                    border: `1px solid ${D.purple}`,
+                    color: service?.hidden ? D.purple : D.purple,
                     cursor: "pointer",
                     fontSize: 11,
                     padding: "2px 10px",
                     borderRadius: 3,
                     fontFamily: "JetBrains Mono, monospace",
                     userSelect: "none",
-                    opacity: service?.hidden ? 0.6 : 0.9,
+                    opacity: 0.9,
                   }}
                 >
                   {service?.hidden ? "取消隐藏" : "隐藏"}
