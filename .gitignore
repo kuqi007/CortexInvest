@@ -119,3 +119,13 @@ src/data/sim_trading.db.crashed
 src/data/sim_trading.db.local_backup
 src/data/*.db-shm
 src/data/*.db-wal
+
+# Runtime data files
+src/data/market_data.json
+src/data/morning_briefing.json
+src/data/daily_summary.json
+src/data/l2_strategy_signals.json
+src/data/*.db
+src/data/*.db-*
+logs/*.log
+logs/screen_shots/

@@ -77,13 +77,13 @@ do_start() {
     if [ "$LAST_DATE" != "$TODAY_STR" ]; then
       echo "早间简报是 $LAST_DATE，今天是 $TODAY_STR，正在生成..."
       cd "$DIR"
-      poetry run python -c "from src.tools.daily_summary_generator import generate_morning_briefing; generate_morning_briefing()" >> "$DIR/logs/morning_briefing.log" 2>&1
+      python3 -c "from src.tools.daily_summary_generator import generate_morning_briefing; generate_morning_briefing()" >> "$DIR/logs/morning_briefing.log" 2>&1
       echo "早间简报生成完成"
     fi
   else
     echo "早间简报文件不存在，正在生成..."
     cd "$DIR"
-    poetry run python -c "from src.tools.daily_summary_generator import generate_morning_briefing; generate_morning_briefing()" >> "$DIR/logs/morning_briefing.log" 2>&1
+    python3 -c "from src.tools.daily_summary_generator import generate_morning_briefing; generate_morning_briefing()" >> "$DIR/logs/morning_briefing.log" 2>&1
     echo "早间简报生成完成"
   fi
 
@@ -93,7 +93,7 @@ do_start() {
     echo "Poller 已在运行 (pid=$(_read_pid "$POLLER_PID"))，跳过"
   else
     cd "$DIR"
-    nohup poetry run python src/tools/market_data_poller.py >> "$POLLER_LOG" 2>&1 &
+    nohup python3 src/tools/market_data_poller.py >> "$POLLER_LOG" 2>&1 &
     echo $! > "$POLLER_PID"
     echo "Poller  启动  pid=$!  日志=logs/poller-$TODAY.log"
   fi
@@ -105,7 +105,7 @@ do_start() {
   else
     cd "$DIR"
     sleep 2  # 等 poller 首次写入 market_data.json
-    nohup poetry run python src/tools/stock_notifier.py >> "$NOTIFIER_LOG" 2>&1 &
+    nohup python3 src/tools/stock_notifier.py >> "$NOTIFIER_LOG" 2>&1 &
     echo $! > "$NOTIFIER_PID"
     echo "Notifier 启动  pid=$!  日志=logs/notifier-$TODAY.log"
   fi
@@ -116,7 +116,7 @@ do_start() {
     echo "L2 Daemon 已在运行 (pid=$(_read_pid "$L2_DAEMON_PID"))，跳过"
   else
     cd "$DIR"
-    nohup poetry run python src/tools/l2_strategy_daemon.py >> "$L2_DAEMON_LOG" 2>&1 &
+    nohup python3 src/tools/l2_strategy_daemon.py >> "$L2_DAEMON_LOG" 2>&1 &
     echo $! > "$L2_DAEMON_PID"
     echo "L2 Daemon 启动  pid=$!  日志=logs/l2_daemon-$TODAY.log"
   fi
