@@ -1,34 +1,53 @@
 # AGENTS.md — Guidelines for AI Agents
 
+## Project Overview
+
+- **Python backend**: `src/` — trading agents, sim engine, market data poller, notifier
+- **TypeScript frontend**: `web/` — Next.js 15 + React 19 web dashboard
+- **Database**: SQLite (`src/data/sim_trading.db`) with WAL mode
+- **Data files** (`src/data/`): JSON configs, market data JSON — atomic writes (tmp → rename)
+
 ## Build / Lint / Test Commands
 
 ### Python (Poetry)
 ```bash
 poetry install                                      # install dependencies
-poetry run pytest src/sim_trading/test_sim_trading.py -v              # run all tests
-poetry run pytest src/sim_trading/test_sim_trading.py -v -k "T3"      # single test (by name)
-poetry run pytest src/sim_trading/test_sim_trading.py -v -x            # fail-fast
-poetry run python src/main.py --ticker 000000 --show-reasoning          # run agent analysis
-poetry run python src/tools/l2_strategy_daemon.py                      # run L2 daemon
-poetry run python -m src.sim_trading.replay_runner                    # sim replay
-poetry run python -m src.sim_trading.scoring_backtester                # v3 Optuna backtest
+poetry run black --check src/                      # lint check (no changes)
+poetry run black src/                              # auto-format
+poetry run isort --check src/                      # import check
+poetry run isort src/                              # fix imports
+
+poetry run pytest src/sim_trading/test_sim_trading.py -v           # run all tests
+poetry run pytest src/sim_trading/test_sim_trading.py -v -k "T3"  # single test by name
+poetry run pytest src/sim_trading/test_sim_trading.py -v -x       # fail-fast
+poetry run pytest src/sim_trading/test_position_change_log.py -v   # position change tests
+poetry run pytest src/tools/test_market_data_poller.py -v          # poller unit tests
+
+poetry run python src/main.py --ticker 000000 --show-reasoning     # run agent analysis
+poetry run python src/tools/l2_strategy_daemon.py                  # run L2 daemon
+poetry run python -m src.sim_trading.replay_runner                # sim replay
+poetry run python -m src.sim_trading.scoring_backtester            # v3 Optuna backtest
+poetry run python src/sim_trading/kline_fetcher.py --codes HK00700,HK09988  # fetch Kline
 ```
 
 ### Web / TypeScript (Next.js)
 ```bash
 cd web && npm run dev              # dev server on :3120
-cd web && npx tsc --noEmit         # TypeScript type check (no build required)
-cd web && npx vitest run           # unit tests (vitest)
-cd web && npx playwright test       # E2E tests
-cd web && npx playwright test --ui  # E2E with UI
+cd web && npx tsc --noEmit        # TypeScript type check (no build required)
+cd web && npm run test:unit        # vitest unit tests
+cd web && npx vitest run           # vitest (alternate)
+cd web && npm run test             # Playwright E2E tests
+cd web && npm run test:ui          # Playwright with UI
+cd web && npm run test:headed      # Playwright headed
+cd web && npm run test:all         # vitest + playwright
 ```
 
 ### Critical Notes
-- **Never run `next build` while dev server is running** — build overwrites `.next/` causing `Cannot find module` errors in dev server.
-- **Webpack dev cache**: Next.js dev mode uses in-memory webpack cache. If you hit stale chunk errors, `rm -rf web/.next` and restart.
-- **Python linting**: Use `black` and `isort` (in `pyproject.toml` dev dependencies). No ruff/flake8 config.
-- **Vitest** is configured in `web/vitest.config.ts`; Playwright in `web/playwright.config.ts`.
-- **Playwright E2E: Every new feature or UI change must include an E2E test** in `web/screenshots/test_<feature>.mjs`. Tests without E2E coverage are considered incomplete.
+- **Never run `next build` while dev server is running** — build overwrites `.next/` causing `Cannot find module` errors.
+- **Webpack dev cache**: If stale chunk errors, `rm -rf web/.next` and restart dev.
+- **Vitest** config: `web/vitest.config.ts`; **Playwright** config: `web/playwright.config.ts`.
+- **Playwright E2E**: Every new feature or UI change must include an E2E test in `web/screenshots/test_<feature>.mjs`. Tests without E2E coverage are considered incomplete.
+- **Python linting**: `black` (line length default 88) + `isort`. No ruff/flake8 config.
 
 ---
 
@@ -46,7 +65,7 @@ from .broker import AbstractBroker
 from src.utils.logging_config import setup_logger
 ```
 
-**Formatting**: `black` (line length default 88) + `isort` for import sorting. Docstrings in Chinese are common throughout the codebase.
+**Formatting**: `black` (default 88 chars) + `isort` for import sorting. Docstrings in Chinese are common throughout the codebase.
 
 **Types**: Use `dataclass` for structured data (e.g., `TradeDecision`, `Position`). Avoid `Any`. Prefer explicit type annotations on function signatures. Use `dict`/`list`/`tuple` generics (`dict[str, int]`) not `Dict`/`List`/`Tuple` from typing.
 
@@ -57,7 +76,7 @@ from src.utils.logging_config import setup_logger
 - Constants: `UPPER_SNAKE_CASE`
 - Type aliases: `SomeType = dict[str, Any]`
 
-**Error Handling**: Use logging (`logger.error`, `logger.warning`) for operational errors. Catch specific exceptions. Never swallow errors silently without at least a debug log. Use `try/except/finally` with meaningful messages.
+**Error Handling**: Use logging (`logger.error`, `logger.warning`) for operational errors. Catch specific exceptions. Never swallow errors silently. Use `try/except/finally` with meaningful messages.
 
 **Data Classes**:
 ```python
@@ -71,7 +90,7 @@ class TradeDecision:
     trigger_signal_ids: list[int] = field(default_factory=list)
 ```
 
-**SQLite**: Use WAL mode, `busy_timeout=5000`, `isolation_level=None`. Use `readFileSync`/`writeFileSync` with atomic rename (tmp → rename) for JSON config writes. All DB operations must be try/finally with explicit `close()`.
+**SQLite**: Use WAL mode, `busy_timeout=5000`, `isolation_level=None`. Use `readFileSync`/`writeFileSync` with atomic rename (tmp → rename) for JSON config writes. All DB operations must use try/finally with explicit `close()`.
 
 **Constants**: All numeric magic numbers must be named constants (e.g., `T3_COOLDOWN_MS = 5 * 60 * 1000`). Tuple keys are preferred for compound state (e.g., `_t3_cooldown: dict[tuple[str, str], int]` keyed by `(code, strategy)`).
 
@@ -110,13 +129,13 @@ try {
 - **Single source of truth**: `alert_events` → SQLite `alert_events` table (written by Python Notifier); Web reads only, never computes alerts.
 - **Data files** (`monitor_config.json`, `alert_config.json`, `sim_trading.db`): use atomic file writes (tmp → rename).
 - **Secrets**: Never log or commit API keys. Use `.env` + `python-dotenv`.
-- **All market data and FX fetching must happen in Python poller**, not in Next.js API routes. This keeps the pipeline centralized and avoids duplicate API calls.
+- **All market data and FX fetching must happen in Python poller**, not in Next.js API routes.
 - **Alert config and monitor config are separate**: `above`/`below` thresholds live in `alert_config.json`, not inside watchlist entries. Delete operations must clean both.
 - **Fee calculation is Python-only**: `SimulationEngine.calc_cost()` is the single source of truth. Web `/api/sim` reads DB `pnl` directly, never recalculates.
 - **Stock code prefixes**: `HK` = 港股, no prefix = A股, `KR` = 韩国（不支持实时行情）.
 - **HK P&L FX conversion**: Apply `fxRate` (from poller, fallback 0.92) to `mktVal`, `totalPnlRaw`, `dayPnl` for HK stocks. Percentage fields (`pnl%`, `change%`) are NOT converted.
-- **P&L guard**: `totalPnlRaw` calculation requires `s.cost > 0` (not just `!= null`). Cost=0 holdings display `-` instead of meaningless numbers.
-- **Day P&L cap**: For stocks bought today, when `rawDayPnl` exceeds `totalPnl` in the same direction, cap at `totalPnl` to exclude overnight gaps from cost basis to today.
+- **P&L guard**: `totalPnlRaw` calculation requires `s.cost > 0` (not just `!= null`). Cost=0 holdings display `-`.
+- **Day P&L cap**: For stocks bought today, when `rawDayPnl` exceeds `totalPnl` in the same direction, cap at `totalPnl` to exclude overnight gaps.
 
 ### Data File Responsibilities
 

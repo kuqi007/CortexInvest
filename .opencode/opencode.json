@@ -1,0 +1,31 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    ".claude/rules/sim-trading-safety.md",
+    ".claude/rules/futu-api.md",
+    ".claude/rules/notification-system.md",
+    ".claude/rules/quant-engineer.md",
+    "AGENTS.md"
+  ],
+  "plugin": [
+    "./.opencode/plugins",
+    "superpowers@git+https://github.com/obra/superpowers.git"
+  ],
+  "agent": {
+    "finance-ux-reviewer": {
+      "description": "Professional financial UX/UI review for dashboards, trading tools, and fintech applications",
+      "mode": "subagent",
+      "prompt": "{file:prompts/agents/finance-ux-reviewer.txt}"
+    },
+    "quant-engineer": {
+      "description": "Quantitative trading strategy, technical analysis, backtesting, and risk management for A-share and HK markets",
+      "mode": "subagent",
+      "prompt": "{file:prompts/agents/quant-engineer.txt}"
+    },
+    "fintech-fullstack-dev": {
+      "description": "Full-stack fintech development — FastAPI backends, Next.js frontends, SQLite, real-time data pipelines",
+      "mode": "subagent",
+      "prompt": "{file:prompts/agents/fintech-fullstack-dev.txt}"
+    }
+  }
+}
