@@ -9,16 +9,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 uv sync --all-extras                                # install dependencies (including dev)
 source .venv/bin/activate                           # activate venv (Python 3.13)
-python src/main.py --ticker 000000                  # CLI analysis
-python src/main.py --ticker 000000 --show-reasoning  # with agent reasoning
-python src/main.py --ticker 000000 --summary        # with summary report
-python src/backtester.py --ticker 301157 --start-date 2024-12-11 --end-date 2025-01-07
-python run_with_backend.py                          # FastAPI on :8000 (Swagger at /docs)
-python run_with_backend.py --ticker 002848          # API server + immediate analysis
-python -m src.sim_trading.replay_runner             # sim trading replay (writes to sim_trading.db)
-pytest src/sim_trading/test_sim_trading.py -v       # sim trading tests (138 tests)
-python -m src.sim_trading.kline_fetcher              # fetch HK daily klines from Tencent Finance
-python -m src.sim_trading.scoring_backtester        # v3 Optuna walk-forward backtest
+uv run python src/main.py --ticker 000000          # CLI analysis
+uv run python src/main.py --ticker 000000 --show-reasoning  # with agent reasoning
+uv run python src/main.py --ticker 000000 --summary        # with summary report
+uv run python src/backtester.py --ticker 301157 --start-date 2024-12-11 --end-date 2025-01-07
+uv run python run_with_backend.py                          # FastAPI on :8000 (Swagger at /docs)
+uv run python run_with_backend.py --ticker 002848          # API server + immediate analysis
+uv run python -m src.sim_trading.replay_runner             # sim trading replay (writes to sim_trading.db)
+uv run pytest src/sim_trading/test_sim_trading.py -v       # sim trading tests (113 tests)
+uv run python -m src.sim_trading.kline_fetcher              # fetch HK daily klines from Tencent Finance
+uv run python -m src.sim_trading.scoring_backtester        # v3 Optuna walk-forward backtest
 ```
 
 ### Web Dashboard (Next.js)
@@ -67,7 +67,7 @@ OPENAI_COMPATIBLE_BASE_URL=...       # optional
 OPENAI_COMPATIBLE_MODEL=...          # optional
 ```
 
-### FastAPI Backend (`backend/`)
+### FastAPI Backend
 
 Dual data model:
 - **`api_state`** (in-memory): real-time agent status, latest LLM request/response
@@ -76,6 +76,8 @@ Dual data model:
 Key routers: `analysis.py` (trigger analysis, async via ThreadPoolExecutor), `agents.py` (agent status), `workflow.py` (graph status), `logs.py` + `runs.py` (execution history).
 
 All responses follow `ApiResponse<T>` schema with `success`, `message`, `data`, `timestamp`.
+
+Started via `uv run python run_with_backend.py` from project root.
 
 ### Web Dashboard (`web/`)
 
@@ -191,11 +193,11 @@ sector_index_engine.py
 
 **运行方式**:
 ```bash
-poetry run python -m src.tools.sector_index_engine              # 全量运行（跳过周末）
-poetry run python -m src.tools.sector_index_engine --rotation    # 仅采集板块排名
-poetry run python -m src.tools.sector_index_engine --indices     # 仅计算自定义指数
-poetry run python -m src.tools.sector_index_engine --backfill ID # 回填指数30天历史（不受交易日限制）
-poetry run python -m src.tools.sector_index_engine --detect      # 仅检测主线信号
+uv run python -m src.tools.sector_index_engine              # 全量运行（跳过周末）
+uv run python -m src.tools.sector_index_engine --rotation    # 仅采集板块排名
+uv run python -m src.tools.sector_index_engine --indices     # 仅计算自定义指数
+uv run python -m src.tools.sector_index_engine --backfill ID # 回填指数30天历史（不受交易日限制）
+uv run python -m src.tools.sector_index_engine --detect      # 仅检测主线信号
 ```
 
 **指数定义（Tag-Based）**: 指数由 `monitor_watchlist.tags` 自动聚合，不需要独立配置文件。
@@ -299,7 +301,7 @@ JSON 同时存储三种视图：`watchlist`（统一）、`holdings`（仅持仓
 
 - **`CONFIG_SOURCE` 环境变量**: 设 `json` 强制读 JSON，默认读 DB（DB 空时自动 fallback JSON）
 - **双写模式**: `/api/config` 所有写操作先写 DB，然后导出快照到 JSON，保证两者一致
-- **迁移工具**: `poetry run python -m src.tools.monitor_config_db_migrator --action import-verify`
+- **迁移工具**: `uv run python -m src.tools.monitor_config_db_migrator --action import-verify`
 - **向后兼容**: Python 端 Poller/Notifier 仍读 JSON；Web 端 `/api/config` 和 `/api/metrics` 支持 DB 优先
 
 **`alert_config.json` structure** (独立告警规则):
@@ -451,25 +453,25 @@ L2StrategyEngine (poll_once → L2 signals)
 
 **运行回放**:
 ```bash
-poetry run python -m src.sim_trading.replay_runner                    # 默认 v1_baseline
-poetry run python -m src.sim_trading.replay_runner --version v2_test  # 指定参数版本
+uv run python -m src.sim_trading.replay_runner                    # 默认 v1_baseline
+uv run python -m src.sim_trading.replay_runner --version v2_test  # 指定参数版本
 ```
 
 **运行回测 (v3 Optuna)**:
 ```bash
-poetry run python -m src.sim_trading.kline_fetcher                      # 先获取 9 月日 K 线
-poetry run python -m src.sim_trading.kline_fetcher --codes HK09988,HK00700  # 指定股票
-poetry run python -m src.sim_trading.scoring_backtester                  # walk-forward 优化 (300 trials)
+uv run python -m src.sim_trading.kline_fetcher                      # 先获取 9 月日 K 线
+uv run python -m src.sim_trading.kline_fetcher --codes HK09988,HK00700  # 指定股票
+uv run python -m src.sim_trading.scoring_backtester                  # walk-forward 优化 (300 trials)
 ```
 
 **重启 daemon (v3)**:
 ```bash
 pkill -f l2_strategy_daemon
-nohup poetry run python src/tools/l2_strategy_daemon.py >> logs/l2_daemon_out.log 2>&1 &
+nohup uv run python src/tools/l2_strategy_daemon.py >> logs/l2_daemon_out.log 2>&1 &
 tail -f logs/l2_daemon.log | grep rt_sim   # 观察 v3 RT 日志
 ```
 
-**测试**: `poetry run pytest src/sim_trading/test_sim_trading.py -v` (113 tests)
+**测试**: `uv run pytest src/sim_trading/test_sim_trading.py -v` (113 tests)
 
 **SQLite 数据库 (`src/data/sim_trading.db`)**:
 - `signals`: 归档的 L2 信号 (strategy, code, direction, price_at_signal) — 180 天保留
@@ -525,7 +527,7 @@ tail -f logs/l2_daemon.log | grep rt_sim   # 观察 v3 RT 日志
 - LLM 必须在"重点关注"中深度分析所有 ★ 股票（持仓+自选）
 - 要求自然引用具体数字（"大单净买0.19亿, tick偏买12.4%"），禁止模糊表述
 
-**手动重新生成**: `poetry run python -c "from src.tools.daily_summary_generator import generate_daily_summary; generate_daily_summary()"`
+**手动重新生成**: `uv run python -c "from src.tools.daily_summary_generator import generate_daily_summary; generate_daily_summary()"`
 
 ### Morning Briefing (`src/tools/daily_summary_generator.py`)
 
@@ -546,7 +548,7 @@ summary = json.loads(Path("src/data/daily_summary.json").read_text())
 # 使用 morning['global_news'] 获取国际要闻
 ```
 
-**手动重新生成**: `poetry run python -c "from src.tools.daily_summary_generator import generate_morning_briefing; generate_morning_briefing()"`
+**手动重新生成**: `uv run python -c "from src.tools.daily_summary_generator import generate_morning_briefing; generate_morning_briefing()"`
 
 ### 交易计划系统 (`src/data/trade_plans.json`)
 
@@ -631,7 +633,7 @@ Lightweight macOS notification daemon. Reads poller output, never fetches data d
 
 **Data flow**: `market_data.json` (poller) + `monitor_config.json` (config) + `alert_config.json` (thresholds) → DeltaAlertEngine + TradePlanEngine → stealth_dispatch → terminal-notifier + `sim_trading.db:alert_events` → web
 
-**启动**: `./start_monitor.sh` 一键启动 Poller + Notifier + Web，或单独运行 `poetry run python src/tools/stock_notifier.py`。修改代码后必须重启进程（kill old pid → restart）。
+**启动**: `./start_monitor.sh` 一键启动 Poller + Notifier + Web，或单独运行 `uv run python src/tools/stock_notifier.py`。修改代码后必须重启进程（kill old pid → restart）。
 
 #### Tiered Notification (L1-L4)
 
