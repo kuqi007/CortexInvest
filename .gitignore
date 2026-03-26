@@ -129,3 +129,4 @@ src/data/*.db
 src/data/*.db-*
 logs/*.log
 logs/screen_shots/
+.opencode/plugins/
