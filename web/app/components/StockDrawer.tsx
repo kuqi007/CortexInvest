@@ -739,6 +739,31 @@ export function StockDrawer({
   const [dipOverride, setDipOverride] = useState<boolean | null>(null);
   const [aliasOverride, setAliasOverride] = useState<string | null | undefined>(undefined);
 
+  // Fresh config entry fetched directly from API (avoids stale MetricsProvider cache)
+  const [configEntry, setConfigEntry] = useState<{
+    cost: number | null;
+    shares: number | null;
+    alias: string | null;
+    type: string;
+    hidden: boolean;
+    star: boolean;
+    dip_buy: boolean;
+    tags: string[];
+    name: string;
+  } | null>(null);
+
+  // Fetch config from API when symbol changes (always fresh)
+  useEffect(() => {
+    if (!symbol) { setConfigEntry(null); return; }
+    fetch(`/api/config`)
+      .then((r) => r.json())
+      .then((data) => {
+        const entry = data?.watchlist?.[symbol] || data?.holdings?.[symbol] || data?.watching?.[symbol];
+        if (entry) setConfigEntry({ ...entry, type: entry.type || "watching" });
+      })
+      .catch(() => setConfigEntry(null));
+  }, [symbol]);
+
   // Technical indicators from MetricsProvider (via indicator_cache)
   const svcMatch = services.find((s) => s.id === symbol);
   const indicators = svcMatch?.indicators ?? null;
@@ -753,17 +778,20 @@ export function StockDrawer({
   const saveConfig = useCallback(async (field: string, value: unknown) => {
     // Optimistic update for alias
     if (field === "alias") setAliasOverride(value as string | null);
+    const body = { action: "update", code: symbol, data: { [field]: value } };
     try {
       const res = await fetch("/api/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "update", code: symbol, data: { [field]: value } }),
+        body: JSON.stringify(body),
       });
-      setToast(res.ok ? { msg: "已保存", type: "ok" } : { msg: "保存失败", type: "err" });
-      if (res.ok) onRefreshMetrics?.();
-      else if (field === "alias") setAliasOverride(undefined); // revert on error
-    } catch {
-      setToast({ msg: "保存失败", type: "err" });
+      const json = await res.json();
+      const ok = res.ok && json.success;
+      setToast(ok ? { msg: "已保存", type: "ok" } : { msg: `保存失败: ${json.message || res.status}`, type: "err" });
+      if (ok) onRefreshMetrics?.();
+      else if (field === "alias") setAliasOverride(undefined);
+    } catch (e) {
+      setToast({ msg: `保存失败: ${e}`, type: "err" });
       if (field === "alias") setAliasOverride(undefined);
     }
     setTimeout(() => setToast(null), 2000);
@@ -805,9 +833,9 @@ export function StockDrawer({
   const symbolPlans = planMap[symbol] ?? [];
 
   // Optimistic values: override takes precedence over stale poll data
-  const isStar = starOverride !== null ? starOverride : (service?.star ?? false);
-  const isDip = dipOverride !== null ? dipOverride : (service?.dip_buy ?? false);
-  const aliasVal = aliasOverride !== undefined ? aliasOverride : (service?.alias ?? null);
+  const isStar = starOverride !== null ? starOverride : (configEntry?.star ?? false);
+  const isDip = dipOverride !== null ? dipOverride : (configEntry?.dip_buy ?? false);
+  const aliasVal = aliasOverride !== undefined ? aliasOverride : (configEntry?.alias ?? null);
 
   return (
     <>
@@ -857,7 +885,7 @@ export function StockDrawer({
           }}
         >
           <span style={{ color: D.cyan, fontWeight: "bold" }}>
-            {symbol}&nbsp;&nbsp;{service?.name}
+            {symbol}&nbsp;&nbsp;{configEntry?.name || service?.name}
           </span>
           <button
             onClick={onClose}
@@ -882,11 +910,22 @@ export function StockDrawer({
           {/* Section 1: 基本信息 */}
           <section style={{ marginBottom: 20 }}>
             <div style={{ color: D.comment, fontSize: 11, marginBottom: 8, textTransform: "uppercase", letterSpacing: 1 }}>基本信息</div>
+
+            {/* Stock not in watchlist */}
+            {!configEntry && (
+              <div style={{ color: D.orange, fontSize: 12, padding: "8px 0" }}>
+                该股票不在监控列表中，无法编辑。请先在 Manage 页面添加。
+              </div>
+            )}
+
+            {/* Everything below is only shown when stock IS in watchlist */}
+            {configEntry && (
+            <>
             <div style={{ display: "flex", gap: 24 }}>
               <span>成本&nbsp;
                 <EditableCell
-                  value={service?.cost ?? null}
-                  onSave={(v) => saveConfig("cost", parseFloat(v))}
+                  value={configEntry.cost}
+                  onSave={(v) => saveConfig("cost", v === "" ? null : Number(v))}
                   width="80px"
                   isNumber
                   placeholder="-"
@@ -894,8 +933,8 @@ export function StockDrawer({
               </span>
               <span>股数&nbsp;
                 <EditableCell
-                  value={service?.shares ?? null}
-                  onSave={(v) => saveConfig("shares", parseInt(v))}
+                  value={configEntry.shares}
+                  onSave={(v) => saveConfig("shares", v === "" ? null : Number(v))}
                   width="80px"
                   isNumber
                   placeholder="-"
@@ -968,11 +1007,11 @@ export function StockDrawer({
                 dip 回调监控
               </span>
               {/* demote: holding → watching */}
-              {service?.type === "holding" && (
+              {configEntry?.type === "holding" && (
                 <button
                   onClick={async () => {
                     if (!symbol) return;
-                    if (!window.confirm(`将 ${symbol}（${service?.name ?? ""}）从持仓降为自选？`)) return;
+                    if (!window.confirm(`将 ${symbol}（${configEntry?.name ?? ""}）从持仓降为自选？`)) return;
                     try {
                       const res = await fetch("/api/config", {
                         method: "POST",
@@ -1010,14 +1049,14 @@ export function StockDrawer({
                 </button>
               )}
               {/* hide / unhide — only for holdings */}
-              {service?.type === "holding" && (
+              {configEntry?.type === "holding" && (
                 <button
-                  onClick={() => saveData({ hidden: !service?.hidden })}
-                  title={service?.hidden ? "取消隐藏" : "隐藏（不通知）"}
+                  onClick={() => saveData({ hidden: !configEntry?.hidden })}
+                  title={configEntry?.hidden ? "取消隐藏" : "隐藏（不通知）"}
                   style={{
-                    background: service?.hidden ? "rgba(155, 77, 207, 0.3)" : "transparent",
+                    background: configEntry?.hidden ? "rgba(155, 77, 207, 0.3)" : "transparent",
                     border: `1px solid ${D.purple}`,
-                    color: service?.hidden ? D.purple : D.purple,
+                    color: configEntry?.hidden ? D.purple : D.purple,
                     cursor: "pointer",
                     fontSize: 11,
                     padding: "2px 10px",
@@ -1027,15 +1066,15 @@ export function StockDrawer({
                     opacity: 0.9,
                   }}
                 >
-                  {service?.hidden ? "取消隐藏" : "隐藏"}
+                  {configEntry?.hidden ? "取消隐藏" : "隐藏"}
                 </button>
               )}
               {/* delete */}
               <button
                 onClick={async () => {
                   if (!symbol) return;
-                  const label = service?.type === "holding" ? "持仓" : "自选";
-                  if (!window.confirm(`确认删除 ${label} ${symbol}（${service?.name ?? ""}）？此操作不可撤销。`)) return;
+                  const label = configEntry?.type === "holding" ? "持仓" : "自选";
+                  if (!window.confirm(`确认删除 ${label} ${symbol}（${configEntry?.name ?? ""}）？此操作不可撤销。`)) return;
                   try {
                     const res = await fetch("/api/config", {
                       method: "POST",
@@ -1073,6 +1112,8 @@ export function StockDrawer({
                 删除
               </button>
             </div>
+            </>
+            )}
           </section>
 
           {/* Divider */}
@@ -1084,7 +1125,7 @@ export function StockDrawer({
             {symbol && (
               <TagArea
                 code={symbol}
-                tags={service?.tags || []}
+                tags={configEntry?.tags || []}
                 allTags={allTags}
                 onSaveTags={saveTags}
                 zIndex={300}

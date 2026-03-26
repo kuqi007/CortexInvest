@@ -4,20 +4,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-### Python (Poetry)
+### Python (uv)
 
 ```bash
-poetry install                                          # install dependencies
-poetry run python src/main.py --ticker 000000           # CLI analysis
-poetry run python src/main.py --ticker 000000 --show-reasoning  # with agent reasoning
-poetry run python src/main.py --ticker 000000 --summary # with summary report
-poetry run python src/backtester.py --ticker 301157 --start-date 2024-12-11 --end-date 2025-01-07
-poetry run python run_with_backend.py                   # FastAPI on :8000 (Swagger at /docs)
-poetry run python run_with_backend.py --ticker 002848   # API server + immediate analysis
-poetry run python -m src.sim_trading.replay_runner       # sim trading replay (writes to sim_trading.db)
-poetry run pytest src/sim_trading/test_sim_trading.py -v # sim trading tests (113 tests)
-poetry run python -m src.sim_trading.kline_fetcher          # fetch HK daily klines from Tencent Finance
-poetry run python -m src.sim_trading.scoring_backtester      # v3 Optuna walk-forward backtest
+uv sync --all-extras                                # install dependencies (including dev)
+source .venv/bin/activate                           # activate venv (Python 3.13)
+python src/main.py --ticker 000000                  # CLI analysis
+python src/main.py --ticker 000000 --show-reasoning  # with agent reasoning
+python src/main.py --ticker 000000 --summary        # with summary report
+python src/backtester.py --ticker 301157 --start-date 2024-12-11 --end-date 2025-01-07
+python run_with_backend.py                          # FastAPI on :8000 (Swagger at /docs)
+python run_with_backend.py --ticker 002848          # API server + immediate analysis
+python -m src.sim_trading.replay_runner             # sim trading replay (writes to sim_trading.db)
+pytest src/sim_trading/test_sim_trading.py -v       # sim trading tests (138 tests)
+python -m src.sim_trading.kline_fetcher              # fetch HK daily klines from Tencent Finance
+python -m src.sim_trading.scoring_backtester        # v3 Optuna walk-forward backtest
 ```
 
 ### Web Dashboard (Next.js)
