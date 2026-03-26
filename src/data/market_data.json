@@ -2273,7 +2273,7 @@
       "vol": 92989621,
       "amount": 2567922610.0,
       "amp": 6.138,
-      "turnover": 13.27,
+      "turnover": 13.4,
       "volRatio": 1.02,
       "high": 28.72,
       "low": 26.8,
@@ -2362,7 +2362,7 @@
       "vol": 317932512,
       "amount": 1183126473.0,
       "amp": 6.288,
-      "turnover": 9.11,
+      "turnover": 8.95,
       "volRatio": 0.73,
       "high": 3.87,
       "low": 3.624,
@@ -5208,7 +5208,7 @@
       "avgPrice": 1.798
     }
   ],
-  "ts": 1774520676141,
+  "ts": 1774535252559,
   "settings": {
     "big_move_pct": 5,
     "cooldown_minutes": 10,
@@ -5240,8 +5240,8 @@
     "hkTurnover": 2617.0,
     "hkTech": 4761.54,
     "hkTechPct": -3.28,
-    "amo1": 0.872,
-    "amo2": 0.895
+    "amo1": 1.0,
+    "amo2": 1.0
   },
   "_source": {
     "primary": "sina",
