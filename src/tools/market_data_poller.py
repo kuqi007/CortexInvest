@@ -27,8 +27,10 @@ EM_UT = "fa5fd1943c7b386f172d6893dbfba10b"
 from src.sim_trading.db import init_db
 from src.tools.futu_enricher import FutuL2Enricher
 from src.tools.stock_monitor import (
-    fetch_realtime_eastmoney, fetch_realtime_sina,
-    fetch_realtime_yahoo, is_kr_symbol,
+    fetch_realtime_eastmoney,
+    fetch_realtime_sina,
+    fetch_realtime_yahoo,
+    is_kr_symbol,
 )
 from src.utils.logging_config import setup_logger
 
@@ -50,7 +52,7 @@ _amo_history: dict[str, list[float]] = {}
 # market_amo_history[date_str] = total_amount(亿元)
 _market_amo_history: list[tuple[str, float]] = []  # [(date, amount), ...]
 
-_AMO_DAYS_1 = 6   # AMO1 短周期
+_AMO_DAYS_1 = 6  # AMO1 短周期
 _AMO_DAYS_2 = 12  # AMO2 中周期
 AMO_MIN_AMOUNT = 1_000_000  # 最小成交额(元)，低于此值不计入 AMO
 
@@ -101,7 +103,6 @@ def _load_amo_history_from_db(codes: list[str]) -> dict[str, list[float]]:
     return history
 
 
-
 def _update_amo_for_stock(code: str, amount_today: float) -> tuple[float, float]:
     """更新单只股票的 AMO 历史，返回 (amo1, amo2)。
 
@@ -121,7 +122,7 @@ def _update_amo_for_stock(code: str, amount_today: float) -> tuple[float, float]
 
     # keep max 12 days
     if len(_amo_history[code]) > _AMO_DAYS_2:
-        _amo_history[code] = _amo_history[code][: _AMO_DAYS_2]
+        _amo_history[code] = _amo_history[code][:_AMO_DAYS_2]
 
     # 计算 AMO：只用历史数据 [1:] 算均值
     hist = _amo_history[code]
@@ -179,7 +180,7 @@ def _update_market_amo(total_yi: float):
     if not _market_amo_12d or _market_amo_12d[0] != amount_yuan:
         _market_amo_12d.insert(0, amount_yuan)
         if len(_market_amo_12d) > _AMO_DAYS_2:
-            _market_amo_12d = _market_amo_12d[: _AMO_DAYS_2]
+            _market_amo_12d = _market_amo_12d[:_AMO_DAYS_2]
 
 
 def _get_market_amo1() -> float:
@@ -332,22 +333,26 @@ def fetch_realtime_with_fallback(symbols: list[str]) -> tuple[list[dict], bool]:
         if pct == 0 and prev > 0 and abs(price - prev) < 0.001 and sym.startswith("HK"):
             continue
         chg = price - prev if prev > 0 and price > 0 else 0
-        results.append({
-            "code": sym,
-            "name": q.get("name", ""),
-            "price": price,
-            "pct": pct,
-            "change": round(chg, 3),
-            "volume": q.get("volume", 0),
-            "amount": q.get("amount", 0),
-            "amplitude": round((q.get("high", 0) - q.get("low", 0)) / prev * 100, 2) if prev > 0 else 0,
-            "turnover": 0,     # 新浪无换手率，poll_once 会从旧数据继承
-            "vol_ratio": 0,    # 新浪无量比，poll_once 会从旧数据继承
-            "high": q.get("high", 0),
-            "low": q.get("low", 0),
-            "open": q.get("open", 0),
-            "prev_close": prev,
-        })
+        results.append(
+            {
+                "code": sym,
+                "name": q.get("name", ""),
+                "price": price,
+                "pct": pct,
+                "change": round(chg, 3),
+                "volume": q.get("volume", 0),
+                "amount": q.get("amount", 0),
+                "amplitude": round((q.get("high", 0) - q.get("low", 0)) / prev * 100, 2)
+                if prev > 0
+                else 0,
+                "turnover": 0,  # 新浪无换手率，poll_once 会从旧数据继承
+                "vol_ratio": 0,  # 新浪无量比，poll_once 会从旧数据继承
+                "high": q.get("high", 0),
+                "low": q.get("low", 0),
+                "open": q.get("open", 0),
+                "prev_close": prev,
+            }
+        )
     return results, True
 
 
@@ -366,22 +371,24 @@ def build_services(stocks: list[dict], watchlist: dict) -> list[dict]:
         # 停牌股: price=0 但有昨收，用昨收价填充，涨跌=0
         if (not price or price <= 0) and prev > 0:
             price = prev
-        services.append({
-            "id": code,
-            "name": s.get("name", ""),
-            "price": price,
-            "change": s.get("pct", 0) if price != prev else 0,
-            "chgAmt": s.get("change", 0) if price != prev else 0,
-            "vol": s.get("volume", 0),
-            "amount": s.get("amount", 0),
-            "amp": s.get("amplitude", 0),
-            "turnover": s.get("turnover", 0),
-            "volRatio": s.get("vol_ratio", 0),
-            "high": s.get("high", 0),
-            "low": s.get("low", 0),
-            "open": s.get("open", 0),
-            "prevClose": s.get("prev_close", 0),
-        })
+        services.append(
+            {
+                "id": code,
+                "name": s.get("name", ""),
+                "price": price,
+                "change": s.get("pct", 0) if price != prev else 0,
+                "chgAmt": s.get("change", 0) if price != prev else 0,
+                "vol": s.get("volume", 0),
+                "amount": s.get("amount", 0),
+                "amp": s.get("amplitude", 0),
+                "turnover": s.get("turnover", 0),
+                "volRatio": s.get("vol_ratio", 0),
+                "high": s.get("high", 0),
+                "low": s.get("low", 0),
+                "open": s.get("open", 0),
+                "prevClose": s.get("prev_close", 0),
+            }
+        )
     return services
 
 
@@ -573,7 +580,7 @@ def poll_once() -> bool:
     em_symbols = [s for s in symbols if not is_kr_symbol(s)]
 
     # 追加 A 股指数：创业板、科创50
-    INDEX_CODES = ["399006", "000688"]
+    INDEX_CODES = ["399006", "sh000688"]
     em_with_index = em_symbols + INDEX_CODES
     stocks, is_sina_fallback = fetch_realtime_with_fallback(em_with_index)
 
@@ -595,7 +602,11 @@ def poll_once() -> bool:
             existing = {"services": []}
         existing["ts"] = int(time.time() * 1000)
         existing["settings"] = settings
-        existing["_source"] = {"primary": "unavailable", "is_fallback": True, "futu_connected": False}
+        existing["_source"] = {
+            "primary": "unavailable",
+            "is_fallback": True,
+            "futu_connected": False,
+        }
         if turnover:
             # 市场 AMO 计算：成交额(亿元) × 1e8 = 元
             total_yi = float(turnover.get("total", 0))
@@ -612,7 +623,9 @@ def poll_once() -> bool:
             json.dump(existing, f, ensure_ascii=False, indent=2)
         tmp.replace(OUTPUT_PATH)
         if turnover:
-            logger.info(f"大盘数据已更新: 两市 {turnover['total']:,}亿 ({turnover['verdict']})")
+            logger.info(
+                f"大盘数据已更新: 两市 {turnover['total']:,}亿 ({turnover['verdict']})"
+            )
         return False
 
     # 自动填充缺失的股票名称（只在首次抓到名称时写入，后续 no-op）
@@ -676,18 +689,24 @@ def poll_once() -> bool:
             sina_hk = fetch_hk_index_data()
             if sina_hk:
                 hk_idx.update(sina_hk)
-                logger.info(f"港股指数(腾讯兜底): hkIndex={sina_hk.get('hkIndex')} hkTech={sina_hk.get('hkTech')}")
+                logger.info(
+                    f"港股指数(腾讯兜底): hkIndex={sina_hk.get('hkIndex')} hkTech={sina_hk.get('hkTech')}"
+                )
         if hk_idx:
             for k, v in hk_idx.items():
                 turnover[k] = v
-            logger.info(f"港股指数: hkIndex={hk_idx.get('hkIndex')} hkTech={hk_idx.get('hkTech')}")
+            logger.info(
+                f"港股指数: hkIndex={hk_idx.get('hkIndex')} hkTech={hk_idx.get('hkTech')}"
+            )
 
     # 有港股持仓时获取汇率（失败时从旧数据继承）
     has_hk = any(s.startswith("HK") for s in symbols)
     hkd_cny_rate = fetch_hkd_cny_rate() if has_hk else None
     if has_hk and hkd_cny_rate is None:
         try:
-            old_rate = json.loads(OUTPUT_PATH.read_text(encoding="utf-8")).get("hkdCnyRate")
+            old_rate = json.loads(OUTPUT_PATH.read_text(encoding="utf-8")).get(
+                "hkdCnyRate"
+            )
             if old_rate:
                 hkd_cny_rate = old_rate
                 logger.info(f"汇率获取失败，继承上次值: {hkd_cny_rate}")
@@ -720,7 +739,7 @@ def poll_once() -> bool:
             if code == "399006":
                 turnover["chiNext"] = round(price, 2) if price else 0
                 turnover["chiNextPct"] = round(pct, 2) if pct else 0
-            elif code == "000688":
+            elif code == "sh000688":
                 turnover["kc50"] = round(price, 2) if price else 0
                 turnover["kc50Pct"] = round(pct, 2) if pct else 0
 
