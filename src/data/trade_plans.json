@@ -282,8 +282,8 @@
           "consecutive_days": null,
           "trailing": null,
           "label": "反弹减半仓——反弹至90减压",
-          "triggered": false,
-          "triggered_at": null
+          "triggered": true,
+          "triggered_at": "2026-03-25T15:38:05.326507"
         },
         {
           "id": "tp_relief",
@@ -1206,8 +1206,8 @@
           "consecutive_days": null,
           "trailing": null,
           "label": "止损：跌破3月低点全清",
-          "triggered": false,
-          "triggered_at": null
+          "triggered": true,
+          "triggered_at": "2026-03-26T10:00:52.212455"
         },
         {
           "id": "tp1",
@@ -1328,8 +1328,8 @@
           "consecutive_days": null,
           "trailing": null,
           "label": "反弹减半仓@115(MA20附近 回本+4.3%)",
-          "triggered": false,
-          "triggered_at": null
+          "triggered": true,
+          "triggered_at": "2026-03-25T15:38:05.328445"
         },
         {
           "id": "tp1",
