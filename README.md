@@ -28,7 +28,7 @@
 
 ```bash
 # Python 依赖
-poetry install
+uv sync --all-extras
 
 # Web 依赖
 cd web && npm install
@@ -183,15 +183,15 @@ tail -f logs/notifier-$(date +%Y-%m-%d).log
 tail -f logs/l2_daemon-$(date +%Y-%m-%d).log
 
 # 模拟交易回测
-poetry run python -m src.sim_trading.scoring_backtester
-poetry run python -m src.sim_trading.replay_runner
+uv run python -m src.sim_trading.scoring_backtester
+uv run python -m src.sim_trading.replay_runner
 
 # 板块指数计算
-poetry run python -m src.tools.sector_index_engine
+uv run python -m src.tools.sector_index_engine
 
 # 生成早间简报/日报
-poetry run python -c "from src.tools.daily_summary_generator import generate_morning_briefing; generate_morning_briefing()"
-poetry run python -c "from src.tools.daily_summary_generator import generate_daily_summary; generate_daily_summary()"
+uv run python -c "from src.tools.daily_summary_generator import generate_morning_briefing; generate_morning_briefing()"
+uv run python -c "from src.tools.daily_summary_generator import generate_daily_summary; generate_daily_summary()"
 ```
 
 ---
@@ -259,7 +259,7 @@ poetry run python -c "from src.tools.daily_summary_generator import generate_dai
 
 ```bash
 # 模拟交易单元测试
-poetry run pytest src/sim_trading/test_sim_trading.py -v
+uv run pytest src/sim_trading/test_sim_trading.py -v
 
 # E2E 测试 (需要 Playwright)
 node web/screenshots/test_full_checkup.mjs
