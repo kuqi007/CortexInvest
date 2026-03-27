@@ -271,10 +271,20 @@ def generate_morning_briefing() -> dict | None:
     """Generate morning briefing with overnight US/Asia market movements.
 
     Output: src/data/morning_briefing.json
+    Skips generation if already generated today.
 
     Returns:
-        The generated briefing dict, or None on failure.
+        The generated briefing dict, or None on failure/already exists.
     """
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    if MORNING_BRIEFING_PATH.exists():
+        try:
+            data = _read_json(MORNING_BRIEFING_PATH)
+            if data and data.get("generated_at", "").startswith(today_str):
+                logger.info(f"Morning briefing already generated today ({today_str}), skipping")
+                return data
+        except Exception:
+            pass
     logger.info("Generating morning briefing...")
 
     try:
