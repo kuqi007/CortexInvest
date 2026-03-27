@@ -108,7 +108,7 @@ else
 fi
 
 # 修改 start_monitor.sh 使用虚拟环境的 python
-sed -i '' 's|^poetry run python|python3|g' start_monitor.sh 2>/dev/null || true
+sed -i '' 's|^poetry run python|uv run python|g' start_monitor.sh 2>/dev/null || true
 
 echo ""
 echo -e "${GREEN}=== 安装完成! ===${NC}"
