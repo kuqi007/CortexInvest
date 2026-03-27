@@ -2313,7 +2313,7 @@ def run():
     # ── Graceful shutdown ──
     running = True
 
-    def _handle_signal(signum, frame):
+    def _handle_signal(_signum, _frame):
         nonlocal running
         running = False
 

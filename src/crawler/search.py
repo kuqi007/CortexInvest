@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 import logging
 
 try:
-    from playwright.async_api import async_playwright, Browser, BrowserContext, Page
+    from playwright.async_api import async_playwright, Browser
 except ImportError:
     raise ImportError(
         "请安装 playwright: pip install playwright && playwright install chromium")

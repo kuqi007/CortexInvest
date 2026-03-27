@@ -266,18 +266,6 @@ def _search_global_news() -> list[dict]:
 
     return unique_news
 
-    # 去重并限制数量
-    seen = set()
-    unique_news = []
-    for item in news_items:
-        if item["title"] not in seen:
-            seen.add(item["title"])
-            unique_news.append(item)
-            if len(unique_news) >= 6:
-                break
-
-    return unique_news
-
 
 def generate_morning_briefing() -> dict | None:
     """Generate morning briefing with overnight US/Asia market movements.

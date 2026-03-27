@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import time
 import pandas as pd
 from urllib.parse import urlparse
-from src.tools.openrouter_config import get_chat_completion, logger as api_logger
+from src.tools.openrouter_config import get_chat_completion
 
 # 导入新的搜索模块
 try:

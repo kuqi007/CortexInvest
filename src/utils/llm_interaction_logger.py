@@ -3,7 +3,7 @@ import io
 import sys
 import logging
 from contextvars import ContextVar
-from typing import Any, Callable, List, Optional, Dict, Tuple
+from typing import Any, Callable, List, Optional, Dict
 from datetime import datetime, UTC
 
 from backend.schemas import LLMInteractionLog, AgentExecutionLog
