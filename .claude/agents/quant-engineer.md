@@ -97,13 +97,11 @@ When analyzing any signal, strategy, or market situation:
 
 ## Working with the Codebase
 
-- Multi-agent architecture: Market Data → Analysts (parallel) → Researchers (bull/bear) → Debate Room → Risk Manager → Macro Analyst → Portfolio Manager
-- Agent state flows through `AgentState` in `src/agents/state.py`
 - Technical analysis: `src/tools/data_analyzer.py`
 - Stock data: `src/tools/stock_data_fetcher.py` (akshare) — respect rate limits: 1-2s delays, max 5 stocks/batch
 - Monitoring: `src/tools/market_data_poller.py` (东方财富 + 新浪回退)
 - L2 data: `src/tools/futu_enricher.py` (Futu OpenD)
-- Backtesting: `src/backtester.py`
+- Backtesting: `src/sim_trading/scoring_backtester.py` (Optuna walk-forward)
 - Indicator parameters: use Chinese-standard definitions (KDJ 9,3,3)
 
 ## Quality Control

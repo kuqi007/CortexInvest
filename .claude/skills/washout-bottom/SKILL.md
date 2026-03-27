@@ -40,12 +40,12 @@ ATR(14) = 14日平均真实波幅（Wilder's EMA）
 ## 运行工具
 
 ```bash
-poetry run python -m src.tools.washout_calculator --code <股票代码> --days <回溯天数>
+uv run python -m src.tools.washout_calculator --code <股票代码> --days <回溯天数>
 
 # 示例
-poetry run python -m src.tools.washout_calculator --code 002438 --days 90
-poetry run python -m src.tools.washout_calculator --code 300750 --days 120
-poetry run python -m src.tools.washout_calculator --code 600519 --days 180
+uv run python -m src.tools.washout_calculator --code 002438 --days 90
+uv run python -m src.tools.washout_calculator --code 300750 --days 120
+uv run python -m src.tools.washout_calculator --code 600519 --days 180
 ```
 
 ## 策略选择指南

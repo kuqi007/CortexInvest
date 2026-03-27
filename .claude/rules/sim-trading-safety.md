@@ -48,13 +48,13 @@
 1. **新功能** — 写完逻辑后立即检查 `test_sim_trading.py` 是否有对应测试；没有则补写后再提交
 2. **Bug 修复** — 每个 bug fix 必须附带至少一个回归测试，直接复现该 bug 场景（先失败后通过）
 3. **修改已有逻辑** — 确认相关测试仍然通过；如行为变化则更新测试断言
-4. **提交前** — 运行 `poetry run pytest src/sim_trading/test_sim_trading.py -q` 确认全绿
+4. **提交前** — 运行 `uv run pytest src/sim_trading/test_sim_trading.py -q` 确认全绿
 
 ### 测试运行
 
 ```bash
-poetry run pytest src/sim_trading/test_sim_trading.py -v   # 详细输出
-poetry run pytest src/sim_trading/test_sim_trading.py -q   # 快速检查（当前 113 tests）
+uv run pytest src/sim_trading/test_sim_trading.py -v   # 详细输出
+uv run pytest src/sim_trading/test_sim_trading.py -q   # 快速检查（当前 113 tests）
 ```
 
 ### 测试文件结构

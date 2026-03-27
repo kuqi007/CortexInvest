@@ -269,8 +269,8 @@ node web/screenshots/test_full_checkup.mjs
 
 ## 📚 相关文档
 
-- [CLAUDE.md](./CLAUDE.md) - 详细架构文档
-- [AGENTS.md](./AGENTS.md) - Agent 配置说明
+- [CLAUDE.md](./CLAUDE.md) - AI 开发入口文档（架构索引 + 命令速查）
+- [docs/](./docs/) - 分领域详细文档（ARCHITECTURE / SIM_TRADING / MONITORING / SECTOR / API / DATABASE）
 
 ---
 
