@@ -856,12 +856,24 @@ class TechnicalSignalEngine:
 WEB_DASHBOARD_URL = "http://localhost:3120/alerts"
 
 
-def notify(title: str, message: str, sound: str = "default", group: str = ""):
+def notify(
+    title: str,
+    message: str,
+    sound: str = "default",
+    group: str = "",
+    *,
+    change_pct: float | None = None,
+    level: str | None = None,
+    is_portfolio: bool = False,
+):
     """发送 macOS 通知，按优先级尝试多种方式
 
     Args:
         group: terminal-notifier 分组 ID，同 group 的通知会互相覆盖。
                留空则用时间戳生成唯一 ID，确保每条通知独立显示。
+        change_pct: 涨跌幅，正数=上涨(红)，负数=下跌(绿)
+        level: 告警级别，如 "L1 ★"
+        is_portfolio: 是否为组合持仓消息
     """
     # 转义双引号
     safe_title = title.replace('"', '\\"')
@@ -912,7 +924,7 @@ def notify(title: str, message: str, sound: str = "default", group: str = ""):
 
     # 飞书通知（并行，不阻塞 macOS 通知）
     try:
-        feishu_send(title, message)
+        feishu_send(title, message, change_pct=change_pct, level=level, is_portfolio=is_portfolio)
     except Exception as e:
         logger.warning(f"飞书通知发送失败（不影响主流程）: {e}")
 

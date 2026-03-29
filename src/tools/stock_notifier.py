@@ -1359,10 +1359,13 @@ def stealth_dispatch(alerts: list[dict], *, sound: str = ""):
             for a in stock_alerts
         )
 
+        top = stock_alerts[0]
         notify(
             _notify_title(is_summary=False),
             "\n".join(lines),
             sound="default" if has_critical else sound,
+            change_pct=top.get("_change_pct"),
+            level=top.get("_level"),
         )
         sent += 1
 
@@ -1373,6 +1376,7 @@ def stealth_dispatch(alerts: list[dict], *, sound: str = ""):
             _notify_title(is_summary=True),
             a.get("_stealth", a["message"]),
             sound="",
+            is_portfolio=True,
         )
         sent += 1
 
