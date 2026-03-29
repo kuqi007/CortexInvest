@@ -945,34 +945,86 @@ def feishu_get_token() -> str | None:
         return None
 
 
-def feishu_send(title: str, message: str) -> bool:
-    """发送飞书点对点消息（Interactive card），返回是否成功"""
+def feishu_send(
+    title: str,
+    message: str,
+    *,
+    change_pct: float | None = None,
+    level: str | None = None,
+    is_portfolio: bool = False,
+    with_button: bool = False,
+) -> bool:
+    """发送飞书点对点消息（Interactive card），返回是否成功
+
+    Args:
+        title: 卡片标题
+        message: 卡片内容（多行用 \\n 分隔）
+        change_pct: 涨跌幅，正数=红色header，负数=绿色header
+        level: 告警级别，如 "L1 ★"
+        is_portfolio: True=组合持仓卡片
+        with_button: True=底部加「查看详情」按钮
+    """
     token = feishu_get_token()
     if not token:
         return False
+
+    # 根据涨跌幅决定 header 颜色
+    if change_pct is not None:
+        header_color = "red" if change_pct > 0 else "green"
+    elif is_portfolio:
+        header_color = "purple"
+    elif "告警" in title or "异动" in title:
+        header_color = "red"
+    else:
+        header_color = "blue"
+
+    # 构建 elements
+    lines = message.split("\n")
+    elements = []
+    for line in lines:
+        if line.strip():
+            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": line}})
+
+    # 级别标签
+    if level:
+        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"**级别**: {level}"}})
+
+    elements.append({"tag": "hr"})
+
+    if with_button:
+        elements.append({
+            "tag": "action",
+            "actions": [{
+                "tag": "button",
+                "text": {"tag": "plain_text", "content": "📊 查看详情"},
+                "type": "primary",
+                "url": "http://localhost:3120/alerts",
+            }],
+        })
+
+    elements.append({"tag": "note", "elements": [{"tag": "plain_text", "content": "AI 股票监控系统"}]})
+
+    card_content = {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": title},
+            "template": header_color,
+        },
+        "elements": elements,
+    }
+
     url = "https://open.feishu.cn/open-apis/im/v1/messages"
     params = {"receive_id_type": "open_id"}
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
-    card_content = {
-        "config": {"wide_screen_mode": True},
-        "header": {
-            "title": {"tag": "plain_text", "content": title},
-            "template": "red" if "告警" in title else "blue",
-        },
-        "elements": [
-            {"tag": "div", "text": {"tag": "lark_md", "content": message.replace("\n", "\n\n")}},
-            {"tag": "hr"},
-            {"tag": "note", "elements": [{"tag": "plain_text", "content": "AI 股票监控系统"}]},
-        ],
-    }
     payload = {
         "receive_id": FEISHU_USER_OPEN_ID,
         "msg_type": "interactive",
         "content": json.dumps(card_content),
     }
+
     try:
         resp = requests.post(url, params=params, headers=headers, json=payload, timeout=10)
         resp.raise_for_status()
