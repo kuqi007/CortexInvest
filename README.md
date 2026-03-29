@@ -44,7 +44,7 @@ cp .env.example .env
 ### 3. 一键启动监控服务
 
 ```bash
-./start_monitor.sh start
+./start_ai_investor.sh start
 ```
 
 启动后会运行以下服务：
@@ -59,7 +59,7 @@ cp .env.example .env
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    start_monitor.sh                         │
+│                    start_ai_investor.sh                         │
 ├─────────────┬─────────────┬──────────────┬──────────────────┤
 │   Poller    │  Notifier   │  L2 Daemon   │      Web         │
 │  (Python)   │  (Python)   │   (Python)   │   (Next.js)      │
@@ -129,7 +129,7 @@ cp .env.example .env
 
 ```
 .
-├── start_monitor.sh           # 一键启停脚本
+├── start_ai_investor.sh           # 一键启停脚本
 ├── src/
 │   ├── tools/                 # 监控工具
 │   │   ├── market_data_poller.py      # 行情轮询
@@ -172,10 +172,10 @@ cp .env.example .env
 
 ```bash
 # 启动/停止/重启
-./start_monitor.sh start
-./start_monitor.sh stop
-./start_monitor.sh restart
-./start_monitor.sh status
+./start_ai_investor.sh start
+./start_ai_investor.sh stop
+./start_ai_investor.sh restart
+./start_ai_investor.sh status
 
 # 查看日志
 tail -f logs/poller-$(date +%Y-%m-%d).log
