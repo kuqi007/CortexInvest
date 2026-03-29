@@ -63,6 +63,13 @@ DEFAULT_SETTINGS = {
     "cooldown_minutes": 10,
 }
 
+# ── 飞书配置 ──
+FEISHU_APP_ID = "cli_a93c2db9a4b89bef"
+FEISHU_APP_SECRET = "3tBNzFxifw9ekDSQgBFB0Cdwh1Rm3CwF"
+FEISHU_USER_OPEN_ID = "ou_553029ec877f28bdf3217b38bef62c8f"
+_feishu_access_token: str | None = None
+_feishu_token_expires_at: float = 0
+
 
 # ══════════════════════════════════════════
 # 1. 配置管理
@@ -902,6 +909,82 @@ def notify(title: str, message: str, sound: str = "default", group: str = ""):
         logger.info(f"通知已发送(dialog): [{title}] {message}")
     except Exception as e:
         logger.error(f"发送通知失败: {e}")
+
+    # 飞书通知（并行，不阻塞 macOS 通知）
+    try:
+        feishu_send(title, message)
+    except Exception as e:
+        logger.warning(f"飞书通知发送失败（不影响主流程）: {e}")
+
+
+# ══════════════════════════════════════════
+# 3. 飞书通知
+# ══════════════════════════════════════════
+
+def feishu_get_token() -> str | None:
+    """获取飞书 access token，带缓存（有效期 2 小时）"""
+    global _feishu_access_token, _feishu_token_expires_at
+    if _feishu_access_token and time.time() < _feishu_token_expires_at - 60:
+        return _feishu_access_token
+    url = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
+    try:
+        resp = requests.post(url, json={
+            "app_id": FEISHU_APP_ID,
+            "app_secret": FEISHU_APP_SECRET,
+        }, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("code") != 0:
+            logger.warning(f"飞书 token 获取失败: {data}")
+            return None
+        _feishu_access_token = data["tenant_access_token"]
+        _feishu_token_expires_at = time.time() + data.get("expire", 7200)
+        return _feishu_access_token
+    except Exception as e:
+        logger.warning(f"飞书 token 请求异常: {e}")
+        return None
+
+
+def feishu_send(title: str, message: str) -> bool:
+    """发送飞书点对点消息（Interactive card），返回是否成功"""
+    token = feishu_get_token()
+    if not token:
+        return False
+    url = "https://open.feishu.cn/open-apis/im/v1/messages"
+    params = {"receive_id_type": "open_id"}
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    card_content = {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": title},
+            "template": "red" if "告警" in title else "blue",
+        },
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md", "content": message.replace("\n", "\n\n")}},
+            {"tag": "hr"},
+            {"tag": "note", "elements": [{"tag": "plain_text", "content": "AI 股票监控系统"}]},
+        ],
+    }
+    payload = {
+        "receive_id": FEISHU_USER_OPEN_ID,
+        "msg_type": "interactive",
+        "content": json.dumps(card_content),
+    }
+    try:
+        resp = requests.post(url, params=params, headers=headers, json=payload, timeout=10)
+        resp.raise_for_status()
+        result = resp.json()
+        if result.get("code") != 0:
+            logger.warning(f"飞书消息发送失败: {result}")
+            return False
+        logger.info(f"飞书通知已发送: [{title}] {message[:50]}")
+        return True
+    except Exception as e:
+        logger.warning(f"飞书消息发送异常: {e}")
+        return False
 
 
 # ══════════════════════════════════════════
