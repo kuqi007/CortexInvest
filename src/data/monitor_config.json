@@ -1674,7 +1674,7 @@
     "HK06809": {
       "name": "澜起科技",
       "type": "holding",
-      "cost": 146.667,
+      "cost": 146.6,
       "shares": 300,
       "lot": 100,
       "star": true,
@@ -2019,7 +2019,7 @@
     },
     "HK06809": {
       "name": "澜起科技",
-      "cost": 146.667,
+      "cost": 146.6,
       "shares": 300,
       "lot": 100,
       "star": true,
