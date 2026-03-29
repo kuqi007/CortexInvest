@@ -178,35 +178,6 @@
       ],
       "scope": "real"
     },
-    "HK09973_exit": {
-      "name": "奇瑞汽车减亏离场",
-      "symbol": "HK09973",
-      "status": "completed",
-      "created_at": "2026-03-05",
-      "orders": [
-        {
-          "id": "sl1",
-          "side": "sell",
-          "op": "<=",
-          "price": 24,
-          "shares": 400,
-          "label": "硬止损-跌破24整数关口",
-          "triggered": true,
-          "triggered_at": "2026-03-09T09:49:15.334240"
-        },
-        {
-          "id": "tp1",
-          "side": "sell",
-          "op": ">=",
-          "price": 26.22,
-          "shares": 200,
-          "label": "反弹减仓-MA5阻力位",
-          "triggered": false,
-          "triggered_at": null
-        }
-      ],
-      "scope": "real"
-    },
     "HK03986_dip": {
       "name": "兆易创新港股低吸",
       "symbol": "HK03986",
