@@ -1360,12 +1360,21 @@ def stealth_dispatch(alerts: list[dict], *, sound: str = ""):
         )
 
         top = stock_alerts[0]
+        stock_info = {
+            "name": top.get("name", ""),
+            "code": top.get("code", ""),
+            "price": top.get("price", ""),
+            "change_pct": top.get("_change_pct"),
+            "level": top.get("_level"),
+            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
         notify(
             _notify_title(is_summary=False),
             "\n".join(lines),
             sound="default" if has_critical else sound,
             change_pct=top.get("_change_pct"),
             level=top.get("_level"),
+            stock_info=stock_info,
         )
         sent += 1
 

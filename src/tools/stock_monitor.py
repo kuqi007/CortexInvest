@@ -865,6 +865,7 @@ def notify(
     change_pct: float | None = None,
     level: str | None = None,
     is_portfolio: bool = False,
+    stock_info: dict | None = None,
 ):
     """发送 macOS 通知，按优先级尝试多种方式
 
@@ -873,7 +874,8 @@ def notify(
                留空则用时间戳生成唯一 ID，确保每条通知独立显示。
         change_pct: 涨跌幅，正数=上涨(红)，负数=下跌(绿)
         level: 告警级别，如 "L1 ★"
-        is_portfolio: 是否为组合持仓消息
+        is_portfolio: 是否为组合持仓消息（暂未用于飞书）
+        stock_info: 结构化股票信息，飞书卡片使用
     """
     # 转义双引号
     safe_title = title.replace('"', '\\"')
@@ -924,7 +926,7 @@ def notify(
 
     # 飞书通知（并行，不阻塞 macOS 通知）
     try:
-        feishu_send(title, message, change_pct=change_pct, level=level, is_portfolio=is_portfolio)
+        feishu_send(title, message, change_pct=change_pct, level=level, stock_info=stock_info)
     except Exception as e:
         logger.warning(f"飞书通知发送失败（不影响主流程）: {e}")
 
@@ -964,57 +966,86 @@ def feishu_send(
     change_pct: float | None = None,
     level: str | None = None,
     is_portfolio: bool = False,
-    with_button: bool = False,
+    stock_info: dict | None = None,
 ) -> bool:
     """发送飞书点对点消息（Interactive card），返回是否成功
 
     Args:
         title: 卡片标题
-        message: 卡片内容（多行用 \\n 分隔）
-        change_pct: 涨跌幅，正数=红色header，负数=绿色header
+        message: 兜底消息内容（stock_info 优先）
+        change_pct: 涨跌幅，正数=红，负数=绿
         level: 告警级别，如 "L1 ★"
         is_portfolio: True=组合持仓卡片
-        with_button: True=底部加「查看详情」按钮
+        stock_info: 结构化股票信息 dict，含 name/code/price/change_pct/level/time
     """
     token = feishu_get_token()
     if not token:
         return False
 
-    # 根据涨跌幅决定 header 颜色
-    if change_pct is not None:
-        header_color = "red" if change_pct > 0 else "green"
-    elif is_portfolio:
-        header_color = "purple"
-    elif "告警" in title or "异动" in title:
-        header_color = "red"
-    else:
-        header_color = "blue"
+    # 橙色 header 用于告警卡片
+    header_color = "orange"
 
     # 构建 elements
-    lines = message.split("\n")
     elements = []
-    for line in lines:
-        if line.strip():
-            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": line}})
 
-    # 级别标签
-    if level:
-        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"**级别**: {level}"}})
+    # 结构化股票信息
+    if stock_info:
+        # 📌 提醒
+        elements.append({
+            "tag": "div",
+            "text": {"tag": "lark_md", "content": "**📌 提醒**"},
+        })
+        elements.append({
+            "tag": "div",
+            "text": {"tag": "lark_md", "content": "您关注的股票出现价格异动："},
+        })
+
+        # 股票名 + 代码
+        name = stock_info.get("name", "")
+        code = stock_info.get("code", "")
+        price = stock_info.get("price", "")
+        pct = stock_info.get("change_pct", change_pct or 0)
+        lvl = stock_info.get("level", level or "")
+
+        pct_str = f"+{pct:.2f}%" if pct > 0 else f"{pct:.2f}%"
+        price_str = f"HK${price}" if price else ""
+
+        line = f"**{name}** ({code})"
+        if price_str or pct:
+            detail = f"当前价格 **{price_str}**，今日涨幅 **{pct_str}**"
+            line += f"：{detail}"
+        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": line}})
+
+        # 时间
+        ts = stock_info.get("time") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        elements.append({
+            "tag": "div",
+            "text": {"tag": "lark_md", "content": f"时间：{ts}"},
+        })
+    else:
+        # 兜底：直接显示 message
+        for line in message.split("\n"):
+            if line.strip():
+                elements.append({"tag": "div", "text": {"tag": "lark_md", "content": line}})
 
     elements.append({"tag": "hr"})
 
-    if with_button:
-        elements.append({
-            "tag": "action",
-            "actions": [{
-                "tag": "button",
-                "text": {"tag": "plain_text", "content": "📊 查看详情"},
-                "type": "primary",
-                "url": "http://localhost:3120/alerts",
-            }],
-        })
+    # 查看详情按钮
+    elements.append({
+        "tag": "action",
+        "actions": [{
+            "tag": "button",
+            "text": {"tag": "plain_text", "content": "查看详情 >>"},
+            "type": "primary",
+            "url": "http://localhost:3120/alerts",
+        }],
+    })
 
-    elements.append({"tag": "note", "elements": [{"tag": "plain_text", "content": "AI 股票监控系统"}]})
+    # 底部勿回复
+    elements.append({
+        "tag": "note",
+        "elements": [{"tag": "plain_text", "content": "此消息由系统自动发送，请勿直接回复。"}],
+    })
 
     card_content = {
         "config": {"wide_screen_mode": True},
