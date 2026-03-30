@@ -37,7 +37,7 @@ L2_SIGNALS_PATH = PROJECT_ROOT / "src" / "data" / "l2_strategy_signals.json"
 ARCHIVE_DIR = PROJECT_ROOT / "src" / "data" / "archive"
 
 # ── Poll intervals ──
-TRADING_CHECK_SEC = 3      # mtime check interval during trading hours
+TRADING_CHECK_SEC = 3  # mtime check interval during trading hours
 NON_TRADING_CHECK_SEC = 60  # mtime check interval outside trading hours
 
 
@@ -49,6 +49,7 @@ def _archive_and_reset(today):
     必须每日归档保留完整数据用于量化回测。
     """
     import shutil
+
     yesterday = (today - timedelta(days=1)).isoformat()
     ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -102,21 +103,30 @@ def _archive_and_reset(today):
     conn = None
     try:
         from src.sim_trading.db import get_connection
+
         conn = get_connection()
         cutoff_30d = (today - timedelta(days=30)).isoformat()
         cutoff_180d = (today - timedelta(days=180)).isoformat()
 
         # alert_events: 30 天
-        d1 = conn.execute("DELETE FROM alert_events WHERE date < ?", (cutoff_30d,)).rowcount
+        d1 = conn.execute(
+            "DELETE FROM alert_events WHERE date < ?", (cutoff_30d,)
+        ).rowcount
         # signals / price_snapshots / session_snapshots: 180 天
         d2 = conn.execute("DELETE FROM signals WHERE date < ?", (cutoff_180d,)).rowcount
-        d3 = conn.execute("DELETE FROM price_snapshots WHERE date < ?", (cutoff_180d,)).rowcount
-        d4 = conn.execute("DELETE FROM session_snapshots WHERE date < ?", (cutoff_180d,)).rowcount
+        d3 = conn.execute(
+            "DELETE FROM price_snapshots WHERE date < ?", (cutoff_180d,)
+        ).rowcount
+        d4 = conn.execute(
+            "DELETE FROM session_snapshots WHERE date < ?", (cutoff_180d,)
+        ).rowcount
 
         conn.commit()
         total = d1 + d2 + d3 + d4
         if total:
-            logger.info(f"SQLite 清理: alert_events -{d1}, signals -{d2}, price_snap -{d3}, session_snap -{d4}")
+            logger.info(
+                f"SQLite 清理: alert_events -{d1}, signals -{d2}, price_snap -{d3}, session_snap -{d4}"
+            )
     except Exception as e:
         logger.warning(f"SQLite 清理失败: {e}")
     finally:
@@ -127,6 +137,7 @@ def _archive_and_reset(today):
 # ══════════════════════════════════════════
 # 1. Trading hours (extended for HK)
 # ══════════════════════════════════════════
+
 
 def is_in_auction_period() -> bool:
     """检查是否在集合竞价时段，竞价时段不发送 alert。
@@ -142,12 +153,14 @@ def is_in_auction_period() -> bool:
     # A股 开盘集合竞价 (09:15-09:24)
     if 915 <= t < 925:
         from src.tools.trading_calendar import is_trading_day
+
         if is_trading_day("CN"):
             return True
 
     # 港股 开市前时段竞价 (09:00-09:19)
     if 900 <= t < 920:
         from src.tools.trading_calendar import is_trading_day
+
         if is_trading_day("HK"):
             return True
 
@@ -186,6 +199,7 @@ def is_any_market_open(has_hk: bool = False) -> bool:
 # ══════════════════════════════════════════
 # 1b. PatternEngine — 通用形态引擎基类 + 注册表
 # ══════════════════════════════════════════
+
 
 class PatternEngine:
     """通用形态检测引擎基类。
@@ -226,6 +240,7 @@ def register_pattern_engine(engine: PatternEngine) -> PatternEngine:
 # 2. File reading helpers
 # ══════════════════════════════════════════
 
+
 def read_json_safe(path: Path) -> dict | None:
     """Read a JSON file, returning None on any error."""
     try:
@@ -263,6 +278,7 @@ def _read_l2_indicators() -> dict:
 # ══════════════════════════════════════════
 # 3. Data merging
 # ══════════════════════════════════════════
+
 
 def merge_data(market: dict, config: dict) -> dict:
     """Build quotes dict from market_data + config.
@@ -337,14 +353,38 @@ DEFAULT_PORTFOLIO_DELTA_PCT = 2.0  # 组合: P&L 变化 >= 2%
 
 # ── 分级通知策略表（配置驱动，可扩展） ──
 NOTIFY_POLICIES = {
-    1: {"trigger_pct": 4, "delta_pct": 5, "cooldown_min": 5,
-        "big_move": True, "threshold": True, "dispatch": "sound"},
-    2: {"trigger_pct": 6, "delta_pct": 7, "cooldown_min": 15,
-        "big_move": True, "threshold": True, "dispatch": "silent"},
-    3: {"trigger_pct": None, "delta_pct": None, "cooldown_min": 30,
-        "big_move": False, "threshold": True, "dispatch": "web_only"},
-    4: {"trigger_pct": None, "delta_pct": None, "cooldown_min": None,
-        "big_move": False, "threshold": False, "dispatch": "none"},
+    1: {
+        "trigger_pct": 4,
+        "delta_pct": 5,
+        "cooldown_min": 5,
+        "big_move": True,
+        "threshold": True,
+        "dispatch": "sound",
+    },
+    2: {
+        "trigger_pct": 6,
+        "delta_pct": 7,
+        "cooldown_min": 15,
+        "big_move": True,
+        "threshold": True,
+        "dispatch": "silent",
+    },
+    3: {
+        "trigger_pct": None,
+        "delta_pct": None,
+        "cooldown_min": 30,
+        "big_move": False,
+        "threshold": True,
+        "dispatch": "web_only",
+    },
+    4: {
+        "trigger_pct": None,
+        "delta_pct": None,
+        "cooldown_min": None,
+        "big_move": False,
+        "threshold": False,
+        "dispatch": "none",
+    },
 }
 
 
@@ -439,7 +479,9 @@ class DeltaAlertEngine:
         config = self.config
         watchlist = config.get("watchlist", {})
         settings = config.get("settings", {})
-        portfolio_delta_pct = settings.get("portfolio_delta_pct", DEFAULT_PORTFOLIO_DELTA_PCT)
+        portfolio_delta_pct = settings.get(
+            "portfolio_delta_pct", DEFAULT_PORTFOLIO_DELTA_PCT
+        )
 
         alerts: list[dict] = []
         total_daily_pnl = 0.0
@@ -505,7 +547,11 @@ class DeltaAlertEngine:
                 # ── First notification ──
                 if threshold_hit:
                     reasons.append("threshold")
-                elif policy["big_move"] and trigger_pct and abs(change_pct) >= trigger_pct:
+                elif (
+                    policy["big_move"]
+                    and trigger_pct
+                    and abs(change_pct) >= trigger_pct
+                ):
                     reasons.append("big_move")
                 if not reasons:
                     continue
@@ -553,16 +599,18 @@ class DeltaAlertEngine:
             if "threshold" in reasons:
                 stealth_extra += " threshold"
 
-            alerts.append({
-                "symbol": symbol,
-                "title": title,
-                "message": message,
-                "_kind": kind,
-                "_level": level,
-                "_change_pct": alert_pct,
-                "_price": price,
-                "_stealth": _notify_line(name, alert_pct, stealth_extra),
-            })
+            alerts.append(
+                {
+                    "symbol": symbol,
+                    "title": title,
+                    "message": message,
+                    "_kind": kind,
+                    "_level": level,
+                    "_change_pct": alert_pct,
+                    "_price": price,
+                    "_stealth": _notify_line(name, alert_pct, stealth_extra),
+                }
+            )
 
         # ── Portfolio summary ──
         if holdings_counted > 0 and total_market_value > 0:
@@ -574,22 +622,28 @@ class DeltaAlertEngine:
                     should_notify = True
             else:
                 pnl_delta = abs(total_daily_pnl - self._last_portfolio_pnl)
-                pnl_delta_pct = (pnl_delta / total_market_value) * 100 if total_market_value > 0 else 0
+                pnl_delta_pct = (
+                    (pnl_delta / total_market_value) * 100
+                    if total_market_value > 0
+                    else 0
+                )
                 if pnl_delta_pct >= portfolio_delta_pct:
                     should_notify = True
 
             if should_notify:
                 self._last_portfolio_pnl = total_daily_pnl
                 pct_sign = "+" if portfolio_pct >= 0 else ""
-                alerts.append({
-                    "symbol": "",
-                    "title": f"组合 {pct_sign}{portfolio_pct:.1f}%",
-                    "message": f"{holdings_counted} stocks",
-                    "_kind": "portfolio",
-                    "_level": 2,
-                    "_change_pct": portfolio_pct,
-                    "_stealth": f"组合 {pct_sign}{portfolio_pct:.1f}%",
-                })
+                alerts.append(
+                    {
+                        "symbol": "",
+                        "title": f"组合 {pct_sign}{portfolio_pct:.1f}%",
+                        "message": f"{holdings_counted} stocks",
+                        "_kind": "portfolio",
+                        "_level": 2,
+                        "_change_pct": portfolio_pct,
+                        "_stealth": f"组合 {pct_sign}{portfolio_pct:.1f}%",
+                    }
+                )
 
         return alerts
 
@@ -618,7 +672,7 @@ class DataFreshnessWatchdog:
         self._mtime_unchanged_since: float | None = None
         self._file_stale_alerted: bool = False
         # Layer 2: price freeze (per-market)
-        self._price_fingerprints: dict[str, dict] = {}   # {market: {fp, first_seen}}
+        self._price_fingerprints: dict[str, dict] = {}  # {market: {fp, first_seen}}
         self._price_frozen_alerted: dict[str, bool] = {}
         # Layer 3: source degradation
         self._fallback_since: float | None = None
@@ -670,8 +724,9 @@ class DataFreshnessWatchdog:
         self._cooldowns[key] = now
 
     @staticmethod
-    def _make_alert(issue_type: str, display_msg: str, level: int = 2,
-                    is_recovery: bool = False) -> dict:
+    def _make_alert(
+        issue_type: str, display_msg: str, level: int = 2, is_recovery: bool = False
+    ) -> dict:
         icon = "OK" if is_recovery else "WARN"
         return {
             "symbol": "",
@@ -699,11 +754,14 @@ class DataFreshnessWatchdog:
             self._mtime_unchanged_since = None
             if self._file_stale_alerted:
                 self._file_stale_alerted = False
-                return [self._make_alert(
-                    "file_stale_recovery",
-                    "数据恢复: Poller 已恢复写入",
-                    level=3, is_recovery=True,
-                )]
+                return [
+                    self._make_alert(
+                        "file_stale_recovery",
+                        "数据恢复: Poller 已恢复写入",
+                        level=3,
+                        is_recovery=True,
+                    )
+                ]
             return []
 
         # mtime unchanged
@@ -716,11 +774,13 @@ class DataFreshnessWatchdog:
                 self._fire("file_stale", now)
                 self._file_stale_alerted = True
                 mins = int(elapsed // 60) or 1
-                return [self._make_alert(
-                    "file_stale",
-                    f"Poller 可能挂起: market_data.json 已 {mins} 分钟未更新",
-                    level=1,
-                )]
+                return [
+                    self._make_alert(
+                        "file_stale",
+                        f"Poller 可能挂起: market_data.json 已 {mins} 分钟未更新",
+                        level=1,
+                    )
+                ]
         return []
 
     # ── Layer 2: price freeze ──
@@ -728,6 +788,7 @@ class DataFreshnessWatchdog:
     @staticmethod
     def _compute_fingerprint(services: list[dict], market_prefix: str) -> str:
         import hashlib
+
         if market_prefix == "HK":
             subset = [s for s in services if s.get("id", "").startswith("HK")]
         else:
@@ -742,6 +803,7 @@ class DataFreshnessWatchdog:
     @staticmethod
     def _is_market_active(market: str, has_hk: bool) -> bool:
         from src.tools.trading_calendar import is_trading_day
+
         now = datetime.now()
         t = now.hour * 100 + now.minute
         if market == "A":
@@ -756,9 +818,12 @@ class DataFreshnessWatchdog:
             return []
         alerts = []
         # HK data sources update less frequently than A-share; use a higher threshold
-        freeze_thresholds = {"A": self._poll_interval * 5, "HK": self._poll_interval * 8}
+        freeze_thresholds = {
+            "A": self._poll_interval * 5,
+            "HK": self._poll_interval * 8,
+        }
 
-        for mkt in (["A", "HK"] if has_hk else ["A"]):
+        for mkt in ["A", "HK"] if has_hk else ["A"]:
             if not self._is_market_active(mkt, has_hk):
                 self._price_fingerprints.pop(mkt, None)
                 continue
@@ -770,24 +835,31 @@ class DataFreshnessWatchdog:
                 self._price_fingerprints[mkt] = {"fingerprint": fp, "first_seen": now}
                 if self._price_frozen_alerted.get(mkt):
                     self._price_frozen_alerted[mkt] = False
-                    alerts.append(self._make_alert(
-                        f"price_frozen_recovery_{mkt}",
-                        f"价格恢复: {mkt} 行情数据已更新",
-                        level=3, is_recovery=True,
-                    ))
+                    alerts.append(
+                        self._make_alert(
+                            f"price_frozen_recovery_{mkt}",
+                            f"价格恢复: {mkt} 行情数据已更新",
+                            level=3,
+                            is_recovery=True,
+                        )
+                    )
             else:
                 elapsed = now - prev["first_seen"]
-                if elapsed >= freeze_thresholds.get(mkt, freeze_thresholds["A"]) and not self._price_frozen_alerted.get(mkt):
+                if elapsed >= freeze_thresholds.get(
+                    mkt, freeze_thresholds["A"]
+                ) and not self._price_frozen_alerted.get(mkt):
                     key = f"price_frozen_{mkt}"
                     if self._cooled(key, now):
                         self._fire(key, now)
                         self._price_frozen_alerted[mkt] = True
                         mins = round(elapsed / 60, 1)
-                        alerts.append(self._make_alert(
-                            key,
-                            f"价格冻结: {mkt} Top8 价格 {mins} 分钟未变化",
-                            level=2,
-                        ))
+                        alerts.append(
+                            self._make_alert(
+                                key,
+                                f"价格冻结: {mkt} Top8 价格 {mins} 分钟未变化",
+                                level=2,
+                            )
+                        )
         return alerts
 
     # ── Layer 3: source degradation ──
@@ -803,52 +875,66 @@ class DataFreshnessWatchdog:
         if source.get("is_fallback"):
             if self._fallback_since is None:
                 self._fallback_since = now
-            elif (now - self._fallback_since >= threshold
-                    and not self._source_alerted.get("primary_fallback")):
+            elif (
+                now - self._fallback_since >= threshold
+                and not self._source_alerted.get("primary_fallback")
+            ):
                 if self._cooled("source_fallback", now):
                     self._fire("source_fallback", now)
                     self._source_alerted["primary_fallback"] = True
                     mins = int((now - self._fallback_since) // 60)
-                    alerts.append(self._make_alert(
-                        "source_fallback",
-                        f"数据源降级: 东方财富不可用，新浪 fallback {mins}min",
-                        level=2,
-                    ))
+                    alerts.append(
+                        self._make_alert(
+                            "source_fallback",
+                            f"数据源降级: 东方财富不可用，新浪 fallback {mins}min",
+                            level=2,
+                        )
+                    )
         else:
             if self._fallback_since is not None:
                 self._fallback_since = None
                 if self._source_alerted.get("primary_fallback"):
                     self._source_alerted["primary_fallback"] = False
-                    alerts.append(self._make_alert(
-                        "source_recovery",
-                        "数据源恢复: 东方财富重新连接",
-                        level=3, is_recovery=True,
-                    ))
+                    alerts.append(
+                        self._make_alert(
+                            "source_recovery",
+                            "数据源恢复: 东方财富重新连接",
+                            level=3,
+                            is_recovery=True,
+                        )
+                    )
 
         # Futu disconnection
         if not source.get("futu_connected", True):
             if self._futu_down_since is None:
                 self._futu_down_since = now
-            elif (now - self._futu_down_since >= threshold
-                    and not self._source_alerted.get("futu_down")):
+            elif (
+                now - self._futu_down_since >= threshold
+                and not self._source_alerted.get("futu_down")
+            ):
                 if self._cooled("futu_down", now):
                     self._fire("futu_down", now)
                     self._source_alerted["futu_down"] = True
-                    alerts.append(self._make_alert(
-                        "futu_down",
-                        "Futu 断连: HK 行情失去 L2 增强",
-                        level=2,
-                    ))
+                    alerts.append(
+                        self._make_alert(
+                            "futu_down",
+                            "Futu 断连: HK 行情失去 L2 增强",
+                            level=2,
+                        )
+                    )
         else:
             if self._futu_down_since is not None:
                 self._futu_down_since = None
                 if self._source_alerted.get("futu_down"):
                     self._source_alerted["futu_down"] = False
-                    alerts.append(self._make_alert(
-                        "futu_recovery",
-                        "Futu 恢复: HK L2 增强已重连",
-                        level=3, is_recovery=True,
-                    ))
+                    alerts.append(
+                        self._make_alert(
+                            "futu_recovery",
+                            "Futu 恢复: HK L2 增强已重连",
+                            level=3,
+                            is_recovery=True,
+                        )
+                    )
 
         return alerts
 
@@ -868,7 +954,12 @@ class DataFreshnessWatchdog:
 #
 
 # 通知标题（低调，不暴露用途）
-_TITLES_ALERT = ["CI Pipeline Alert", "Deploy Monitor", "SRE Notification", "Build Status"]
+_TITLES_ALERT = [
+    "CI Pipeline Alert",
+    "Deploy Monitor",
+    "SRE Notification",
+    "Build Status",
+]
 _TITLES_SUMMARY = ["Daily Report", "Sprint Summary"]
 
 
@@ -914,7 +1005,7 @@ def _linear_regression(ys: list[float]):
     if ss_xx == 0:
         return 0.0, 0.0
     slope = ss_xy / ss_xx
-    r_squared = (ss_xy ** 2) / (ss_xx * ss_yy) if ss_yy != 0 else 0.0
+    r_squared = (ss_xy**2) / (ss_xx * ss_yy) if ss_yy != 0 else 0.0
     return slope, r_squared
 
 
@@ -922,6 +1013,7 @@ def _linear_regression(ys: list[float]):
 # 5b. Gap-fade / Gap-recover detection
 #     高开低走 / 低开高走
 # ══════════════════════════════════════════
+
 
 class GapFadeEngine(PatternEngine):
     """检测高开低走 & 低开高走形态，每只股票每种形态每日最多触发一次。
@@ -978,10 +1070,14 @@ class GapFadeEngine(PatternEngine):
                 continue
             level = resolve_level(entry)
 
-            gap_from_prev = (open_px - prev_close) / prev_close * 100  # 正=高开, 负=低开
+            gap_from_prev = (
+                (open_px - prev_close) / prev_close * 100
+            )  # 正=高开, 负=低开
 
             # ── 高开低走 ──
-            if gap_from_prev >= gap_pct and not self._already_fired(symbol, "fade", today):
+            if gap_from_prev >= gap_pct and not self._already_fired(
+                symbol, "fade", today
+            ):
                 fade = (open_px - price) / open_px * 100
                 if fade >= fade_pct:
                     gap_erased = price <= prev_close
@@ -991,21 +1087,27 @@ class GapFadeEngine(PatternEngine):
                     erased_str = " 缺口完全回吐" if gap_erased else ""
                     display = f"{symbol} {name} 高开低走: 高开{gap_str} 回落{fade_str}{erased_str} | 现价{price:.2f}"
                     msg = f"{symbol} {name} 高开{gap_str} 回落{fade_str}{erased_str} 现价{price:.2f}"
-                    alerts.append({
-                        "symbol": symbol,
-                        "title": f"{name} 高开低走",
-                        "message": msg,
-                        "display": display,
-                        "_kind": "gap_fade",
-                        "_level": level,
-                        "_price": price,
-                        "_change_pct": q.get("change_pct", 0),
-                        "_stealth": msg,
-                    })
-                    logger.info(f"GapFade↓: {symbol} {name} 高开{gap_str} 回落{fade_str}{erased_str}")
+                    alerts.append(
+                        {
+                            "symbol": symbol,
+                            "title": f"{name} 高开低走",
+                            "message": msg,
+                            "display": display,
+                            "_kind": "gap_fade",
+                            "_level": level,
+                            "_price": price,
+                            "_change_pct": q.get("change_pct", 0),
+                            "_stealth": msg,
+                        }
+                    )
+                    logger.info(
+                        f"GapFade↓: {symbol} {name} 高开{gap_str} 回落{fade_str}{erased_str}"
+                    )
 
             # ── 低开高走 ──
-            elif gap_from_prev <= -gap_pct and not self._already_fired(symbol, "recover", today):
+            elif gap_from_prev <= -gap_pct and not self._already_fired(
+                symbol, "recover", today
+            ):
                 recover = (price - open_px) / abs(open_px) * 100
                 if recover >= fade_pct:
                     gap_recovered = price >= prev_close
@@ -1015,18 +1117,22 @@ class GapFadeEngine(PatternEngine):
                     recovered_str = " 缺口完全收复" if gap_recovered else ""
                     display = f"{symbol} {name} 低开高走: 低开{gap_str} 反弹{recover_str}{recovered_str} | 现价{price:.2f}"
                     msg = f"{symbol} {name} 低开{gap_str} 反弹{recover_str}{recovered_str} 现价{price:.2f}"
-                    alerts.append({
-                        "symbol": symbol,
-                        "title": f"{name} 低开高走",
-                        "message": msg,
-                        "display": display,
-                        "_kind": "gap_recover",
-                        "_level": level,
-                        "_price": price,
-                        "_change_pct": q.get("change_pct", 0),
-                        "_stealth": msg,
-                    })
-                    logger.info(f"GapRecover↑: {symbol} {name} 低开{gap_str} 反弹{recover_str}{recovered_str}")
+                    alerts.append(
+                        {
+                            "symbol": symbol,
+                            "title": f"{name} 低开高走",
+                            "message": msg,
+                            "display": display,
+                            "_kind": "gap_recover",
+                            "_level": level,
+                            "_price": price,
+                            "_change_pct": q.get("change_pct", 0),
+                            "_stealth": msg,
+                        }
+                    )
+                    logger.info(
+                        f"GapRecover↑: {symbol} {name} 低开{gap_str} 反弹{recover_str}{recovered_str}"
+                    )
 
         return alerts
 
@@ -1093,48 +1199,60 @@ def check_mainline_alerts() -> list[dict]:
             if len(values) < 3:
                 slope, r_squared = 0.0, 0.0
             else:
-                returns = [(values[i] / values[i - 1] - 1) * 100
-                           for i in range(1, len(values))]
+                returns = [
+                    (values[i] / values[i - 1] - 1) * 100 for i in range(1, len(values))
+                ]
                 slope, r_squared = _linear_regression(returns)
 
             # Mainline: cumulative >= threshold AND slope >= threshold AND R² >= min
-            if (cum_gain >= cum_threshold
-                    and slope >= slope_threshold
-                    and r_squared >= r2_min):
-                alerts.append({
-                    "symbol": f"tag:{tag_name}",
-                    "title": f"{tag_name} 主线行情",
-                    "_kind": "MAINLINE",
-                    "_level": 1 if star else 2,
-                    "_change_pct": round(cum_gain, 1),
-                    "message": f"{tag_name} 主线行情确认",
-                    "display": (
-                        f"\U0001f525 {tag_name}指数 主线行情"
-                        f" 累涨{cum_gain:.1f}% 斜率{slope:.3f} R\u00b2={r_squared:.2f}"
-                    ),
-                    "_stealth": f"{tag_name} 主线确认",
-                })
+            if (
+                cum_gain >= cum_threshold
+                and slope >= slope_threshold
+                and r_squared >= r2_min
+            ):
+                alerts.append(
+                    {
+                        "symbol": f"tag:{tag_name}",
+                        "title": f"{tag_name} 主线行情",
+                        "_kind": "MAINLINE",
+                        "_level": 1 if star else 2,
+                        "_change_pct": round(cum_gain, 1),
+                        "message": f"{tag_name} 主线行情确认",
+                        "display": (
+                            f"\U0001f525 {tag_name}指数 主线行情"
+                            f" 累涨{cum_gain:.1f}% 斜率{slope:.3f} R\u00b2={r_squared:.2f}"
+                        ),
+                        "_stealth": f"{tag_name} 主线确认",
+                    }
+                )
                 logger.info(
                     "mainline detected: %s cum=%.1f%% slope=%.3f R2=%.2f",
-                    tag_name, cum_gain, slope, r_squared,
+                    tag_name,
+                    cum_gain,
+                    slope,
+                    r_squared,
                 )
             # Approaching: cumulative >= 75% threshold AND slope > 0
             elif cum_gain >= cum_threshold * 0.75 and slope > 0:
-                alerts.append({
-                    "symbol": f"tag:{tag_name}",
-                    "title": f"{tag_name} 接近主线",
-                    "_kind": "MAINLINE",
-                    "_level": 2,  # approaching is always L2
-                    "_change_pct": round(cum_gain, 1),
-                    "message": f"{tag_name} 接近主线",
-                    "display": (
-                        f"\u26a1 {tag_name}指数 接近主线 累涨{cum_gain:.1f}%"
-                    ),
-                    "_stealth": f"{tag_name} 接近主线",
-                })
+                alerts.append(
+                    {
+                        "symbol": f"tag:{tag_name}",
+                        "title": f"{tag_name} 接近主线",
+                        "_kind": "MAINLINE",
+                        "_level": 2,  # approaching is always L2
+                        "_change_pct": round(cum_gain, 1),
+                        "message": f"{tag_name} 接近主线",
+                        "display": (
+                            f"\u26a1 {tag_name}指数 接近主线 累涨{cum_gain:.1f}%"
+                        ),
+                        "_stealth": f"{tag_name} 接近主线",
+                    }
+                )
                 logger.info(
                     "approaching mainline: %s cum=%.1f%% slope=%.3f",
-                    tag_name, cum_gain, slope,
+                    tag_name,
+                    cum_gain,
+                    slope,
                 )
 
         return alerts
@@ -1200,11 +1318,26 @@ def write_alert_events(alerts: list[dict]):
                 icon = "↑" if change_pct > 0 else "↓"
                 direction = "涨幅" if change_pct > 0 else "跌幅"
                 p = a.get("_price", 0)
-                display = f"{symbol} {name} {icon}{direction} {abs(change_pct):.1f}% → {p:.2f}" if p else f"{symbol} {name} {icon}{direction} {abs(change_pct):.1f}%"
+                display = (
+                    f"{symbol} {name} {icon}{direction} {abs(change_pct):.1f}% → {p:.2f}"
+                    if p
+                    else f"{symbol} {name} {icon}{direction} {abs(change_pct):.1f}%"
+                )
 
         message = a.get("_stealth", a.get("message", ""))
-        rows.append((ts_base + i, today, t, symbol, kind, a.get("_level", 2),
-                      message, display, change_pct))
+        rows.append(
+            (
+                ts_base + i,
+                today,
+                t,
+                symbol,
+                kind,
+                a.get("_level", 2),
+                message,
+                display,
+                change_pct,
+            )
+        )
 
     conn = None
     try:
@@ -1246,7 +1379,9 @@ def check_l2_signals() -> list[dict]:
         return []
 
     # 只取本次新增的（ts > _l2_last_consumed）
-    new_signals = [s for s in signals if s.get("ts", 0) > check_l2_signals._last_consumed]
+    new_signals = [
+        s for s in signals if s.get("ts", 0) > check_l2_signals._last_consumed
+    ]
     if not new_signals:
         return []
 
@@ -1275,15 +1410,17 @@ def check_l2_signals() -> list[dict]:
             continue
         check_l2_signals._daily_counts[code] = count + 1
 
-        alerts.append({
-            "symbol": code,
-            "title": f"L2 {strategy}",
-            "message": display,
-            "_kind": "l2_strategy",
-            "_change_pct": 0,
-            "_stealth": message,
-            "_notify": should_notify,
-        })
+        alerts.append(
+            {
+                "symbol": code,
+                "title": f"L2 {strategy}",
+                "message": display,
+                "_kind": "l2_strategy",
+                "_change_pct": 0,
+                "_stealth": message,
+                "_notify": should_notify,
+            }
+        )
 
     return alerts
 
@@ -1304,11 +1441,12 @@ def _load_seen_today_from_db() -> set:
     try:
         from src.sim_trading.db import get_connection
         import datetime as _dt
+
         today_str = _dt.date.today().strftime("%Y-%m-%d")
         conn = get_connection()
         rows = conn.execute(
             "SELECT symbol, message FROM alert_events WHERE date = ? AND kind = 'l2_strategy'",
-            (today_str,)
+            (today_str,),
         ).fetchall()
         for sym, msg in rows:
             seen.add((sym, msg))
@@ -1408,6 +1546,7 @@ def stealth_dispatch_open_close(alerts: list[dict]):
 # 5b. Status line
 # ══════════════════════════════════════════
 
+
 def print_status(checked: int, alert_count: int, next_sec: int, trading: bool):
     """Print a compact single-line status, overwriting the previous one."""
     now = datetime.now().strftime("%H:%M:%S")
@@ -1422,6 +1561,7 @@ def print_status(checked: int, alert_count: int, next_sec: int, trading: bool):
 # ══════════════════════════════════════════
 # 5b. Market open/close notifications
 # ══════════════════════════════════════════
+
 
 def _count_watchlist(watchlist: dict) -> tuple[int, int]:
     """Count holdings and watching stocks (non-hidden).
@@ -1490,12 +1630,14 @@ def _build_close_summary(
         total_daily_pnl += daily_pnl_cny
         total_market_value += market_value_cny
 
-        holdings_data.append({
-            "symbol": symbol,
-            "name": name,
-            "change_pct": change_pct,
-            "daily_pnl_cny": daily_pnl_cny,
-        })
+        holdings_data.append(
+            {
+                "symbol": symbol,
+                "name": name,
+                "change_pct": change_pct,
+                "daily_pnl_cny": daily_pnl_cny,
+            }
+        )
 
     # ── Threshold hits (from alert_config.json) ──
     threshold_hits: list[str] = []
@@ -1524,13 +1666,17 @@ def _build_close_summary(
         portfolio_pct = (total_daily_pnl / total_market_value) * 100
         sign = "+" if total_daily_pnl >= 0 else ""
         pct_sign = "+" if portfolio_pct >= 0 else ""
-        lines.append(f"持仓盈亏: {sign}{total_daily_pnl:,.0f}元 ({pct_sign}{portfolio_pct:.2f}%)")
+        lines.append(
+            f"持仓盈亏: {sign}{total_daily_pnl:,.0f}元 ({pct_sign}{portfolio_pct:.2f}%)"
+        )
     else:
         lines.append("持仓盈亏: 无持仓数据")
 
     # Top gainers / losers (sorted by change_pct)
     if holdings_data:
-        sorted_by_change = sorted(holdings_data, key=lambda x: x["change_pct"], reverse=True)
+        sorted_by_change = sorted(
+            holdings_data, key=lambda x: x["change_pct"], reverse=True
+        )
 
         gainers = [h for h in sorted_by_change if h["change_pct"] > 0][:3]
         losers = [h for h in reversed(sorted_by_change) if h["change_pct"] < 0][:3]
@@ -1573,21 +1719,25 @@ def check_market_open_close(
     # ── Market open notification: 09:30 ~ 09:45 window ──
     if not sent_open and 930 <= t <= 945:
         num_holdings, num_watching = _count_watchlist(watchlist)
-        alerts.append({
-            "title": "开盘",
-            "message": f"A股开盘 | 关注: {num_holdings}只持仓, {num_watching}只自选",
-            "_stealth": f"持仓{num_holdings}只 自选{num_watching}只",
-        })
+        alerts.append(
+            {
+                "title": "开盘",
+                "message": f"A股开盘 | 关注: {num_holdings}只持仓, {num_watching}只自选",
+                "_stealth": f"持仓{num_holdings}只 自选{num_watching}只",
+            }
+        )
         sent_open = True
 
     # ── Market close notification: 15:01 ~ 15:15 window ──
     if not sent_close and 1501 <= t <= 1515 and quotes:
         summary = _build_close_summary(quotes, config, hkd_cny_rate)
-        alerts.append({
-            "title": "收盘",
-            "message": summary,
-            "_stealth": summary,  # close summary is already compact enough
-        })
+        alerts.append(
+            {
+                "title": "收盘",
+                "message": summary,
+                "_stealth": summary,  # close summary is already compact enough
+            }
+        )
         sent_close = True
 
     return sent_open, sent_close, alerts
@@ -1616,7 +1766,9 @@ class TradePlanEngine:
 
     def __init__(self):
         self._plans: dict = {}
-        self._consecutive_tracker: dict[str, dict] = {}  # {plan_id: {cond_id: {"count": N, "last_date": "YYYY-MM-DD"}}}
+        self._consecutive_tracker: dict[
+            str, dict
+        ] = {}  # {plan_id: {cond_id: {"count": N, "last_date": "YYYY-MM-DD"}}}
         self._last_mtime: float = 0.0
         self._ashare_kline_cache: dict[str, object] = {}  # {symbol: kline DataFrame}
         self._ashare_kline_ts: dict[str, float] = {}  # {symbol: last fetch timestamp}
@@ -1646,8 +1798,9 @@ class TradePlanEngine:
         tmp.rename(TRADE_PLANS_PATH)
         self._last_mtime = TRADE_PLANS_PATH.stat().st_mtime
 
-    def _get_ashare_indicators(self, symbol: str, live_price: float = 0,
-                               live_volume: float = 0) -> dict:
+    def _get_ashare_indicators(
+        self, symbol: str, live_price: float = 0, live_volume: float = 0
+    ) -> dict:
         """获取 A 股日线技术指标，盘中用实时价格预估。
 
         - kline 缓存每 30 分钟刷新一次（避免 akshare 限速）
@@ -1673,13 +1826,18 @@ class TradePlanEngine:
         # 拉取/刷新 kline（每 30 分钟一次）
         ts_now = now.timestamp()
         last_ts = self._ashare_kline_ts.get(symbol, 0)
-        if symbol not in self._ashare_kline_cache or (ts_now - last_ts > self.KLINE_REFRESH_INTERVAL):
+        if symbol not in self._ashare_kline_cache or (
+            ts_now - last_ts > self.KLINE_REFRESH_INTERVAL
+        ):
             try:
                 from src.tools.indicator_alert_engine import fetch_kline_akshare
                 import time
+
                 kline = fetch_kline_akshare(symbol, days=60)
                 if kline is None:
-                    logger.warning(f"TradePlan: A-share kline fetch failed for {symbol}")
+                    logger.warning(
+                        f"TradePlan: A-share kline fetch failed for {symbol}"
+                    )
                     return {}
                 self._ashare_kline_cache[symbol] = kline
                 self._ashare_kline_ts[symbol] = ts_now
@@ -1694,10 +1852,13 @@ class TradePlanEngine:
 
         try:
             from src.tools.indicator_alert_engine import compute_indicators
+
             # 盘中 (9:30-15:00): 用实时价格作为当日收盘预估
             is_trading = 930 <= hhmm <= 1500
             if is_trading and live_price > 0:
-                ind = compute_indicators(kline, live_price=live_price, live_volume=live_volume)
+                ind = compute_indicators(
+                    kline, live_price=live_price, live_volume=live_volume
+                )
             else:
                 ind = compute_indicators(kline)
 
@@ -1706,7 +1867,10 @@ class TradePlanEngine:
 
             return {
                 "rsi": ind.get("rsi"),
-                "macd_hist_list": [ind.get("macd_hist_prev", 0), ind.get("macd_hist", 0)],
+                "macd_hist_list": [
+                    ind.get("macd_hist_prev", 0),
+                    ind.get("macd_hist", 0),
+                ],
                 "vol_ratio": ind.get("vol_ratio"),
                 "macd_golden_cross": ind.get("macd_golden_cross", False),
                 "macd_death_cross": ind.get("macd_death_cross", False),
@@ -1714,7 +1878,9 @@ class TradePlanEngine:
                 "ma5_turn_up": ind.get("ma5_turn_up", False),
             }
         except Exception as e:
-            logger.warning(f"TradePlan: A-share indicator compute error for {symbol}: {e}")
+            logger.warning(
+                f"TradePlan: A-share indicator compute error for {symbol}: {e}"
+            )
             return {}
 
     def _plan_has_indicator_orders(self, plan: dict) -> bool:
@@ -1755,7 +1921,8 @@ class TradePlanEngine:
             if not ind and not symbol.startswith("KR"):
                 if self._plan_has_indicator_orders(plan):
                     ind = self._get_ashare_indicators(
-                        symbol, live_price=price,
+                        symbol,
+                        live_price=price,
                         live_volume=q.get("volume", 0) or 0,
                     )
 
@@ -1763,8 +1930,9 @@ class TradePlanEngine:
             for order in plan.get("orders", []):
                 if order.get("triggered"):
                     continue
-                if not self._check_order_conditions(plan_id, order, price, amount, today,
-                                                        indicators=ind):
+                if not self._check_order_conditions(
+                    plan_id, order, price, amount, today, indicators=ind
+                ):
                     if order.pop("_ts_dirty", False):
                         dirty = True
                     continue
@@ -1778,23 +1946,41 @@ class TradePlanEngine:
                     prefix = f"卖出 {shares}股"
                     event_type = "sell_triggered"
                 alert = self._make_alert(
-                    plan_id, plan, order["id"], f"{prefix}: {label}",
-                    price, name, change, event_type=event_type, shares=shares, side=side,
+                    plan_id,
+                    plan,
+                    order["id"],
+                    f"{prefix}: {label}",
+                    price,
+                    name,
+                    change,
+                    event_type=event_type,
+                    shares=shares,
+                    side=side,
                 )
                 alerts.append(alert)
                 order["triggered"] = True
                 order["triggered_at"] = datetime.now().isoformat()
                 dirty = True
-                self._write_plan_event(plan_id, event_type, order["id"], label, price, shares)
-                logger.info(f"PLAN {side.upper()} {plan['name']}: {label} @ {price:.2f}")
+                self._write_plan_event(
+                    plan_id, event_type, order["id"], label, price, shares
+                )
+                logger.info(
+                    f"PLAN {side.upper()} {plan['name']}: {label} @ {price:.2f}"
+                )
 
         if dirty:
             self._save_plans()
         return alerts
 
-    def _check_order_conditions(self, plan_id: str, order: dict,
-                                price: float, amount: float,
-                                today: str, **kwargs) -> bool:
+    def _check_order_conditions(
+        self,
+        plan_id: str,
+        order: dict,
+        price: float,
+        amount: float,
+        today: str,
+        **kwargs,
+    ) -> bool:
         """Check if an order's conditions are met. Supports trailing + indicator conditions."""
         op = order.get("op", ">=")
         target = order.get("price", 0)
@@ -1812,7 +1998,9 @@ class TradePlanEngine:
                 if activated:
                     is_active = True
                     wm = price
-                    logger.info(f"Order trailing activated: {plan_id}:{order['id']} @ {price:.4f}")
+                    logger.info(
+                        f"Order trailing activated: {plan_id}:{order['id']} @ {price:.4f}"
+                    )
 
             if is_active:
                 if side == "sell":
@@ -1903,7 +2091,7 @@ class TradePlanEngine:
             n = cond["macd_hist_narrowing_days"]
             if len(hist) < n + 1:
                 return False
-            recent = hist[-(n + 1):]
+            recent = hist[-(n + 1) :]
             for i in range(1, len(recent)):
                 if abs(recent[i]) >= abs(recent[i - 1]):
                     return False
@@ -1935,8 +2123,11 @@ class TradePlanEngine:
         # ── Confluence: require N or more boolean signals to be true ──
         confluence_min = cond.get("confluence_min")
         if confluence_min:
-            count = sum(1 for k in ("macd_golden_cross", "macd_bull_divergence",
-                                     "ma5_turn_up") if indicators.get(k))
+            count = sum(
+                1
+                for k in ("macd_golden_cross", "macd_bull_divergence", "ma5_turn_up")
+                if indicators.get(k)
+            )
             rsi = indicators.get("rsi")
             if rsi is not None and rsi < 35:
                 count += 1
@@ -1948,20 +2139,36 @@ class TradePlanEngine:
 
         return True
 
-    def _make_alert(self, plan_id: str, plan: dict, cond_id: str,
-                    label: str, price: float, name: str, change: float,
-                    event_type: str = "", shares: int = 0, side: str = "sell") -> dict:
+    def _make_alert(
+        self,
+        plan_id: str,
+        plan: dict,
+        cond_id: str,
+        label: str,
+        price: float,
+        name: str,
+        change: float,
+        event_type: str = "",
+        shares: int = 0,
+        side: str = "sell",
+    ) -> dict:
         """Create alert dict compatible with write_alert_events + stealth_dispatch."""
         symbol = plan.get("symbol", "")
         plan_name = plan.get("name", plan_id)
 
         # Use label's side info if present (e.g., "卖出 100股: 止盈"), otherwise construct from side
         if "买入" in label:
-            action_text = f"买入 {shares} 股 @ {price:.2f}" if shares > 0 else f"@ {price:.2f}"
+            action_text = (
+                f"买入 {shares} 股 @ {price:.2f}" if shares > 0 else f"@ {price:.2f}"
+            )
         elif "卖出" in label:
-            action_text = f"卖出 {shares} 股 @ {price:.2f}" if shares > 0 else f"@ {price:.2f}"
+            action_text = (
+                f"卖出 {shares} 股 @ {price:.2f}" if shares > 0 else f"@ {price:.2f}"
+            )
         elif shares > 0:
-            action_text = f"{'买入' if side == 'buy' else '卖出'} {shares} 股 @ {price:.2f}"
+            action_text = (
+                f"{'买入' if side == 'buy' else '卖出'} {shares} 股 @ {price:.2f}"
+            )
         elif event_type == "sl_triggered":
             action_text = f"止损 @ {price:.2f}"
         else:
@@ -1981,12 +2188,19 @@ class TradePlanEngine:
             "_event_type": event_type,
         }
 
-    def _write_plan_event(self, plan_id: str, event_type: str,
-                          condition_id: str, label: str,
-                          price: float, shares: int):
+    def _write_plan_event(
+        self,
+        plan_id: str,
+        event_type: str,
+        condition_id: str,
+        label: str,
+        price: float,
+        shares: int,
+    ):
         """Write to trade_plan_events SQLite table."""
         try:
             from src.sim_trading.db import get_connection
+
             conn = get_connection()
             conn.execute(
                 "INSERT OR IGNORE INTO trade_plan_events "
@@ -1995,8 +2209,12 @@ class TradePlanEngine:
                 (
                     int(time.time() * 1000),
                     datetime.now().strftime("%Y-%m-%d"),
-                    plan_id, event_type, condition_id, label,
-                    price, shares,
+                    plan_id,
+                    event_type,
+                    condition_id,
+                    label,
+                    price,
+                    shares,
                     f"{label} @ {price:.2f}",
                 ),
             )
@@ -2061,16 +2279,18 @@ class WatchDriftTracker:
                 self._notified_tiers.setdefault(symbol, set()).add(tier)
                 level = 1 if star else (2 if list_type == "holding" else 3)
                 direction = "涨" if drift_pct > 0 else "跌"
-                alerts.append({
-                    "symbol": symbol,
-                    "title": f"{name} drift",
-                    "_kind": "DRIFT",
-                    "_level": level,
-                    "_change_pct": round(drift_pct, 1),
-                    "message": f"{name} 距关注{direction}{abs(tier):.0f}%",
-                    "display": f"{name}({symbol}) 距关注价{wp:.2f}{direction}{abs(drift_pct):.1f}%，现价{price:.2f}",
-                    "_stealth": f"{name} {direction}{abs(tier):.0f}%",
-                })
+                alerts.append(
+                    {
+                        "symbol": symbol,
+                        "title": f"{name} drift",
+                        "_kind": "DRIFT",
+                        "_level": level,
+                        "_change_pct": round(drift_pct, 1),
+                        "message": f"{name} 距关注{direction}{abs(tier):.0f}%",
+                        "display": f"{name}({symbol}) 距关注价{wp:.2f}{direction}{abs(drift_pct):.1f}%，现价{price:.2f}",
+                        "_stealth": f"{name} {direction}{abs(tier):.0f}%",
+                    }
+                )
         return alerts
 
     def check_indices(self, index_values):
@@ -2104,16 +2324,18 @@ class WatchDriftTracker:
                 self._notified_tiers.setdefault(key, set()).add(tier)
                 level = 1 if star else 2
                 direction = "涨" if drift_pct > 0 else "跌"
-                alerts.append({
-                    "symbol": key,
-                    "title": f"{tag}指数 drift",
-                    "_kind": "DRIFT",
-                    "_level": level,
-                    "_change_pct": round(drift_pct, 1),
-                    "message": f"{tag}指数 距创建{direction}{abs(tier):.0f}%",
-                    "display": f"{tag}指数 距创建{direction}{abs(drift_pct):.1f}%，当前{val:.1f}",
-                    "_stealth": f"{tag} {direction}{abs(tier):.0f}%",
-                })
+                alerts.append(
+                    {
+                        "symbol": key,
+                        "title": f"{tag}指数 drift",
+                        "_kind": "DRIFT",
+                        "_level": level,
+                        "_change_pct": round(drift_pct, 1),
+                        "message": f"{tag}指数 距创建{direction}{abs(tier):.0f}%",
+                        "display": f"{tag}指数 距创建{direction}{abs(drift_pct):.1f}%，当前{val:.1f}",
+                        "_stealth": f"{tag} {direction}{abs(tier):.0f}%",
+                    }
+                )
         return alerts
 
     def _get_step(self, key):
@@ -2158,6 +2380,7 @@ class WatchDriftPatternEngine(PatternEngine):
         try:
             from src.sim_trading.db import get_connection as _gc
             import datetime as _dt
+
             today_str = _dt.date.today().strftime("%Y-%m-%d")
             conn = _gc()
             rows = conn.execute(
@@ -2175,6 +2398,7 @@ class WatchDriftPatternEngine(PatternEngine):
 # ══════════════════════════════════════════
 # 6c. PanicSellEngine — 放量下跌恐慌盘检测
 # ══════════════════════════════════════════
+
 
 class PanicSellEngine(PatternEngine):
     """检测大盘放量下跌 + 个股恐慌盘砸出，触发 L1/L2 告警。
@@ -2199,12 +2423,23 @@ class PanicSellEngine(PatternEngine):
         if config_path and config_path.exists():
             try:
                 import json as _j
+
                 cfg = _j.loads(config_path.read_text("utf-8"))
-                self._market_amo1_min = cfg.get("panic_market_amo1_min", self._market_amo1_min)
-                self._market_drop_pct = cfg.get("panic_market_drop_pct", self._market_drop_pct)
-                self._stock_amo1_min = cfg.get("panic_stock_amo1_min", self._stock_amo1_min)
-                self._stock_drop_pct = cfg.get("panic_stock_drop_pct", self._stock_drop_pct)
-                self._cooldown_hours = cfg.get("panic_cooldown_hours", self._cooldown_hours)
+                self._market_amo1_min = cfg.get(
+                    "panic_market_amo1_min", self._market_amo1_min
+                )
+                self._market_drop_pct = cfg.get(
+                    "panic_market_drop_pct", self._market_drop_pct
+                )
+                self._stock_amo1_min = cfg.get(
+                    "panic_stock_amo1_min", self._stock_amo1_min
+                )
+                self._stock_drop_pct = cfg.get(
+                    "panic_stock_drop_pct", self._stock_drop_pct
+                )
+                self._cooldown_hours = cfg.get(
+                    "panic_cooldown_hours", self._cooldown_hours
+                )
             except Exception:
                 pass
 
@@ -2254,7 +2489,9 @@ class PanicSellEngine(PatternEngine):
             return []
 
         # 2. 大盘条件检查
-        market_dropped = sh_pct <= -self._market_drop_pct or sz_pct <= -self._market_drop_pct
+        market_dropped = (
+            sh_pct <= -self._market_drop_pct or sz_pct <= -self._market_drop_pct
+        )
         if not market_dropped:
             return []  # 大盘未放量下跌，跳过
 
@@ -2301,18 +2538,20 @@ class PanicSellEngine(PatternEngine):
             name = q.get("name", symbol)
             level = 1 if is_star else 2
 
-            alerts.append({
-                "symbol": symbol,
-                "title": f"放量恐慌 {pct:.1f}%",
-                "message": f"[PANIC] {name} AMO1={amo1:.1f}x 跌幅{pct:.1f}%",
-                "display": f"🚨 {name} 放量下跌 | AMO1={amo1:.1f}x | {pct:.1f}% | 大盘AMO={market_amo1:.1f}x",
-                "_kind": "panic_sell",
-                "_level": level,
-                "_change_pct": pct,
-                "_stealth": f"{name} 放量恐慌 跌幅{pct:.1f}%",
-                "amo1": amo1,
-                "market_amo1": market_amo1,
-            })
+            alerts.append(
+                {
+                    "symbol": symbol,
+                    "title": f"放量恐慌 {pct:.1f}%",
+                    "message": f"[PANIC] {name} AMO1={amo1:.1f}x 跌幅{pct:.1f}%",
+                    "display": f"🚨 {name} 放量下跌 | AMO1={amo1:.1f}x | {pct:.1f}% | 大盘AMO={market_amo1:.1f}x",
+                    "_kind": "panic_sell",
+                    "_level": level,
+                    "_change_pct": pct,
+                    "_stealth": f"{name} 放量恐慌 跌幅{pct:.1f}%",
+                    "amo1": amo1,
+                    "market_amo1": market_amo1,
+                }
+            )
 
         return alerts
 
@@ -2320,6 +2559,7 @@ class PanicSellEngine(PatternEngine):
 # ══════════════════════════════════════════
 # 7. Main loop
 # ══════════════════════════════════════════
+
 
 def run():
     """Main notification daemon loop."""
@@ -2343,23 +2583,44 @@ def run():
     watchlist = config.get("watchlist", {})
     has_hk = any(is_hk_symbol(s) for s in watchlist)
     num_holdings = sum(
-        1 for e in watchlist.values()
+        1
+        for e in watchlist.values()
         if e.get("type") == "holding" and e.get("cost") and e.get("shares")
     )
 
     print("Stock Notifier started (delta mode)")
-    print(f"  watchlist : {len(watchlist)} stocks ({sum(1 for s in watchlist if is_hk_symbol(s))} HK)")
+    print(
+        f"  watchlist : {len(watchlist)} stocks ({sum(1 for s in watchlist if is_hk_symbol(s))} HK)"
+    )
     print(f"  holdings  : {num_holdings} with cost/shares (P&L tracking)")
     l1 = get_policy(1, settings)
-    print(f"  trigger   : L1 +/-{l1['trigger_pct']}% / L2 +/-{get_policy(2, settings)['trigger_pct']}% (首次触发)")
-    print(f"  delta     : L1 +/-{l1['delta_pct']}% / L2 +/-{get_policy(2, settings)['delta_pct']}% (再次触发)")
+    print(
+        f"  trigger   : L1 +/-{l1['trigger_pct']}% / L2 +/-{get_policy(2, settings)['trigger_pct']}% (首次触发)"
+    )
+    print(
+        f"  delta     : L1 +/-{l1['delta_pct']}% / L2 +/-{get_policy(2, settings)['delta_pct']}% (再次触发)"
+    )
     print(f"  portfolio : +/-{settings.get('portfolio_delta_pct', 2)}% (组合变化)")
     print(f"  data file : {MARKET_DATA_PATH.name}")
     print(f"  Ctrl+C to stop\n")
 
     # ── Ensure alert_events table exists ──
     from src.sim_trading.db import init_db
+
     init_db()
+
+    # ── Leader election ──
+    from src.tools.monitor_lock import MonitorLock
+
+    lock = MonitorLock()
+    if not lock.try_acquire():
+        holder = lock.get_lock_holder()
+        if holder:
+            print(f"[NOTIFIER] 锁被 {holder[0]} (pid={holder[1]}) 持有，退出")
+        else:
+            print("[NOTIFIER] 锁被未知进程持有，退出")
+        sys.exit(1)
+    print(f"[NOTIFIER] 成功获取锁 {lock.machine_id}")
 
     # ── State ──
     last_mtime = 0.0
@@ -2372,6 +2633,7 @@ def run():
     engine = DeltaAlertEngine(config)
     plan_engine = TradePlanEngine()
     watchdog = DataFreshnessWatchdog(poll_interval=settings.get("poll_interval", 30))
+    last_heartbeat = int(time.time())
 
     # ── 注册通用形态引擎（新增形态只需在此 register 一行）──
     register_pattern_engine(GapFadeEngine(config))
@@ -2384,11 +2646,11 @@ def run():
     sent_summary_today = False
     sent_morning_briefing_today = False
     mainline_checked_today = False
-    latest_quotes: dict | None = None       # last merged quotes (for close summary)
+    latest_quotes: dict | None = None  # last merged quotes (for close summary)
     latest_hkd_cny_rate: float | None = None
-    market_snapshot: dict | None = None     # latest parsed market_data.json (for watchdog)
-    last_indicator_refresh: float = 0.0     # 指标缓存上次刷新时间戳
-    INDICATOR_REFRESH_INTERVAL = 1800       # 30 分钟刷新一次
+    market_snapshot: dict | None = None  # latest parsed market_data.json (for watchdog)
+    last_indicator_refresh: float = 0.0  # 指标缓存上次刷新时间戳
+    INDICATOR_REFRESH_INTERVAL = 1800  # 30 分钟刷新一次
 
     while running:
         # Reset daily at 08:00 (before market open)
@@ -2415,7 +2677,11 @@ def run():
             _archive_and_reset(today)
             # Reload config at day boundary
             fresh_config = read_json_safe(MONITOR_CONFIG_PATH)
-            if fresh_config is not None and "settings" in fresh_config and "watchlist" in fresh_config:
+            if (
+                fresh_config is not None
+                and "settings" in fresh_config
+                and "watchlist" in fresh_config
+            ):
                 config = fresh_config
                 watchlist = config.get("watchlist", {})
                 settings = config.get("settings", {})
@@ -2436,7 +2702,11 @@ def run():
 
             # Reload config each time (cheap, picks up threshold changes)
             fresh_config = read_json_safe(MONITOR_CONFIG_PATH)
-            if fresh_config is not None and "settings" in fresh_config and "watchlist" in fresh_config:
+            if (
+                fresh_config is not None
+                and "settings" in fresh_config
+                and "watchlist" in fresh_config
+            ):
                 config = fresh_config
                 watchlist = config.get("watchlist", {})
                 settings = config.get("settings", {})
@@ -2461,7 +2731,9 @@ def run():
                     in_auction = is_in_auction_period()
 
                     hkd_cny_rate = market.get("hkdCnyRate")
-                    all_alerts = [] if in_auction else engine.check(quotes, hkd_cny_rate)
+                    all_alerts = (
+                        [] if in_auction else engine.check(quotes, hkd_cny_rate)
+                    )
 
                     # ── L2 strategy signals (from daemon) ──
                     l2_alerts = [] if in_auction else check_l2_signals()
@@ -2487,8 +2759,13 @@ def run():
                     ts_now = time.time()
                     if ts_now - last_indicator_refresh > INDICATOR_REFRESH_INTERVAL:
                         try:
-                            from src.tools.indicator_alert_engine import refresh_indicator_cache
-                            refresh_indicator_cache(watchlist=watchlist, live_quotes=quotes)
+                            from src.tools.indicator_alert_engine import (
+                                refresh_indicator_cache,
+                            )
+
+                            refresh_indicator_cache(
+                                watchlist=watchlist, live_quotes=quotes
+                            )
                             last_indicator_refresh = ts_now
                         except Exception as _ie:
                             logger.warning(f"indicator_cache refresh failed: {_ie}")
@@ -2501,7 +2778,9 @@ def run():
                                 if _eng_alerts:
                                     all_alerts.extend(_eng_alerts)
                             except Exception as _e:
-                                logger.warning(f"{type(_eng).__name__} check failed: {_e}")
+                                logger.warning(
+                                    f"{type(_eng).__name__} check failed: {_e}"
+                                )
 
                     if all_alerts:
                         print()
@@ -2509,7 +2788,11 @@ def run():
                         write_alert_events(all_alerts)
                         # 按级别分流 macOS 通知
                         l1_alerts = [a for a in all_alerts if a.get("_level") == 1]
-                        l2_alerts_dispatch = [a for a in all_alerts if a.get("_level") == 2 or a.get("_kind") == "portfolio"]
+                        l2_alerts_dispatch = [
+                            a
+                            for a in all_alerts
+                            if a.get("_level") == 2 or a.get("_kind") == "portfolio"
+                        ]
                         # L3 = web_only, 已写入 alert_events，不弹窗
                         if l1_alerts:
                             stealth_dispatch(l1_alerts, sound="default")
@@ -2585,12 +2868,17 @@ def run():
                 def _run_sector_indices():
                     try:
                         from src.tools.sector_index_engine import compute_custom_indices
+
                         compute_custom_indices()
                         logger.info("sector indices computed for today")
                     except Exception as e:
                         logger.warning(f"sector index computation failed: {e}")
+
                 import threading
-                threading.Thread(target=_run_sector_indices, daemon=True, name="sector-indices").start()
+
+                threading.Thread(
+                    target=_run_sector_indices, daemon=True, name="sector-indices"
+                ).start()
 
         # ── Morning briefing generation (8:25-8:35 before A-share open) ──
         if not sent_morning_briefing_today:
@@ -2600,7 +2888,10 @@ def run():
                 sent_morning_briefing_today = True
                 logger.info("Triggering morning briefing generation...")
                 try:
-                    from src.tools.daily_summary_generator import generate_morning_briefing
+                    from src.tools.daily_summary_generator import (
+                        generate_morning_briefing,
+                    )
+
                     generate_morning_briefing()
                     logger.info("Morning briefing generated")
                 except Exception as e:
@@ -2615,10 +2906,20 @@ def run():
                 logger.info("Triggering daily summary generation...")
                 try:
                     from src.tools.daily_summary_generator import generate_daily_summary
+
                     generate_daily_summary()
                     notify("Daily Report", "Signal digest ready", sound="")
                 except Exception as e:
                     logger.error(f"Daily summary generation failed: {e}")
+
+        # Heartbeat refresh
+        now = int(time.time())
+        if now - last_heartbeat >= 30:
+            if not lock.refresh_heartbeat():
+                print("[NOTIFIER] 锁丢失，退出")
+                running = False
+                break
+            last_heartbeat = now
 
         # Sleep in small increments for responsive shutdown
         slept = 0.0
@@ -2627,7 +2928,8 @@ def run():
             slept += 0.5
 
     # ── Shutdown ──
-    print(f"\n\nNotifier stopped. Total alerts today: {daily_alerts}")
+    lock.release()
+    print(f"\n\nNotifier stopped. Total alerts today: {daily_alerts}, 锁已释放")
 
 
 if __name__ == "__main__":

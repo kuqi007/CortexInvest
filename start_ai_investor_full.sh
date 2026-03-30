@@ -40,6 +40,43 @@ _is_running() {
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
 }
 
+# Find actual Python child PID under nohup/uv wrapper
+_get_python_pid() {
+  local wrapper_pid=$1
+  [ -z "$wrapper_pid" ] && return
+  # Try pgrep first (most reliable on macOS/Linux)
+  local child=$(pgrep -P "$wrapper_pid" 2>/dev/null | head -1)
+  if [ -n "$child" ]; then
+    echo "$child"
+    return
+  fi
+  # Fallback: ps approach
+  child=$(ps -o pid= --ppid "$wrapper_pid" 2>/dev/null | tr -d ' ' | head -1)
+  [ -n "$child" ] && echo "$child"
+}
+
+# Check if a Python script process is actually running (checks child process)
+_is_python_running() {
+  local pidfile=$1 pattern=$2
+  local wrapper_pid=$(_read_pid "$pidfile")
+  [ -z "$wrapper_pid" ] && return 1
+  
+  # Check if nohup/uv wrapper is alive
+  if ! kill -0 "$wrapper_pid" 2>/dev/null; then
+    return 1
+  fi
+  
+  # Check if actual Python child process is running
+  local python_pid=$(_get_python_pid "$wrapper_pid")
+  if [ -n "$python_pid" ]; then
+    kill -0 "$python_pid" 2>/dev/null && return 0
+    return 1
+  fi
+  
+  # Fallback: check by pattern if child pid not found
+  pgrep -f "$pattern" > /dev/null 2>&1
+}
+
 _stop_one() {
   local pidfile=$1 label=$2 pattern=$3
   local pid=$(_read_pid "$pidfile")
@@ -120,9 +157,9 @@ do_start() {
 
   echo ""
   echo "全部后台运行中，可关闭终端。"
-  echo "  查看状态: ./start_monitor.sh status"
+  echo "  查看状态: ./start_ai_investor_full.sh status"
   echo "  查看日志: tail -f logs/poller-$TODAY.log logs/notifier-$TODAY.log logs/l2_daemon-$TODAY.log logs/web-$TODAY.log"
-  echo "  停止服务: ./start_monitor.sh stop"
+  echo "  停止服务: ./start_ai_investor_full.sh stop"
 }
 
 do_stop() {
@@ -133,27 +170,39 @@ do_stop() {
 }
 
 do_status() {
-  if _is_running "$POLLER_PID"; then
-    echo "Poller  运行中  pid=$(_read_pid "$POLLER_PID")"
+  local wrapper_pid python_pid
+
+  # Poller
+  wrapper_pid=$(_read_pid "$POLLER_PID")
+  if _is_python_running "$POLLER_PID" "market_data_poller.py"; then
+    python_pid=$(_get_python_pid "$wrapper_pid")
+    echo "Poller  运行中  pid=$python_pid (wrapper=$wrapper_pid)"
   else
     echo "Poller  未运行"
     rm -f "$POLLER_PID"
   fi
 
-  if _is_running "$NOTIFIER_PID"; then
-    echo "Notifier 运行中  pid=$(_read_pid "$NOTIFIER_PID")"
+  # Notifier
+  wrapper_pid=$(_read_pid "$NOTIFIER_PID")
+  if _is_python_running "$NOTIFIER_PID" "stock_notifier.py"; then
+    python_pid=$(_get_python_pid "$wrapper_pid")
+    echo "Notifier 运行中  pid=$python_pid (wrapper=$wrapper_pid)"
   else
     echo "Notifier 未运行"
     rm -f "$NOTIFIER_PID"
   fi
 
-  if _is_running "$L2_DAEMON_PID"; then
-    echo "L2 Daemon 运行中  pid=$(_read_pid "$L2_DAEMON_PID")"
+  # L2 Daemon
+  wrapper_pid=$(_read_pid "$L2_DAEMON_PID")
+  if _is_python_running "$L2_DAEMON_PID" "l2_strategy_daemon.py"; then
+    python_pid=$(_get_python_pid "$wrapper_pid")
+    echo "L2 Daemon 运行中  pid=$python_pid (wrapper=$wrapper_pid)"
   else
     echo "L2 Daemon 未运行"
     rm -f "$L2_DAEMON_PID"
   fi
 
+  # Web
   if _is_running "$WEB_PID"; then
     echo "Web      运行中  pid=$(_read_pid "$WEB_PID")"
   else

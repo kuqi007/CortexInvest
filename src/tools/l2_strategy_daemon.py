@@ -61,8 +61,11 @@ def load_configs() -> tuple[dict, dict]:
     return monitor, l2_config
 
 
-def write_signals(new_signals: list[dict], session_snapshot: dict | None = None,
-                   indicators: dict | None = None):
+def write_signals(
+    new_signals: list[dict],
+    session_snapshot: dict | None = None,
+    indicators: dict | None = None,
+):
     """原子写入信号 + session 快照 + 指标快照到 l2_strategy_signals.json"""
     # 读已有数据
     existing = []
@@ -92,12 +95,17 @@ def write_signals(new_signals: list[dict], session_snapshot: dict | None = None,
     # 原子写入
     tmp = L2_SIGNALS_PATH.with_suffix(".tmp")
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({
-            "signals": existing,
-            "session": session,
-            "indicators": indicators if indicators else prev_indicators,
-            "lastUpdated": ts,
-        }, f, ensure_ascii=False, indent=2)
+        json.dump(
+            {
+                "signals": existing,
+                "session": session,
+                "indicators": indicators if indicators else prev_indicators,
+                "lastUpdated": ts,
+            },
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
     tmp.replace(L2_SIGNALS_PATH)
 
 
@@ -122,7 +130,8 @@ def run():
     watchlist = monitor_config.get("watchlist", {})
     has_hk = any(is_hk_symbol(s) for s in watchlist)
     hk_holdings = [
-        code for code, info in watchlist.items()
+        code
+        for code, info in watchlist.items()
         if code.startswith("HK")
         and info.get("type") == "holding"
         and not info.get("hidden", False)
@@ -135,9 +144,23 @@ def run():
     # ── Initialize engine ──
     engine = L2StrategyEngine(l2_config, watchlist)
 
+    # ── Leader election ──
+    from src.tools.monitor_lock import MonitorLock
+
+    lock = MonitorLock()
+    if not lock.try_acquire():
+        holder = lock.get_lock_holder()
+        if holder:
+            print(f"[L2] 锁被 {holder[0]} (pid={holder[1]}) 持有，退出")
+        else:
+            print("[L2] 锁被未知进程持有，退出")
+        return
+    print(f"[L2] 成功获取锁 {lock.machine_id}")
+
     # ── Initialize signal archiver (sim trading data collection) ──
     try:
         from src.sim_trading.signal_archiver import SignalArchiver
+
         archiver = SignalArchiver()
         archiver_enabled = True
     except Exception as e:
@@ -148,12 +171,14 @@ def run():
     # ── Initialize real-time sim engine (v2: pass daily_tracker + futu config) ──
     try:
         from src.sim_trading.realtime_engine import RealtimeSimEngine
+
         rt_rules_path = PROJECT_ROOT / "src" / "data" / "signal_rules.json"
         rt_rules = json.loads(rt_rules_path.read_text(encoding="utf-8"))
-        daily_tracker = getattr(engine, '_daily_indicators', None)
+        daily_tracker = getattr(engine, "_daily_indicators", None)
         futu_cfg = rt_rules.get("futu_trade", {})
         rt_engine = RealtimeSimEngine(
-            rt_rules, daily_tracker=daily_tracker,
+            rt_rules,
+            daily_tracker=daily_tracker,
             futu_trade=futu_cfg.get("enabled", False),
             futu_host=futu_cfg.get("host", "127.0.0.1"),
             futu_port=futu_cfg.get("port", 11111),
@@ -182,6 +207,7 @@ def run():
     total_signals = 0
     last_date = datetime.now().date()
     prev_save_date = None  # Track which date we last saved for daily_pnl
+    last_heartbeat = int(time.time())
 
     while running:
         # Daily reset
@@ -211,8 +237,10 @@ def run():
         if trading:
             signals, session = engine.poll_once()
             if signals or session:
-                daily_tracker = getattr(engine, '_daily_indicators', None)
-                ind_snapshot = daily_tracker.snapshot_indicators() if daily_tracker else {}
+                daily_tracker = getattr(engine, "_daily_indicators", None)
+                ind_snapshot = (
+                    daily_tracker.snapshot_indicators() if daily_tracker else {}
+                )
                 write_signals(signals, session, ind_snapshot)
                 total_signals += len(signals)
                 for s in signals:
@@ -220,7 +248,11 @@ def run():
 
             # Archive signals + price snapshots + session context to SQLite
             if archiver_enabled and archiver:
-                for _arch_fn in (archiver.archive_signals, archiver.sample_prices, archiver.snapshot_session):
+                for _arch_fn in (
+                    archiver.archive_signals,
+                    archiver.sample_prices,
+                    archiver.snapshot_session,
+                ):
                     try:
                         _arch_fn()
                     except Exception as _arch_err:
@@ -234,18 +266,31 @@ def run():
                     pass  # sim engine failure should not affect daemon
 
             # Status line
-            rt_pos = len(rt_engine._pos_mgr.positions) if rt_enabled and rt_engine else 0
+            rt_pos = (
+                len(rt_engine._pos_mgr.positions) if rt_enabled and rt_engine else 0
+            )
             now = datetime.now().strftime("%H:%M:%S")
             print(
                 f"\r\033[K[{now}] L2 daemon | signals: {total_signals} | sim: {rt_pos} pos | next: {poll_interval}s",
-                end="", flush=True,
+                end="",
+                flush=True,
             )
         else:
             now = datetime.now().strftime("%H:%M:%S")
             print(
                 f"\r\033[K[{now}] L2 daemon | non-trading | signals today: {total_signals} | next: {poll_interval}s",
-                end="", flush=True,
+                end="",
+                flush=True,
             )
+
+        # Heartbeat refresh
+        now = int(time.time())
+        if now - last_heartbeat >= 30:
+            if not lock.refresh_heartbeat():
+                print("[L2] 锁丢失，退出")
+                running = False
+                break
+            last_heartbeat = now
 
         # Sleep in small increments for responsive shutdown
         slept = 0.0
@@ -254,8 +299,11 @@ def run():
             slept += 0.5
 
     # ── Shutdown ──
+    lock.release()
     engine.close()
-    print(f"\n\nL2 Strategy Daemon stopped. Total signals today: {total_signals}")
+    print(
+        f"\n\nL2 Strategy Daemon stopped. Total signals today: {total_signals}, 锁已释放"
+    )
 
 
 if __name__ == "__main__":

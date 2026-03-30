@@ -15,4 +15,4 @@ fi
 source "$VENV_DIR/bin/activate"
 
 # 运行原启动脚本
-exec "$DIR/start_monitor.sh" "$@"
+exec "$DIR/start_ai_investor_full.sh" "$@"

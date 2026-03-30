@@ -769,6 +769,18 @@ def poll_once() -> bool:
 
 
 def main():
+    from src.tools.monitor_lock import MonitorLock, HEARTBEAT_INTERVAL
+
+    lock = MonitorLock()
+    if not lock.try_acquire():
+        holder = lock.get_lock_holder()
+        if holder:
+            print(f"[POLLER] 锁被 {holder[0]} (pid={holder[1]}) 持有，退出")
+        else:
+            print("[POLLER] 锁被未知进程持有，退出")
+        sys.exit(1)
+    print(f"[POLLER] 成功获取锁 {lock.machine_id}")
+
     watchlist, settings = load_watchlist_from_db()
     interval = settings.get("poll_interval", 30)
 
@@ -784,12 +796,19 @@ def main():
     try:
         while True:
             time.sleep(interval)
+            # 刷新锁
+            if not lock.refresh_heartbeat():
+                print("[POLLER] 锁丢失，退出")
+                break
             # 每轮重新读取 DB，这样 watchlist 变化能自动生效
             _, settings = load_watchlist_from_db()
             interval = settings.get("poll_interval", 30)
             poll_once()
     except KeyboardInterrupt:
         print("\nPoller 已停止")
+    finally:
+        lock.release()
+        print("[POLLER] 锁已释放")
 
 
 if __name__ == "__main__":

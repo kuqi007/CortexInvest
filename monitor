@@ -37,4 +37,4 @@ cd "$DIR"
 echo -e "${GREEN}✓ 使用虚拟环境: $VENV_DIR${NC}"
 
 # 执行原脚本
-exec "$DIR/start_monitor.sh" "$@"
+exec "$DIR/start_ai_investor_full.sh" "$@"
