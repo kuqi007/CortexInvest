@@ -78,9 +78,9 @@ def _load_amo_history_from_db(codes: list[str]) -> dict[str, list[float]]:
             FROM daily_kline
             WHERE code IN ({placeholders})
             ORDER BY date DESC
-            LIMIT 500
+            LIMIT ?
             """,
-            codes,
+            codes + [len(codes) * _AMO_DAYS_2],
         ).fetchall()
         conn.close()
 
@@ -142,7 +142,11 @@ _market_amo_12d: list[float] = []  # 最近12天每日两市合计成交额(元)
 
 
 def _load_market_amo_from_db() -> list[float]:
-    """从 SQLite 加载最近最多12天的大盘成交额历史，格式同 _market_amo_12d。"""
+    """从 SQLite 加载最近最多12天的大盘成交额历史。
+
+    Returns: [最新, 次新, ..., 最旧]，与 _amo_history 格式一致。
+    hist[0] = 最新（今日），hist[1:] = 历史，用于 AMO 计算。
+    """
     try:
         conn = sqlite3.connect(str(DB_PATH))
         rows = conn.execute(
@@ -151,8 +155,7 @@ def _load_market_amo_from_db() -> list[float]:
         conn.close()
         if not rows:
             return []
-        # 倒序（最旧的在前，最新的在后），与 _market_amo_12d 顺序一致
-        return [float(r[0]) for r in reversed(rows)]
+        return [float(r[0]) for r in rows]
     except Exception:
         return []
 
@@ -177,10 +180,10 @@ def _update_market_amo(total_yi: float):
     amount_yuan = total_yi * 1e8
     today_str = datetime.now().strftime("%Y-%m-%d")
     _save_market_amo_to_db(today_str, amount_yuan)
-    if not _market_amo_12d or _market_amo_12d[0] != amount_yuan:
-        _market_amo_12d.insert(0, amount_yuan)
-        if len(_market_amo_12d) > _AMO_DAYS_2:
-            _market_amo_12d = _market_amo_12d[:_AMO_DAYS_2]
+    if _market_amo_12d:
+        _market_amo_12d[0] = amount_yuan
+    else:
+        _market_amo_12d = [amount_yuan]
 
 
 def _get_market_amo1() -> float:
@@ -556,11 +559,10 @@ def poll_once() -> bool:
     """
     global _amo_history, _market_amo_history, _market_amo_12d
 
-    # 启动时从 SQLite 恢复大盘 AMO 历史（丢失会导致 AMO1/AMO2=1.0）
-    if not _market_amo_12d:
-        _market_amo_12d = _load_market_amo_from_db()
-        if _market_amo_12d:
-            logger.info(f"大盘AMO历史恢复: {len(_market_amo_12d)}天")
+    # 每轮从 DB 刷新大盘 AMO 历史，避免外部回填后内存缓存过期
+    _market_amo_12d = _load_market_amo_from_db()
+    if _market_amo_12d:
+        logger.debug(f"大盘AMO历史: {len(_market_amo_12d)}天")
 
     watchlist, settings = load_watchlist_from_db()
     symbols = list(watchlist.keys())
@@ -569,11 +571,10 @@ def poll_once() -> bool:
         logger.warning("watchlist 为空，跳过本轮")
         return False
 
-    # ── AMO 历史初始化（首次运行时从 DB 加载）──
+    # ── AMO 历史：每轮从 DB 刷新，避免 kline_fetcher 更新后内存缓存过期 ──
+    _amo_history = _load_amo_history_from_db(symbols)
     if not _amo_history:
-        _amo_history = _load_amo_history_from_db(symbols)
-        loaded = len(_amo_history)
-        logger.info(f"AMO历史加载: {loaded} 只股票，{_AMO_DAYS_2} 天历史")
+        logger.debug(f"AMO历史: DB 无数据，依赖盘中增量")
 
     # 分离 KR 股票（Yahoo Finance），其余走东方财富/新浪
     kr_symbols = [s for s in symbols if is_kr_symbol(s)]
