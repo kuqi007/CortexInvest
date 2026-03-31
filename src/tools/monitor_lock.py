@@ -88,6 +88,8 @@ class MonitorLock:
             return cursor.rowcount == 1
         except Exception as e:
             logger.warning(f"heartbeat refresh failed (DB busy), will retry: {e}")
+            # return True: OneDrive sync may cause transient DB lock,
+            # should not lose leadership. Next heartbeat cycle will retry.
             return True
 
     def release(self):

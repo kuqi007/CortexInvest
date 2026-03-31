@@ -34,6 +34,12 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+
+from dotenv import load_dotenv
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+load_dotenv(PROJECT_ROOT / ".env")
+from pathlib import Path
 from typing import Optional
 
 import requests
@@ -64,9 +70,9 @@ DEFAULT_SETTINGS = {
 }
 
 # ── 飞书配置 ──
-FEISHU_APP_ID = "cli_a93c2db9a4b89bef"
-FEISHU_APP_SECRET = "3tBNzFxifw9ekDSQgBFB0Cdwh1Rm3CwF"
-FEISHU_USER_OPEN_ID = "ou_553029ec877f28bdf3217b38bef62c8f"
+FEISHU_APP_ID = os.environ.get("FEISHU_APP_ID", "")
+FEISHU_APP_SECRET = os.environ.get("FEISHU_APP_SECRET", "")
+FEISHU_USER_OPEN_ID = os.environ.get("FEISHU_USER_OPEN_ID", "")
 _feishu_access_token: str | None = None
 _feishu_token_expires_at: float = 0
 
@@ -74,6 +80,7 @@ _feishu_token_expires_at: float = 0
 # ══════════════════════════════════════════
 # 1. 配置管理
 # ══════════════════════════════════════════
+
 
 def load_config() -> dict:
     """加载配置文件，不存在则用默认 AIDC watchlist 初始化"""
@@ -83,10 +90,7 @@ def load_config() -> dict:
 
     # 初始化默认配置
     config = {
-        "watchlist": {
-            code: {"name": name}
-            for code, name in AIDC_WATCHLIST.items()
-        },
+        "watchlist": {code: {"name": name} for code, name in AIDC_WATCHLIST.items()},
         "settings": DEFAULT_SETTINGS.copy(),
     }
     save_config(config)
@@ -122,6 +126,7 @@ def save_alerts(alerts: dict):
 # ══════════════════════════════════════════
 # 1b. 港股 / A股 识别工具
 # ══════════════════════════════════════════
+
 
 def is_hk_symbol(symbol: str) -> bool:
     """判断是否为港股代码（以 HK 开头，如 HK00700）"""
@@ -167,22 +172,24 @@ def fetch_realtime_yahoo(symbols: list[str]) -> list[dict]:
                 continue
             pct = round((price - prev) / prev * 100, 2) if prev else 0
             chg = round(price - prev, 2) if prev else 0
-            results.append({
-                "code": sym,
-                "name": meta.get("shortName", sym),
-                "price": price,
-                "pct": pct,
-                "change": chg,
-                "volume": meta.get("regularMarketVolume", 0),
-                "amount": 0,
-                "amplitude": 0,
-                "turnover": 0,
-                "vol_ratio": 0,
-                "high": meta.get("regularMarketDayHigh", price),
-                "low": meta.get("regularMarketDayLow", price),
-                "open": meta.get("regularMarketOpen", price),
-                "prev_close": prev,
-            })
+            results.append(
+                {
+                    "code": sym,
+                    "name": meta.get("shortName", sym),
+                    "price": price,
+                    "pct": pct,
+                    "change": chg,
+                    "volume": meta.get("regularMarketVolume", 0),
+                    "amount": 0,
+                    "amplitude": 0,
+                    "turnover": 0,
+                    "vol_ratio": 0,
+                    "high": meta.get("regularMarketDayHigh", price),
+                    "low": meta.get("regularMarketDayLow", price),
+                    "open": meta.get("regularMarketOpen", price),
+                    "prev_close": prev,
+                }
+            )
         except Exception as e:
             logger.debug(f"Yahoo Finance fetch({sym}) error: {e}")
     return results
@@ -359,22 +366,24 @@ def fetch_realtime_eastmoney(symbols: list[str]) -> list[dict]:
     for s in data["data"]["diff"]:
         raw_code = s.get("f12", "")
         code = code_map.get(raw_code, raw_code)
-        results.append({
-            "code": code,
-            "name": s.get("f14", ""),
-            "price": s.get("f2", 0),
-            "pct": s.get("f3", 0),
-            "change": s.get("f4", 0),
-            "volume": s.get("f5", 0),       # 成交量(手)
-            "amount": s.get("f6", 0),        # 成交额(元)
-            "amplitude": s.get("f7", 0),     # 振幅%
-            "turnover": s.get("f8", 0),      # 换手率%
-            "vol_ratio": s.get("f10", 0),    # 量比
-            "high": s.get("f15", 0),
-            "low": s.get("f16", 0),
-            "open": s.get("f17", 0),
-            "prev_close": s.get("f18", 0),
-        })
+        results.append(
+            {
+                "code": code,
+                "name": s.get("f14", ""),
+                "price": s.get("f2", 0),
+                "pct": s.get("f3", 0),
+                "change": s.get("f4", 0),
+                "volume": s.get("f5", 0),  # 成交量(手)
+                "amount": s.get("f6", 0),  # 成交额(元)
+                "amplitude": s.get("f7", 0),  # 振幅%
+                "turnover": s.get("f8", 0),  # 换手率%
+                "vol_ratio": s.get("f10", 0),  # 量比
+                "high": s.get("f15", 0),
+                "low": s.get("f16", 0),
+                "open": s.get("f17", 0),
+                "prev_close": s.get("f18", 0),
+            }
+        )
 
     return results
 
@@ -382,6 +391,7 @@ def fetch_realtime_eastmoney(symbols: list[str]) -> list[dict]:
 # ══════════════════════════════════════════
 # 2c. 实时行情看板（rich 表格）
 # ══════════════════════════════════════════
+
 
 def _render_realtime_board(stocks: list[dict], tick: int, watchlist: dict = None):
     """用 rich 渲染实时行情表格，持仓股显示盈亏"""
@@ -397,14 +407,16 @@ def _render_realtime_board(stocks: list[dict], tick: int, watchlist: dict = None
 
     # 检查是否有持仓
     has_holdings = any(
-        watchlist.get(s.get("code", ""), {}).get("type") == "holding"
-        for s in stocks
+        watchlist.get(s.get("code", ""), {}).get("type") == "holding" for s in stocks
     )
 
     console_width = console.width or 120
     table = Table(
-        title=title, show_lines=True, title_style="bold cyan",
-        width=min(console_width, 150), expand=True,
+        title=title,
+        show_lines=True,
+        title_style="bold cyan",
+        width=min(console_width, 150),
+        expand=True,
     )
     table.add_column("", min_width=2, no_wrap=True)  # 持仓/自选标记
     table.add_column("代码", style="bold", min_width=6, no_wrap=True)
@@ -473,7 +485,9 @@ def _render_realtime_board(stocks: list[dict], tick: int, watchlist: dict = None
             if is_hold and cost and cost > 0 and price > 0:
                 pnl_pct = (price - cost) / cost * 100
                 pnl_sign = "+" if pnl_pct >= 0 else ""
-                pnl_style = "bold red" if pnl_pct > 0 else "bold green" if pnl_pct < 0 else ""
+                pnl_style = (
+                    "bold red" if pnl_pct > 0 else "bold green" if pnl_pct < 0 else ""
+                )
                 pnl_text = Text(f"{pnl_sign}{pnl_pct:.1f}%", style=pnl_style)
             else:
                 pnl_text = Text("-", style="dim")
@@ -488,15 +502,17 @@ def _render_realtime_board(stocks: list[dict], tick: int, watchlist: dict = None
         ]
         if has_holdings:
             row.append(pnl_text)
-        row.extend([
-            vr_text,
-            tr_text,
-            f"{s.get('amplitude', 0):.2f}",
-            f"{s.get('volume', 0):,}",
-            f"{amt_wan:,.0f}",
-            f"{s.get('high', 0):.2f}",
-            f"{s.get('low', 0):.2f}",
-        ])
+        row.extend(
+            [
+                vr_text,
+                tr_text,
+                f"{s.get('amplitude', 0):.2f}",
+                f"{s.get('volume', 0):,}",
+                f"{amt_wan:,.0f}",
+                f"{s.get('high', 0):.2f}",
+                f"{s.get('low', 0):.2f}",
+            ]
+        )
         table.add_row(*row)
 
     # 汇总行
@@ -628,14 +644,18 @@ def _fetch_klines_a(symbol: str, days: int) -> list[float]:
         prefix = get_stock_prefix(symbol)
         params = {
             "symbol": f"{prefix}{symbol}",
-            "scale": "240", "ma": "no",
+            "scale": "240",
+            "ma": "no",
             "datalen": str(days),
         }
         resp = requests.get(
-            SINA_KLINE_URL, params=params,
-            headers=SINA_HEADERS, timeout=10,
+            SINA_KLINE_URL,
+            params=params,
+            headers=SINA_HEADERS,
+            timeout=10,
         )
         import json as _json
+
         data = _json.loads(resp.text)
         if data and len(data) > 0:
             return [float(d["close"]) for d in data]
@@ -648,8 +668,10 @@ def _fetch_klines_a(symbol: str, days: int) -> list[float]:
         "secid": secid,
         "fields1": "f1,f2,f3,f4,f5,f6",
         "fields2": "f51,f52,f53,f54,f55,f56,f57",
-        "klt": "101", "fqt": "1",
-        "end": "20500101", "lmt": str(days),
+        "klt": "101",
+        "fqt": "1",
+        "end": "20500101",
+        "lmt": str(days),
         "ut": EM_UT,
     }
     for attempt in range(2):
@@ -687,13 +709,14 @@ class TechnicalSignalEngine:
 
     def __init__(self, symbols: list[str], watchlist: dict):
         self.watchlist = watchlist
-        self.history: dict[str, list[float]] = {}   # {code: [close1, close2, ...]}
+        self.history: dict[str, list[float]] = {}  # {code: [close1, close2, ...]}
         self.prev_state: dict[str, dict] = {}
         self.cooldowns: dict[str, float] = {}
 
     def load_history(self):
         """启动时批量加载历史K线（约 0.3s × 股票数）"""
         from rich.console import Console
+
         console = Console()
         total = len(self.watchlist)
         for i, (sym, info) in enumerate(self.watchlist.items(), 1):
@@ -791,32 +814,48 @@ class TechnicalSignalEngine:
                 k = f"{code}_golden"
                 if self._cooled(k):
                     self._fire(k)
-                    alerts.append({"title": f"📊 {name} 均线金叉",
-                                   "message": f"{name}({code}) MA5上穿MA10，现价 {price:.2f}"})
+                    alerts.append(
+                        {
+                            "title": f"📊 {name} 均线金叉",
+                            "message": f"{name}({code}) MA5上穿MA10，现价 {price:.2f}",
+                        }
+                    )
 
             # 2) 均线死叉
             if old.get("ma5_above_ma10") is True and new.get("ma5_above_ma10") is False:
                 k = f"{code}_death"
                 if self._cooled(k):
                     self._fire(k)
-                    alerts.append({"title": f"📊 {name} 均线死叉",
-                                   "message": f"{name}({code}) MA5下穿MA10，现价 {price:.2f}"})
+                    alerts.append(
+                        {
+                            "title": f"📊 {name} 均线死叉",
+                            "message": f"{name}({code}) MA5下穿MA10，现价 {price:.2f}",
+                        }
+                    )
 
             # 3) MACD 翻红
             if old.get("macd_pos") is False and new.get("macd_pos") is True:
                 k = f"{code}_macd_bull"
                 if self._cooled(k):
                     self._fire(k)
-                    alerts.append({"title": f"📊 {name} MACD翻红",
-                                   "message": f"{name}({code}) MACD柱转正，现价 {price:.2f}"})
+                    alerts.append(
+                        {
+                            "title": f"📊 {name} MACD翻红",
+                            "message": f"{name}({code}) MACD柱转正，现价 {price:.2f}",
+                        }
+                    )
 
             # 4) MACD 翻绿
             if old.get("macd_pos") is True and new.get("macd_pos") is False:
                 k = f"{code}_macd_bear"
                 if self._cooled(k):
                     self._fire(k)
-                    alerts.append({"title": f"📊 {name} MACD翻绿",
-                                   "message": f"{name}({code}) MACD柱转负，现价 {price:.2f}"})
+                    alerts.append(
+                        {
+                            "title": f"📊 {name} MACD翻绿",
+                            "message": f"{name}({code}) MACD柱转负，现价 {price:.2f}",
+                        }
+                    )
 
             # 5) RSI 超买
             if old.get("rsi_ob") is False and new.get("rsi_ob") is True:
@@ -824,8 +863,12 @@ class TechnicalSignalEngine:
                 if self._cooled(k):
                     self._fire(k)
                     rsi = new.get("rsi", 0)
-                    alerts.append({"title": f"⚠️ {name} RSI超买",
-                                   "message": f"{name}({code}) RSI={rsi:.0f}>70，现价 {price:.2f}"})
+                    alerts.append(
+                        {
+                            "title": f"⚠️ {name} RSI超买",
+                            "message": f"{name}({code}) RSI={rsi:.0f}>70，现价 {price:.2f}",
+                        }
+                    )
 
             # 6) RSI 超卖
             if old.get("rsi_os") is False and new.get("rsi_os") is True:
@@ -833,16 +876,24 @@ class TechnicalSignalEngine:
                 if self._cooled(k):
                     self._fire(k)
                     rsi = new.get("rsi", 0)
-                    alerts.append({"title": f"💡 {name} RSI超卖",
-                                   "message": f"{name}({code}) RSI={rsi:.0f}<30，现价 {price:.2f}"})
+                    alerts.append(
+                        {
+                            "title": f"💡 {name} RSI超卖",
+                            "message": f"{name}({code}) RSI={rsi:.0f}<30，现价 {price:.2f}",
+                        }
+                    )
 
             # 7) 放量突破
             if vol_ratio >= 2.0 and pct >= 2.0:
                 k = f"{code}_vol_break"
                 if self._cooled(k):
                     self._fire(k)
-                    alerts.append({"title": f"🔥 {name} 放量突破",
-                                   "message": f"{name}({code}) 量比{vol_ratio:.1f} 涨{pct:+.1f}%，现价 {price:.2f}"})
+                    alerts.append(
+                        {
+                            "title": f"🔥 {name} 放量突破",
+                            "message": f"{name}({code}) 量比{vol_ratio:.1f} 涨{pct:+.1f}%，现价 {price:.2f}",
+                        }
+                    )
 
             self.prev_state[code] = new
 
@@ -888,14 +939,27 @@ def notify(
     # 方式1: terminal-notifier（点击跳转 web dashboard）
     try:
         result = subprocess.run(
-            ["which", "terminal-notifier"], capture_output=True, timeout=3,
+            ["which", "terminal-notifier"],
+            capture_output=True,
+            timeout=3,
         )
         if result.returncode == 0:
             subprocess.run(
-                ["terminal-notifier", "-title", title, "-message", message,
-                 "-sound", sound, "-group", group,
-                 "-open", WEB_DASHBOARD_URL],
-                capture_output=True, timeout=5,
+                [
+                    "terminal-notifier",
+                    "-title",
+                    title,
+                    "-message",
+                    message,
+                    "-sound",
+                    sound,
+                    "-group",
+                    group,
+                    "-open",
+                    WEB_DASHBOARD_URL,
+                ],
+                capture_output=True,
+                timeout=5,
             )
             logger.info(f"通知已发送(terminal-notifier): [{title}] {message}")
             return
@@ -906,7 +970,9 @@ def notify(
     try:
         script = f'display notification "{safe_msg}" with title "{safe_title}" sound name "{sound}"'
         result = subprocess.run(
-            ["osascript", "-e", script], capture_output=True, timeout=5,
+            ["osascript", "-e", script],
+            capture_output=True,
+            timeout=5,
         )
         if result.returncode == 0:
             logger.info(f"通知已发送(osascript): [{title}] {message}")
@@ -918,7 +984,9 @@ def notify(
     try:
         script = f'display dialog "{safe_msg}" with title "{safe_title}" buttons {{"OK"}} giving up after 5'
         subprocess.run(
-            ["osascript", "-e", script], capture_output=True, timeout=8,
+            ["osascript", "-e", script],
+            capture_output=True,
+            timeout=8,
         )
         logger.info(f"通知已发送(dialog): [{title}] {message}")
     except Exception as e:
@@ -926,7 +994,9 @@ def notify(
 
     # 飞书通知（并行，不阻塞 macOS 通知）
     try:
-        feishu_send(title, message, change_pct=change_pct, level=level, stock_info=stock_info)
+        feishu_send(
+            title, message, change_pct=change_pct, level=level, stock_info=stock_info
+        )
     except Exception as e:
         logger.warning(f"飞书通知发送失败（不影响主流程）: {e}")
 
@@ -935,6 +1005,7 @@ def notify(
 # 3. 飞书通知
 # ══════════════════════════════════════════
 
+
 def feishu_get_token() -> str | None:
     """获取飞书 access token，带缓存（有效期 2 小时）"""
     global _feishu_access_token, _feishu_token_expires_at
@@ -942,10 +1013,14 @@ def feishu_get_token() -> str | None:
         return _feishu_access_token
     url = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
     try:
-        resp = requests.post(url, json={
-            "app_id": FEISHU_APP_ID,
-            "app_secret": FEISHU_APP_SECRET,
-        }, timeout=10)
+        resp = requests.post(
+            url,
+            json={
+                "app_id": FEISHU_APP_ID,
+                "app_secret": FEISHU_APP_SECRET,
+            },
+            timeout=10,
+        )
         resp.raise_for_status()
         data = resp.json()
         if data.get("code") != 0:
@@ -991,14 +1066,18 @@ def feishu_send(
     # 结构化股票信息
     if stock_info:
         # 📌 提醒
-        elements.append({
-            "tag": "div",
-            "text": {"tag": "lark_md", "content": "**📌 提醒**"},
-        })
-        elements.append({
-            "tag": "div",
-            "text": {"tag": "lark_md", "content": "您关注的股票出现价格异动："},
-        })
+        elements.append(
+            {
+                "tag": "div",
+                "text": {"tag": "lark_md", "content": "**📌 提醒**"},
+            }
+        )
+        elements.append(
+            {
+                "tag": "div",
+                "text": {"tag": "lark_md", "content": "您关注的股票出现价格异动："},
+            }
+        )
 
         # 股票名 + 代码
         name = stock_info.get("name", "")
@@ -1018,34 +1097,46 @@ def feishu_send(
 
         # 时间
         ts = stock_info.get("time") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        elements.append({
-            "tag": "div",
-            "text": {"tag": "lark_md", "content": f"时间：{ts}"},
-        })
+        elements.append(
+            {
+                "tag": "div",
+                "text": {"tag": "lark_md", "content": f"时间：{ts}"},
+            }
+        )
     else:
         # 兜底：直接显示 message
         for line in message.split("\n"):
             if line.strip():
-                elements.append({"tag": "div", "text": {"tag": "lark_md", "content": line}})
+                elements.append(
+                    {"tag": "div", "text": {"tag": "lark_md", "content": line}}
+                )
 
     elements.append({"tag": "hr"})
 
     # 查看详情按钮
-    elements.append({
-        "tag": "action",
-        "actions": [{
-            "tag": "button",
-            "text": {"tag": "plain_text", "content": "查看详情 >>"},
-            "type": "primary",
-            "url": "http://localhost:3120/alerts",
-        }],
-    })
+    elements.append(
+        {
+            "tag": "action",
+            "actions": [
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "查看详情 >>"},
+                    "type": "primary",
+                    "url": "http://localhost:3120/alerts",
+                }
+            ],
+        }
+    )
 
     # 底部勿回复
-    elements.append({
-        "tag": "note",
-        "elements": [{"tag": "plain_text", "content": "此消息由系统自动发送，请勿直接回复。"}],
-    })
+    elements.append(
+        {
+            "tag": "note",
+            "elements": [
+                {"tag": "plain_text", "content": "此消息由系统自动发送，请勿直接回复。"}
+            ],
+        }
+    )
 
     card_content = {
         "config": {"wide_screen_mode": True},
@@ -1069,7 +1160,9 @@ def feishu_send(
     }
 
     try:
-        resp = requests.post(url, params=params, headers=headers, json=payload, timeout=10)
+        resp = requests.post(
+            url, params=params, headers=headers, json=payload, timeout=10
+        )
         resp.raise_for_status()
         result = resp.json()
         if result.get("code") != 0:
@@ -1085,6 +1178,7 @@ def feishu_send(
 # ══════════════════════════════════════════
 # 4. 告警引擎
 # ══════════════════════════════════════════
+
 
 class AlertEngine:
     """告警检测引擎，支持价格阈值告警和大涨大跌自动告警"""
@@ -1129,12 +1223,14 @@ class AlertEngine:
                 key = f"{symbol}_above_{above}"
                 if self._is_cooled_down(key):
                     self._trigger(key)
-                    alerts.append({
-                        "symbol": symbol,
-                        "name": name,
-                        "title": f"📈 {name} 突破上限",
-                        "message": f"{name}({symbol}) 当前 {price:.2f}，已突破设定上限 {above}",
-                    })
+                    alerts.append(
+                        {
+                            "symbol": symbol,
+                            "name": name,
+                            "title": f"📈 {name} 突破上限",
+                            "message": f"{name}({symbol}) 当前 {price:.2f}，已突破设定上限 {above}",
+                        }
+                    )
 
             # ── 用户自定义价格下限告警 ──
             below = alert_entry.get("below")
@@ -1142,36 +1238,42 @@ class AlertEngine:
                 key = f"{symbol}_below_{below}"
                 if self._is_cooled_down(key):
                     self._trigger(key)
-                    alerts.append({
-                        "symbol": symbol,
-                        "name": name,
-                        "title": f"📉 {name} 跌破下限",
-                        "message": f"{name}({symbol}) 当前 {price:.2f}，已跌破设定下限 {below}",
-                    })
+                    alerts.append(
+                        {
+                            "symbol": symbol,
+                            "name": name,
+                            "title": f"📉 {name} 跌破下限",
+                            "message": f"{name}({symbol}) 当前 {price:.2f}，已跌破设定下限 {below}",
+                        }
+                    )
 
             # ── 大涨自动告警 ──
             if change_pct >= big_move_pct:
                 key = f"{symbol}_big_up"
                 if self._is_cooled_down(key):
                     self._trigger(key)
-                    alerts.append({
-                        "symbol": symbol,
-                        "name": name,
-                        "title": f"🔥 {name} 大涨 +{change_pct:.1f}%",
-                        "message": f"{name}({symbol}) 当前 {price:.2f}，涨幅 +{change_pct:.1f}%",
-                    })
+                    alerts.append(
+                        {
+                            "symbol": symbol,
+                            "name": name,
+                            "title": f"🔥 {name} 大涨 +{change_pct:.1f}%",
+                            "message": f"{name}({symbol}) 当前 {price:.2f}，涨幅 +{change_pct:.1f}%",
+                        }
+                    )
 
             # ── 大跌自动告警 ──
             if change_pct <= -big_move_pct:
                 key = f"{symbol}_big_down"
                 if self._is_cooled_down(key):
                     self._trigger(key)
-                    alerts.append({
-                        "symbol": symbol,
-                        "name": name,
-                        "title": f"⚠️ {name} 大跌 {change_pct:.1f}%",
-                        "message": f"{name}({symbol}) 当前 {price:.2f}，跌幅 {change_pct:.1f}%",
-                    })
+                    alerts.append(
+                        {
+                            "symbol": symbol,
+                            "name": name,
+                            "title": f"⚠️ {name} 大跌 {change_pct:.1f}%",
+                            "message": f"{name}({symbol}) 当前 {price:.2f}，跌幅 {change_pct:.1f}%",
+                        }
+                    )
 
         return alerts
 
@@ -1179,6 +1281,7 @@ class AlertEngine:
 # ══════════════════════════════════════════
 # 5. 交易时段检测
 # ══════════════════════════════════════════
+
 
 def is_trading_hours() -> bool:
     """判断当前是否在 A 股交易时段（周一至周五 9:30-11:30, 13:00-15:00）"""
@@ -1193,6 +1296,7 @@ def is_trading_hours() -> bool:
 # ══════════════════════════════════════════
 # 6. 终端状态显示
 # ══════════════════════════════════════════
+
 
 def print_status_line(quotes: dict):
     """在终端打印一行简要行情状态"""
@@ -1211,6 +1315,7 @@ def print_status_line(quotes: dict):
 # 7. 监控主循环
 # ══════════════════════════════════════════
 
+
 def monitor_loop(config: dict):
     """主监控循环"""
     interval = config["settings"]["poll_interval"]
@@ -1221,12 +1326,12 @@ def monitor_loop(config: dict):
         print("❌ watchlist 为空，请先添加股票")
         return
 
-    stock_names = ", ".join(
-        f'{s}({config["watchlist"][s]["name"]})' for s in symbols
-    )
+    stock_names = ", ".join(f"{s}({config['watchlist'][s]['name']})" for s in symbols)
     print(f"🔍 开始监控 {len(symbols)} 只股票: {stock_names}")
-    print(f"⚙️  轮询间隔: {interval}s | 大涨大跌阈值: ±{config['settings']['big_move_pct']}%"
-          f" | 冷却: {config['settings']['cooldown_minutes']}min")
+    print(
+        f"⚙️  轮询间隔: {interval}s | 大涨大跌阈值: ±{config['settings']['big_move_pct']}%"
+        f" | 冷却: {config['settings']['cooldown_minutes']}min"
+    )
     print(f"📋 交易时段: 9:30-11:30, 13:00-15:00 (非交易时段自动休眠)")
     print(f"按 Ctrl+C 退出\n")
 
@@ -1264,6 +1369,7 @@ def monitor_loop(config: dict):
 # 8. CLI
 # ══════════════════════════════════════════
 
+
 def cmd_add(args, config: dict):
     """添加或更新股票提醒"""
     symbol = args.add.upper() if args.add.upper().startswith("HK") else args.add
@@ -1277,7 +1383,8 @@ def cmd_add(args, config: dict):
         config["watchlist"][symbol] = {
             "name": name,
             "type": "holding" if args.holding else "watching",
-            "cost": None, "shares": None,
+            "cost": None,
+            "shares": None,
         }
 
     if args.holding:
@@ -1349,8 +1456,10 @@ def cmd_list(config: dict):
 
     if holdings:
         print(f"💰 持仓列表 ({len(holdings)} 只):")
-        print(f"   {'代码':<10} {'名称':<12} {'成本':>8} {'持仓量':>8} {'上限':>8} {'下限':>8}")
-        print(f"   {'─'*10} {'─'*12} {'─'*8} {'─'*8} {'─'*8} {'─'*8}")
+        print(
+            f"   {'代码':<10} {'名称':<12} {'成本':>8} {'持仓量':>8} {'上限':>8} {'下限':>8}"
+        )
+        print(f"   {'─' * 10} {'─' * 12} {'─' * 8} {'─' * 8} {'─' * 8} {'─' * 8}")
         for symbol, entry in holdings.items():
             name = entry["name"]
             ae = alert_rules.get(symbol, {})
@@ -1358,13 +1467,15 @@ def cmd_list(config: dict):
             shares_str = f"{entry['shares']}" if entry.get("shares") else "-"
             above_str = f"{ae['above']}" if ae.get("above") is not None else "-"
             below_str = f"{ae['below']}" if ae.get("below") is not None else "-"
-            print(f"   {symbol:<10} {name:<12} {cost_str:>8} {shares_str:>8} {above_str:>8} {below_str:>8}")
+            print(
+                f"   {symbol:<10} {name:<12} {cost_str:>8} {shares_str:>8} {above_str:>8} {below_str:>8}"
+            )
         print()
 
     if watching:
         print(f"👀 自选列表 ({len(watching)} 只):")
         print(f"   {'代码':<10} {'名称':<12} {'上限':>8} {'下限':>8}")
-        print(f"   {'─'*10} {'─'*12} {'─'*8} {'─'*8}")
+        print(f"   {'─' * 10} {'─' * 12} {'─' * 8} {'─' * 8}")
         for symbol, entry in watching.items():
             name = entry["name"]
             ae = alert_rules.get(symbol, {})
@@ -1388,16 +1499,25 @@ def main():
         """,
     )
 
-    parser.add_argument("--add", metavar="SYMBOL", help="添加/更新股票（默认自选，配合 --holding 设为持仓）")
-    parser.add_argument("--holding", action="store_true", help="标记为持仓 (配合 --add)")
+    parser.add_argument(
+        "--add",
+        metavar="SYMBOL",
+        help="添加/更新股票（默认自选，配合 --holding 设为持仓）",
+    )
+    parser.add_argument(
+        "--holding", action="store_true", help="标记为持仓 (配合 --add)"
+    )
     parser.add_argument("--cost", type=float, help="持仓成本价 (配合 --add --holding)")
     parser.add_argument("--shares", type=int, help="持仓数量 (配合 --add --holding)")
     parser.add_argument("--above", type=float, help="价格上限告警 (配合 --add)")
     parser.add_argument("--below", type=float, help="价格下限告警 (配合 --add)")
     parser.add_argument("--remove", metavar="SYMBOL", help="删除股票提醒")
     parser.add_argument("--list", action="store_true", help="查看当前所有提醒设置")
-    parser.add_argument("--realtime", action="store_true",
-                        help="实时行情看板（含量比/换手率，默认60s刷新）")
+    parser.add_argument(
+        "--realtime",
+        action="store_true",
+        help="实时行情看板（含量比/换手率，默认60s刷新）",
+    )
     parser.add_argument("--interval", type=int, help="轮询间隔（秒）")
     parser.add_argument("--threshold", type=float, help="大涨大跌阈值（%%）")
 

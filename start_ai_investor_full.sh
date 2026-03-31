@@ -81,7 +81,11 @@ _stop_one() {
   local pidfile=$1 label=$2 pattern=$3
   local pid=$(_read_pid "$pidfile")
   if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-    # 杀进程组（uv run → python 子进程一起杀）
+    # 先杀 Python 子进程（uv run → python），再杀 wrapper
+    local child_pid=$(pgrep -P "$pid" 2>/dev/null | head -1)
+    if [ -n "$child_pid" ]; then
+      kill "$child_pid" 2>/dev/null || true
+    fi
     kill -- -"$pid" 2>/dev/null || kill "$pid" 2>/dev/null
     echo "$label 已停止 (pid=$pid)"
   fi
