@@ -155,7 +155,7 @@ def run():
         else:
             print("[L2] 锁被未知进程持有，退出")
         return
-    print(f"[L2] 成功获取锁 {lock.machine_id}")
+    print(f"[L2] 成功获取锁 {lock.hostname}")
 
     # ── Initialize signal archiver (sim trading data collection) ──
     try:
@@ -299,11 +299,8 @@ def run():
             slept += 0.5
 
     # ── Shutdown ──
-    lock.release()
     engine.close()
-    print(
-        f"\n\nL2 Strategy Daemon stopped. Total signals today: {total_signals}, 锁已释放"
-    )
+    print(f"\n\nL2 Strategy Daemon stopped. Total signals today: {total_signals}")
 
 
 if __name__ == "__main__":

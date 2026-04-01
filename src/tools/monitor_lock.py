@@ -2,17 +2,19 @@
 """
 Leader election for monitor scripts via SQLite.
 
-抢锁流程：
-1. 启动时删除所有超时锁
-2. INSERT OR IGNORE 原子抢锁
-3. 抢到 → 成为 leader，每 30s 更新 heartbeat
-4. 未抢到 → 退出或只读
+设计：
+- 一把锁 (monitor_lock) 代表一台机器
+- 同一台机器上的 Poller/Notifier/L2 共享锁，都可以运行
+- 不同机器互斥：只有一台机器能成为 leader
+- 同机器的进程心跳刷新同一行（保持锁活跃）
+- 退出时不释放锁（让心跳超时自动过期），避免影响同机器其他进程
 """
 
 import atexit
 import logging
 import os
 import socket
+import sqlite3
 import sys
 import time
 from pathlib import Path
@@ -29,8 +31,8 @@ HEARTBEAT_INTERVAL = 30
 HEARTBEAT_TIMEOUT = 180
 
 
-def _machine_id() -> str:
-    return f"{socket.gethostname()}-{os.getpid()}"
+def _hostname() -> str:
+    return socket.gethostname()
 
 
 def _ensure_table():
@@ -39,7 +41,7 @@ def _ensure_table():
     conn.execute("""
         CREATE TABLE IF NOT EXISTS leader_election (
             lock_name TEXT PRIMARY KEY,
-            machine_id TEXT NOT NULL,
+            hostname  TEXT NOT NULL,
             pid INTEGER NOT NULL,
             heartbeat INTEGER NOT NULL
         )
@@ -49,7 +51,7 @@ def _ensure_table():
 class MonitorLock:
     def __init__(self):
         _ensure_table()
-        self.machine_id = _machine_id()
+        self.hostname = _hostname()
         self.pid = os.getpid()
         self.is_leader = False
 
@@ -57,20 +59,47 @@ class MonitorLock:
         now = int(time.time())
         try:
             conn = get_connection()
-            with conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
                 conn.execute(
                     "DELETE FROM leader_election WHERE heartbeat < ?",
                     (now - HEARTBEAT_TIMEOUT,),
                 )
-                cursor = conn.execute(
-                    """INSERT OR IGNORE INTO leader_election 
-                       (lock_name, machine_id, pid, heartbeat) 
-                       VALUES (?, ?, ?, ?)""",
-                    (LOCK_NAME, self.machine_id, self.pid, now),
-                )
-                acquired = cursor.rowcount == 1
-            self.is_leader = acquired
-            return acquired
+
+                row = conn.execute(
+                    "SELECT hostname FROM leader_election WHERE lock_name = ?",
+                    (LOCK_NAME,),
+                ).fetchone()
+
+                if row:
+                    if row["hostname"] == self.hostname:
+                        conn.execute(
+                            "UPDATE leader_election SET heartbeat=? WHERE lock_name=?",
+                            (now, LOCK_NAME),
+                        )
+                        conn.execute("COMMIT")
+                        self.is_leader = True
+                        return True
+                    else:
+                        conn.execute("COMMIT")
+                        self.is_leader = False
+                        return False
+
+                try:
+                    conn.execute(
+                        "INSERT INTO leader_election (lock_name, hostname, pid, heartbeat) VALUES (?,?,?,?)",
+                        (LOCK_NAME, self.hostname, self.pid, now),
+                    )
+                    conn.execute("COMMIT")
+                    self.is_leader = True
+                    return True
+                except sqlite3.IntegrityError:
+                    conn.execute("ROLLBACK")
+                    self.is_leader = False
+                    return False
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
         except Exception as e:
             logger.warning(f"try_acquire failed: {e}")
             return False
@@ -80,73 +109,52 @@ class MonitorLock:
         try:
             conn = get_connection()
             cursor = conn.execute(
-                """UPDATE leader_election 
-                   SET heartbeat = ? 
-                   WHERE lock_name = ? AND machine_id = ? AND pid = ?""",
-                (now, LOCK_NAME, self.machine_id, self.pid),
+                "UPDATE leader_election SET heartbeat=? WHERE lock_name=? AND hostname=?",
+                (now, LOCK_NAME, self.hostname),
             )
-            return cursor.rowcount == 1
+            if cursor.rowcount == 1:
+                return True
+            return self.try_acquire()
         except Exception as e:
             logger.warning(f"heartbeat refresh failed (DB busy), will retry: {e}")
-            # return True: OneDrive sync may cause transient DB lock,
-            # should not lose leadership. Next heartbeat cycle will retry.
             return True
-
-    def release(self):
-        try:
-            conn = get_connection()
-            conn.execute(
-                "DELETE FROM leader_election WHERE machine_id = ? AND pid = ?",
-                (self.machine_id, self.pid),
-            )
-        except Exception as e:
-            logger.warning(f"lock release failed: {e}")
 
     def get_lock_holder(self) -> tuple[str, int] | None:
         now = int(time.time())
         try:
             conn = get_connection()
             row = conn.execute(
-                """SELECT machine_id, pid, heartbeat FROM leader_election 
-                   WHERE lock_name = ? AND heartbeat >= ?""",
+                "SELECT hostname, pid, heartbeat FROM leader_election WHERE lock_name=? AND heartbeat >= ?",
                 (LOCK_NAME, now - HEARTBEAT_TIMEOUT),
             ).fetchone()
             if row:
-                return (row["machine_id"], row["pid"])
+                return (row["hostname"], row["pid"])
             return None
         except Exception as e:
             logger.warning(f"get_lock_holder failed: {e}")
             return None
 
+    def release(self):
+        pass
 
-def run_with_lock():
+
+if __name__ == "__main__":
     lock = MonitorLock()
     if not lock.try_acquire():
         holder = lock.get_lock_holder()
         if holder:
-            print(f"Monitor locked by {holder[0]} (pid={holder[1]}), exiting")
+            print(f"Lock held by {holder[0]} (pid={holder[1]}), exiting")
         else:
-            print("Monitor locked by unknown holder, exiting")
-        return False
-    atexit.register(lock.release)
-    print(f"Acquired lock as {lock.machine_id}")
-    return lock
-
-
-if __name__ == "__main__":
-    result = run_with_lock()
-    if result:
-        lock = result
-        print("Lock acquired. Press Ctrl+C to exit.")
-        try:
-            while True:
-                time.sleep(HEARTBEAT_INTERVAL)
-                if not lock.refresh_heartbeat():
-                    print("Lost lock, exiting")
-                    break
-                print(f"Heartbeat OK at {time.strftime('%H:%M:%S')}")
-        except KeyboardInterrupt:
-            print("Exiting...")
-        finally:
-            lock.release()
-            print("Lock released")
+            print("Lock held by unknown holder, exiting")
+        sys.exit(1)
+    print(f"Acquired lock as {lock.hostname} (pid={lock.pid})")
+    print("Press Ctrl+C to exit.")
+    try:
+        while True:
+            time.sleep(HEARTBEAT_INTERVAL)
+            if not lock.refresh_heartbeat():
+                print("Lost lock, exiting")
+                break
+            print(f"Heartbeat OK at {time.strftime('%H:%M:%S')}")
+    except KeyboardInterrupt:
+        print("Exiting...")

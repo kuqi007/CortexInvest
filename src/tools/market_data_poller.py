@@ -780,7 +780,7 @@ def main():
         else:
             print("[POLLER] 锁被未知进程持有，退出")
         sys.exit(1)
-    print(f"[POLLER] 成功获取锁 {lock.machine_id}")
+    print(f"[POLLER] 成功获取锁 {lock.hostname}")
 
     watchlist, settings = load_watchlist_from_db()
     interval = settings.get("poll_interval", 30)
@@ -807,9 +807,6 @@ def main():
             poll_once()
     except KeyboardInterrupt:
         print("\nPoller 已停止")
-    finally:
-        lock.release()
-        print("[POLLER] 锁已释放")
 
 
 if __name__ == "__main__":

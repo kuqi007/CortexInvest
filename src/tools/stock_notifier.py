@@ -2620,7 +2620,7 @@ def run():
         else:
             print("[NOTIFIER] 锁被未知进程持有，退出")
         sys.exit(1)
-    print(f"[NOTIFIER] 成功获取锁 {lock.machine_id}")
+    print(f"[NOTIFIER] 成功获取锁 {lock.hostname}")
 
     # ── State ──
     last_mtime = 0.0
@@ -2928,8 +2928,7 @@ def run():
             slept += 0.5
 
     # ── Shutdown ──
-    lock.release()
-    print(f"\n\nNotifier stopped. Total alerts today: {daily_alerts}, 锁已释放")
+    print(f"\n\nNotifier stopped. Total alerts today: {daily_alerts}")
 
 
 if __name__ == "__main__":
