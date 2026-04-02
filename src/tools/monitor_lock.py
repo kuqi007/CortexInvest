@@ -30,6 +30,11 @@ LOCK_NAME = "monitor_lock"
 HEARTBEAT_INTERVAL = 30
 HEARTBEAT_TIMEOUT = 180
 
+# Secondary guard: if market_data.json was updated by another machine
+# within this window, assume a remote poller is active.
+MARKET_DATA_PATH = PROJECT_ROOT / "src" / "data" / "market_data.json"
+MARKET_DATA_ACTIVE_WINDOW = 60  # seconds
+
 
 def _hostname() -> str:
     return socket.gethostname()
@@ -55,7 +60,43 @@ class MonitorLock:
         self.pid = os.getpid()
         self.is_leader = False
 
+    def _is_market_data_active_remotely(self) -> str | None:
+        """Check if market_data.json was recently updated by another machine.
+
+        Returns the hostname of the active machine if detected, else None.
+        This is a secondary guard against OneDrive sync delays that can
+        make the SQLite leader_election table stale.
+        """
+        try:
+            if not MARKET_DATA_PATH.exists():
+                return None
+            mtime = MARKET_DATA_PATH.stat().st_mtime
+            age = time.time() - mtime
+            if age >= MARKET_DATA_ACTIVE_WINDOW:
+                return None
+            # File was recently updated — check if it was us or another machine
+            # by reading the last updater field
+            import json
+            try:
+                data = json.loads(MARKET_DATA_PATH.read_text(encoding="utf-8"))
+                updater = data.get("_updated_by", "")
+                if updater and updater != self.hostname:
+                    return updater
+            except (json.JSONDecodeError, KeyError):
+                pass
+            return None
+        except Exception:
+            return None
+
     def try_acquire(self) -> bool:
+        # ── Secondary guard: market_data.json mtime check ──
+        remote = self._is_market_data_active_remotely()
+        if remote:
+            print(f"[LOCK] market_data.json 最近被 {remote} 更新，"
+                  f"推测远程 poller 仍在运行，退出")
+            self.is_leader = False
+            return False
+
         now = int(time.time())
         try:
             conn = get_connection()

@@ -10,6 +10,7 @@ Market data poller — 轻量守护脚本
 """
 
 import json
+import socket
 import sqlite3
 import sys
 import time
@@ -747,6 +748,7 @@ def poll_once() -> bool:
     payload = {
         "services": services,
         "ts": int(time.time() * 1000),
+        "_updated_by": socket.gethostname(),
         "settings": settings,
         "hkdCnyRate": hkd_cny_rate,
         "marketTurnover": turnover,
