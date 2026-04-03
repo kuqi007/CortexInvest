@@ -66,7 +66,28 @@ def write_signals(
     session_snapshot: dict | None = None,
     indicators: dict | None = None,
 ):
-    """原子写入信号 + session 快照 + 指标快照到 l2_strategy_signals.json"""
+    """Buffered write: accumulate signals, flush to disk every 30s or 5 signals."""
+    write_signals._buffer.extend(new_signals or [])
+    if session_snapshot:
+        write_signals._session = session_snapshot
+    if indicators:
+        write_signals._indicators = indicators
+
+    now = time.time()
+    buf_len = len(write_signals._buffer)
+    elapsed = now - write_signals._last_flush
+
+    # Flush when: 5+ signals buffered OR 30s elapsed
+    if buf_len >= 5 or elapsed >= 30:
+        _flush_signals_to_disk()
+
+
+def _flush_signals_to_disk():
+    """Actual disk write — called by write_signals when buffer threshold met."""
+    buf = write_signals._buffer
+    write_signals._buffer = []
+    write_signals._last_flush = time.time()
+
     # 读已有数据
     existing = []
     prev_session = {}
@@ -81,25 +102,20 @@ def write_signals(
     except Exception:
         existing = []
 
-    # 追加新信号
-    if new_signals:
-        existing.extend(new_signals)
-
-    # 保留最近 N 条
-    max_signals = MAX_SIGNALS
-    existing = existing[-max_signals:]
+    existing.extend(buf)
+    existing = existing[-MAX_SIGNALS:]
 
     ts = int(time.time() * 1000)
-    session = session_snapshot if session_snapshot else prev_session
+    session = write_signals._session or prev_session
+    ind = write_signals._indicators or prev_indicators
 
-    # 原子写入
     tmp = L2_SIGNALS_PATH.with_suffix(".tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(
             {
                 "signals": existing,
                 "session": session,
-                "indicators": indicators if indicators else prev_indicators,
+                "indicators": ind,
                 "lastUpdated": ts,
             },
             f,
@@ -107,6 +123,13 @@ def write_signals(
             indent=2,
         )
     tmp.replace(L2_SIGNALS_PATH)
+
+
+# Buffer state (module-level, attached to function for testability)
+write_signals._buffer: list[dict] = []
+write_signals._session: dict = {}
+write_signals._indicators: dict = {}
+write_signals._last_flush: float = time.time()
 
 
 def run():
@@ -213,6 +236,7 @@ def run():
         # Daily reset
         today = datetime.now().date()
         if today != last_date:
+            _flush_signals_to_disk()  # Flush buffer before daily reset
             # Save previous day's equity to daily_pnl before resetting
             if rt_enabled and rt_engine and prev_save_date is not None:
                 try:
@@ -299,6 +323,7 @@ def run():
             slept += 0.5
 
     # ── Shutdown ──
+    _flush_signals_to_disk()
     engine.close()
     print(f"\n\nL2 Strategy Daemon stopped. Total signals today: {total_signals}")
 
