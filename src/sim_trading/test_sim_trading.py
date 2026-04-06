@@ -236,6 +236,7 @@ class TestTradeSignalMapper:
 
 class TestPositionManager:
 
+    @pytest.mark.smoke
     def test_open_position(self, pos_mgr):
         decision = TradeDecision(
             action="BUY", code="HK00700", confidence=0.65,
@@ -276,6 +277,7 @@ class TestPositionManager:
         assert pos1 is not None
         assert pos2 is None  # Already holding
 
+    @pytest.mark.smoke
     def test_close_position(self, pos_mgr):
         decision = TradeDecision(
             action="BUY", code="HK00700", confidence=0.65,
@@ -313,6 +315,7 @@ class TestPositionManager:
         assert "HK01211" in pos_mgr.positions  # Still has remaining
         assert pos_mgr.positions["HK01211"].quantity < qty_before
 
+    @pytest.mark.smoke
     def test_check_exits_stop_loss(self, pos_mgr):
         decision = TradeDecision(
             action="BUY", code="HK00700", confidence=0.65,
@@ -329,6 +332,7 @@ class TestPositionManager:
         assert len(closed) == 1
         assert "stop_loss" in closed[0]["exit_reason"]
 
+    @pytest.mark.smoke
     def test_check_exits_take_profit(self, pos_mgr):
         decision = TradeDecision(
             action="BUY", code="HK00700", confidence=0.65,
@@ -345,6 +349,7 @@ class TestPositionManager:
         assert len(closed) == 1
         assert "take_profit" in closed[0]["exit_reason"]
 
+    @pytest.mark.smoke
     def test_check_exits_max_hold(self, pos_mgr):
         decision = TradeDecision(
             action="BUY", code="HK00700", confidence=0.65,
@@ -788,6 +793,7 @@ class TestEmergencyStop:
             current_date="2026-01-01", current_ts=entry_ts, day_index=0,
         )
 
+    @pytest.mark.smoke
     def test_emergency_stop_at_5pct(self, pos_mgr):
         """Price drop of 5% should trigger emergency stop."""
         entry_ts = 1_000_000
@@ -804,6 +810,7 @@ class TestEmergencyStop:
         assert len(closed) == 1
         assert "emergency_stop" in closed[0]["exit_reason"]
 
+    @pytest.mark.smoke
     def test_no_emergency_at_4pct(self, pos_mgr):
         """Price drop of 4% should NOT trigger emergency stop (SL at 90%)."""
         entry_ts = 1_000_000
@@ -818,6 +825,7 @@ class TestEmergencyStop:
         )
         assert len(closed) == 0
 
+    @pytest.mark.smoke
     def test_emergency_before_sl(self, pos_mgr):
         """Emergency stop should trigger before normal SL if loss > 5%."""
         entry_ts = 1_000_000
@@ -1096,6 +1104,7 @@ class TestFutuBrokerCheckExits:
         assert "HK09988" not in pm.positions
         adapter.sell.assert_called_once()
 
+    @pytest.mark.smoke
     def test_futu_sell_failure_still_closes_pm(self, rules):
         """Risk control priority: PM closes even when Futu SELL fails."""
         broker, pm, adapter = self._setup(rules, sell_success=False)
@@ -1205,6 +1214,7 @@ class TestFutuBrokerGetExitCandidates:
                              ts=1_000_000, day_index=0)
         return broker, pm
 
+    @pytest.mark.smoke
     def test_stop_loss_candidate(self, rules):
         broker, pm = self._setup(rules)
         sl = pm.positions["HK09988"].stop_loss
@@ -1261,6 +1271,7 @@ class TestFutuBrokerGetExitCandidates:
 class TestTrailingStop:
     """Trailing stop ratchets SL up when price exceeds entry."""
 
+    @pytest.mark.smoke
     def test_trailing_stop_ratchets_sl(self, rules):
         """PM trailing stop: price rises → SL moves up via trailing_atr."""
         pm = PositionManager(500_000, rules.get("lot_sizes", {}))
@@ -1279,6 +1290,7 @@ class TestTrailingStop:
         assert pos.stop_loss >= 100.0
         assert pos.stop_loss > original_sl
 
+    @pytest.mark.smoke
     def test_trailing_stop_only_ratchets_up(self, rules):
         """SL should never decrease — only goes up when highest_price increases."""
         pm = PositionManager(500_000, rules.get("lot_sizes", {}))
@@ -1525,6 +1537,7 @@ class TestSyncFromFutuPreservesEntryTime:
         fp.market_val = market_val or avg_price * qty
         return fp
 
+    @pytest.mark.smoke
     def test_existing_position_entry_time_preserved(self, rules):
         """sync_from_futu must NOT overwrite entry_time of existing position."""
         pm = PositionManager(500_000, rules.get("lot_sizes", {}))
@@ -1640,6 +1653,7 @@ class TestT3EntryTimeZeroGuard:
         engine._futu_enabled = False
         return engine, pm
 
+    @pytest.mark.smoke
     def test_t3_blocked_when_entry_time_zero(self, rules):
         """entry_time=0 → T3 must be blocked regardless of strategy."""
         engine, pm = self._make_engine_with_position(rules, entry_time=0)

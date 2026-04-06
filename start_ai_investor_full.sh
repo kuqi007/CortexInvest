@@ -107,6 +107,9 @@ _ensure_no_orphan() {
 }
 
 do_start() {
+  # 清理 OneDrive 同步冲突残留文件（带机器ID后缀的副本，如 -ADSKKN7X1GJJYG）
+  find "$DIR/src/data" -name '*-[A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9]*' -delete 2>/dev/null || true
+
   # 检查 terminal-notifier 依赖
   _check_terminal_notifier
 

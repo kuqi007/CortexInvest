@@ -3,5 +3,29 @@
     "ralph-loop@claude-plugins-official": true,
     "claude-code-setup@claude-plugins-official": true,
     "frontend-design@claude-plugins-official": true
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .claude/hooks/sim_trading_test.py"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash(git commit:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git diff --cached -- '*.py' '*.json' '*.toml' | grep -qE '(max_single_stock_pct|max_total_invested_pct|position_pct|max_new_positions_per_day|min_notional|min_hold_minutes)\\s*=' && { echo '⚠️ 风控参数被修改！请确认是否符合 sim-trading-safety.md 规则'; exit 1; } || true"
+          }
+        ]
+      }
+    ]
   }
 }
