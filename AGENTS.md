@@ -195,6 +195,7 @@ web/
 4. **Local data first** — read `src/data/market_data.json` for stock prices before calling external APIs
 5. **Config DB-first dual-write** — `/api/config` writes SQLite + exports JSON snapshot
 6. **Config read from DB** — Python tools must use `src.utils.config_reader.read_monitor_config()` to read watchlist/settings; JSON is backup only
+7. **Config updates via API only** — NEVER modify SQLite directly. Use `POST /api/config` with `action: add|update|remove|batch` to update holdings/watchlist. This ensures validation, change logging, and JSON snapshot sync.
 
 ## Risk Control (DO NOT relax)
 
@@ -211,6 +212,64 @@ When modifying sim_trading code, these parameters are hard limits:
 | `src/data/market_data.json` | Poller | Notifier, Web API, tools |
 | `src/data/monitor_config.json` | Web `/api/config` (export) | Python tools (fallback) |
 | `src/data/sim_trading.db` | Web `/api/config`, Trading engine | Web API, Python tools (primary) |
+
+## Config API Usage
+
+All config changes must go through the API:
+
+```bash
+# Add/update a holding
+curl -X POST http://localhost:3120/api/config \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "add",
+    "code": "002436",
+    "data": {
+      "name": "兴森科技",
+      "type": "holding",
+      "cost": 23.687,
+      "shares": 8700,
+      "star": true
+    }
+  }'
+
+# Batch update multiple stocks
+curl -X POST http://localhost:3120/api/config \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "batch",
+    "updates": [
+      {"code": "002436", "data": {"type": "holding", "cost": 23.69, "shares": 8700}},
+      {"code": "000338", "data": {"type": "holding", "cost": 26.45, "shares": 2000}}
+    ]
+  }'
+
+# Remove a stock
+curl -X POST http://localhost:3120/api/config \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "remove",
+    "codes": ["000078"]
+  }'
+```
+
+Python example:
+```python
+import requests
+
+# Update holding via API
+requests.post("http://localhost:3120/api/config", json={
+    "action": "add",
+    "code": "002436",
+    "data": {
+        "name": "兴森科技",
+        "type": "holding",
+        "cost": 23.687,
+        "shares": 8700,
+        "star": True
+    }
+})
+```
 
 ## Key Dependencies
 

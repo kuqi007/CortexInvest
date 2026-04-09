@@ -44,6 +44,8 @@ cd web && npm run dev                           # Web 开发 (:3120)
 4. **Config DB-first 双写** — `/api/config` 写 DB + 导 JSON 快照，Python 读 JSON
 5. **Poller 降级不丢数据** — 东方财富失败时 fallback 新浪，量比/汇率继承上轮值
 6. **板块轮动独立于 Poller** — `sector_index_engine.py` 是独立 cron，不嵌入 poller 循环
+7. **行情数据本地优先** — 需要股票实时行情时，先读 `src/data/market_data.json` 的 `services` 数组（按 `id` 匹配股票代码，字段含 `price`/`change`/`high`/`low`/`open`/`prevClose`/`vol`/`amount`/`turnover`/`volRatio` 等）；本地无该股票或数据过期（`ts` 超过 5 分钟）时再调外部 API
+8. **配置更新必须通过 API** — 禁止直接修改 SQLite，所有配置变更通过 `POST /api/config`（支持 `action: add/update/remove/batch`），确保变更日志、数据验证和 JSON 快照同步
 
 ## 风控硬性参数（不得放松）
 
