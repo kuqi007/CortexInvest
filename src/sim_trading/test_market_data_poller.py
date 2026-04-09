@@ -217,7 +217,7 @@ def test_poll_once_uses_db_watchlist(tmp_db, stale_json, tmp_path):
         # Returns (stocks, is_sina_fallback) — the actual return type of fetch_realtime_with_fallback
         # Only return watchlist stocks; INDEX_CODES are excluded since fetch_market_turnover
         # is mocked to return None (turnover=None causes crash on index writes at line 608)
-        INDEX_CODES = {"399006", "000688"}
+        INDEX_CODES = {"399006", "sh000688"}
         return ([
             {
                 "code": s, "name": f"Name_{s}", "price": 10.0,
@@ -282,7 +282,7 @@ def test_poll_once_extracts_chiNext_kc50_to_turnover(tmp_db, stale_json, tmp_pat
                                "amount": 0, "amplitude": 0, "turnover": 0,
                                "vol_ratio": 0, "high": 0, "low": 0,
                                "open": 0, "prev_close": 0})
-            elif s == "000688":
+            elif s == "sh000688":
                 result.append({"code": s, "name": "科创50", "price": 1020.30,
                                "pct": -0.32, "change": -3.27, "volume": 0,
                                "amount": 0, "amplitude": 0, "turnover": 0,
@@ -329,7 +329,7 @@ def test_poll_once_extracts_chiNext_kc50_to_turnover(tmp_db, stale_json, tmp_pat
     # Index stocks NOT in services list
     svc_ids = {s["id"] for s in data["services"]}
     assert "399006" not in svc_ids, "399006 (创业板) must not appear in services"
-    assert "000688" not in svc_ids, "000688 (科创50) must not appear in services"
+    assert "sh000688" not in svc_ids, "sh000688 (科创50) must not appear in services"
 
     # Watchlist stocks still present
     assert "002080" in svc_ids
