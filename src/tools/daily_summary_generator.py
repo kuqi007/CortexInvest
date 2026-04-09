@@ -612,7 +612,7 @@ def _build_llm_prompt(stats: dict, per_stock: list[dict], l1_displays: list[str]
 - 标题用 ## 不用 ###，标题上不要加 **加粗**
 - 正文中股票名称可以用 **加粗**
 - **严禁模糊表述**：不可写"资金流入显著"、"大单活跃"等空话，必须写"大单净买0.19亿"、"tick偏买12.4%"这样的具体数字
-- **严禁编造数据**：只能使用本文中提供的具体数据，绝不可为没有数据的标的编造tick、大单、资金流等数字。如果某只股票没有提供微观数据，就写"无微观数据"，不可杜撰
+- **严禁编造数据**：只能使用本文中提供的具体数据，绝不可为没有数据的标的编造tick、大单、资金流等数字。如果某只股票标注了"无微观数据"，必须写"无微观数据"，绝不可自己捏造任何具体数字（如tick偏买12%、大单净买0.19亿等都是禁止的）
 - 数据要像专业研报一样自然融入文字中，不要堆砌成表格
 - 当大单方向与资金流向矛盾时（如大单净卖但主力净流入），需解读原因（算法拆单、对倒等）
 - 标注[★重点]的股票（包括持仓和自选）是用户最关注的，必须在"重点关注"中详细分析
@@ -621,7 +621,8 @@ def _build_llm_prompt(stats: dict, per_stock: list[dict], l1_displays: list[str]
 - 如有条件单数据，在操作建议中结合条件单距离给出提醒（如"阿里距买入条件单125仅3.5%"）
 - ★重点自选标的同样需要深度分析微观数据，不能只给一句话
 - 风格：专业简洁，像给基金经理写的晨会纪要
-- 输出纯 Markdown，不要代码块包裹"""
+- 输出纯 Markdown，不要代码块包裹
+- **数据来源约束**：每只标的的"微观:"行列出了该标的的全部微观数据。如果该行写"无微观数据"，则该标的不能出现任何tick、大单、主力资金流的具体数字。如果你在文中写了任何tick偏买/偏卖X%、大单净买/卖X亿、主力流入/流出X亿的数字，该数字必须能在对应标的的"微观:"行中找到完全一致的值。违规即视为严重错误"""
 
     # Build data section
     holdings = [ps for ps in per_stock if ps["type"] == "holding"]
@@ -710,7 +711,7 @@ def _build_llm_prompt(stats: dict, per_stock: list[dict], l1_displays: list[str]
                 tags.append(f"盈亏{ps['pnl_pct']:+.1f}%")
             tag_str = f" [{', '.join(tags)}]" if tags else ""
             line = f"- {ps['code']} {ps['name']}{tag_str} | 涨跌:{ps['change']:+.2f}% | 信号:{ps['signalCount']}条 | 方向:{ps['direction']} | {sigs}"
-            # Append L2 microstructure digest
+            # Append L2 microstructure digest (or explicit "无微观数据" to prevent LLM hallucination)
             d = digest_map.get(ps["code"])
             if d:
                 lo_net_yi = d["lo_net_amount"] / 1e8
@@ -727,6 +728,8 @@ def _build_llm_prompt(stats: dict, per_stock: list[dict], l1_displays: list[str]
                     micro += f" | {' '.join(events_parts)}"
                 micro += f" | 综合:{d['direction_score']:+d}({d['direction']})"
                 line += "\n" + micro
+            else:
+                line += "\n  微观: 无微观数据（不可编造）"
             lines.append(line)
         lines.append("")
 
@@ -755,6 +758,8 @@ def _build_llm_prompt(stats: dict, per_stock: list[dict], l1_displays: list[str]
                     micro += f" | {' '.join(events_parts)}"
                 micro += f" | 综合:{d['direction_score']:+d}({d['direction']})"
                 line += "\n" + micro
+            else:
+                line += "\n  微观: 无微观数据（不可编造）"
             lines.append(line)
         lines.append("")
 
