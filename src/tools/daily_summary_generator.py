@@ -36,7 +36,8 @@ logger = setup_logger("daily_summary")
 # ── Data file paths ──
 DATA_DIR = PROJECT_ROOT / "src" / "data"
 MARKET_DATA_PATH = DATA_DIR / "market_data.json"
-MONITOR_CONFIG_PATH = DATA_DIR / "monitor_config.json"
+# Config read from DB (primary) or JSON (backup)
+from src.utils.config_reader import read_monitor_config
 ALERT_CONFIG_PATH = DATA_DIR / "alert_config.json"
 L2_SIGNALS_PATH = DATA_DIR / "l2_strategy_signals.json"
 DAILY_SUMMARY_PATH = DATA_DIR / "daily_summary.json"
@@ -966,7 +967,9 @@ def generate_daily_summary(date_str: str | None = None) -> dict | None:
 
     # ── Read data sources ──
     market_data = _read_json(MARKET_DATA_PATH) or {"services": []}
-    config = _read_json(MONITOR_CONFIG_PATH) or {"watchlist": {}, "settings": {}}
+    config = read_monitor_config()
+    if not config.get("watchlist"):
+        config = {"watchlist": {}, "settings": {}}
     l2_signals_data = _read_json(L2_SIGNALS_PATH) or {"signals": []}
 
     # Filter signals to today only (JSON has no date column; use timestamp)

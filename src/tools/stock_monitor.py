@@ -83,7 +83,18 @@ _feishu_token_expires_at: float = 0
 
 
 def load_config() -> dict:
-    """加载配置文件，不存在则用默认 AIDC watchlist 初始化"""
+    """加载配置 — DB 优先，JSON 作为备份"""
+    from src.utils.config_reader import read_monitor_config
+    
+    # 优先从 DB 读取
+    try:
+        cfg = read_monitor_config(prefer_db=True)
+        if cfg.get("watchlist"):
+            return cfg
+    except Exception:
+        pass
+    
+    # 回退到 JSON
     if CONFIG_PATH.exists():
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             return json.load(f)

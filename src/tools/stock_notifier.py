@@ -30,7 +30,8 @@ logger = setup_logger("stock_notifier")
 
 # ── Data file paths ──
 MARKET_DATA_PATH = PROJECT_ROOT / "src" / "data" / "market_data.json"
-MONITOR_CONFIG_PATH = PROJECT_ROOT / "src" / "data" / "monitor_config.json"
+# Config now read from DB (primary) or JSON (backup)
+from src.utils.config_reader import read_monitor_config
 ALERT_CONFIG_PATH = PROJECT_ROOT / "src" / "data" / "alert_config.json"
 L2_SIGNALS_PATH = PROJECT_ROOT / "src" / "data" / "l2_strategy_signals.json"
 
@@ -2574,9 +2575,9 @@ def run():
     signal.signal(signal.SIGTERM, _handle_signal)
 
     # ── Startup banner ──
-    config = read_json_safe(MONITOR_CONFIG_PATH)
-    if config is None:
-        print(f"ERROR: cannot read {MONITOR_CONFIG_PATH}")
+    config = read_monitor_config()
+    if not config.get("watchlist"):
+        print("ERROR: cannot read watchlist from DB or JSON")
         sys.exit(1)
 
     settings = config.get("settings", {})
@@ -2676,12 +2677,8 @@ def run():
             # 归档昨日数据 + 清空（新交易日重新开始）
             _archive_and_reset(today)
             # Reload config at day boundary
-            fresh_config = read_json_safe(MONITOR_CONFIG_PATH)
-            if (
-                fresh_config is not None
-                and "settings" in fresh_config
-                and "watchlist" in fresh_config
-            ):
+            fresh_config = read_monitor_config()
+            if fresh_config.get("watchlist"):
                 config = fresh_config
                 watchlist = config.get("watchlist", {})
                 settings = config.get("settings", {})
@@ -2701,12 +2698,8 @@ def run():
             last_mtime = current_mtime
 
             # Reload config each time (cheap, picks up threshold changes)
-            fresh_config = read_json_safe(MONITOR_CONFIG_PATH)
-            if (
-                fresh_config is not None
-                and "settings" in fresh_config
-                and "watchlist" in fresh_config
-            ):
+            fresh_config = read_monitor_config()
+            if fresh_config.get("watchlist"):
                 config = fresh_config
                 watchlist = config.get("watchlist", {})
                 settings = config.get("settings", {})

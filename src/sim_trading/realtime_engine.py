@@ -30,7 +30,8 @@ from .simulation_engine import SimulationEngine
 logger = logging.getLogger("l2_daemon.rt_sim")
 
 MARKET_DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "market_data.json"
-MONITOR_CONFIG_PATH = Path(__file__).resolve().parent.parent / "data" / "monitor_config.json"
+# Config read from DB (primary) or JSON (backup)
+from src.utils.config_reader import read_monitor_config
 PARAM_VERSION = "live"
 
 
@@ -436,19 +437,16 @@ class RealtimeSimEngine:
         return result
 
     def _get_watchlist_codes(self) -> list[str]:
-        """Get holding codes from monitor_config.json.
+        """Get holding codes from DB.
 
         Virtual mode: HK only (original behavior).
         Futu mode: HK + A-share holdings.
         """
-        try:
-            with open(MONITOR_CONFIG_PATH, "r", encoding="utf-8") as f:
-                config = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            return []
+        config = read_monitor_config()
+        watchlist = config.get("watchlist", {})
 
         codes = []
-        for code, info in config.get("watchlist", {}).items():
+        for code, info in watchlist.items():
             if info.get("type") != "holding" or info.get("hidden", False):
                 continue
             if self._futu_enabled:
@@ -770,15 +768,12 @@ class RealtimeSimEngine:
                 )
 
     def _get_dip_buy_codes(self) -> list[str]:
-        """Get codes with dip_buy=true from monitor_config.json (any type)."""
-        try:
-            with open(MONITOR_CONFIG_PATH, "r", encoding="utf-8") as f:
-                config = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            return []
+        """Get codes with dip_buy=true from DB (any type)."""
+        config = read_monitor_config()
+        watchlist = config.get("watchlist", {})
 
         codes = []
-        for code, info in config.get("watchlist", {}).items():
+        for code, info in watchlist.items():
             if info.get("dip_buy") and not info.get("hidden", False):
                 codes.append(code)
         return codes

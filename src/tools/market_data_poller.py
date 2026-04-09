@@ -235,7 +235,12 @@ def load_watchlist_from_db() -> tuple[dict, dict]:
             if row["star"]:
                 entry["star"] = bool(row["star"])
             if row["tags"]:
-                entry["tags"] = row["tags"]
+                try:
+                    tags = json.loads(row["tags"])
+                    if isinstance(tags, list):
+                        entry["tags"] = tags
+                except json.JSONDecodeError:
+                    entry["tags"] = row["tags"]
             if row["watch_price"]:
                 entry["watch_price"] = row["watch_price"]
             watchlist[row["symbol"]] = entry

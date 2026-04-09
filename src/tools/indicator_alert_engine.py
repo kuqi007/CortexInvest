@@ -207,16 +207,15 @@ def refresh_indicator_cache(watchlist: dict | None = None, live_quotes: dict | N
 
     由 Notifier 每 30 分钟调用一次（盘中用 live_quotes 做预估）。
     Args:
-        watchlist: {symbol: {name, type, ...}} — None 时从 monitor_config.json 读取
+        watchlist: {symbol: {name, type, ...}} — None 时从 DB 读取
         live_quotes: {symbol: {price, volume, ...}} — 盘中实时行情，用于 live_price 预估
     """
     import sqlite3
 
     if watchlist is None:
-        cfg_path = Path(__file__).resolve().parent.parent / "data" / "monitor_config.json"
+        from src.utils.config_reader import read_monitor_config
         try:
-            with open(cfg_path, "r") as f:
-                cfg = json.load(f)
+            cfg = read_monitor_config()
             watchlist = cfg.get("watchlist", {})
         except Exception:
             return

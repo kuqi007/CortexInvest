@@ -35,7 +35,8 @@ from src.utils.logging_config import setup_logger
 logger = setup_logger("l2_daemon")
 
 # ── File paths ──
-MONITOR_CONFIG_PATH = PROJECT_ROOT / "src" / "data" / "monitor_config.json"
+# Config read from DB (primary) or JSON (backup)
+from src.utils.config_reader import read_monitor_config
 L2_CONFIG_PATH = PROJECT_ROOT / "src" / "data" / "l2_strategy_config.json"
 L2_SIGNALS_PATH = PROJECT_ROOT / "src" / "data" / "l2_strategy_signals.json"
 
@@ -47,10 +48,10 @@ MAX_SIGNALS = 200
 
 
 def load_configs() -> tuple[dict, dict]:
-    """Load monitor_config and l2_strategy_config"""
-    monitor = read_json_safe(MONITOR_CONFIG_PATH)
-    if monitor is None:
-        logger.error(f"Cannot read {MONITOR_CONFIG_PATH}")
+    """Load monitor_config from DB and l2_strategy_config from JSON"""
+    monitor = read_monitor_config()
+    if not monitor.get("watchlist"):
+        logger.error("Cannot read watchlist from DB")
         sys.exit(1)
 
     l2_config = read_json_safe(L2_CONFIG_PATH)
