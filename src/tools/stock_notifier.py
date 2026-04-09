@@ -2724,13 +2724,13 @@ def run():
                 # Keep latest data for close summary (even outside trading check)
                 if quotes:
                     latest_quotes = quotes
-                    latest_hkd_cny_rate = market.get("hkdCnyRate")
+                    latest_hkd_cny_rate = 0.92  # 固定汇率值
 
                 if trading and quotes:
                     # 集合竞价时段不发送告警（价格不稳定）
                     in_auction = is_in_auction_period()
 
-                    hkd_cny_rate = market.get("hkdCnyRate")
+                    hkd_cny_rate = 0.92  # 固定汇率值
                     all_alerts = (
                         [] if in_auction else engine.check(quotes, hkd_cny_rate)
                     )

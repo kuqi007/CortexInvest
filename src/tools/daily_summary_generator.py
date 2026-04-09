@@ -395,8 +395,8 @@ def _build_per_stock(
     watchlist = config.get("watchlist", {})
     services = {s["id"]: s for s in market_data.get("services", []) if s.get("id")}
 
-    # Read FX rate from market data (poller writes hkdCnyRate)
-    hkd_cny_rate = market_data.get("hkdCnyRate") or 0.92
+    # HKD/CNY 汇率固定值（汇率功能已移除）
+    hkd_cny_rate = 0.92
 
     per_stock = []
     # Combine all codes from watchlist, signals, and market data

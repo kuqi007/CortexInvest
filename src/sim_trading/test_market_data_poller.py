@@ -245,10 +245,6 @@ def test_poll_once_uses_db_watchlist(tmp_db, stale_json, tmp_path):
              "src.tools.market_data_poller.fetch_market_turnover",
              return_value=None,
          ), \
-         patch(
-             "src.tools.market_data_poller.fetch_hkd_cny_rate",
-             return_value=0.92,
-         ), \
          patch.object(poller._futu_enricher, "enrich", return_value=({}, {})):
         result = poller.poll_once()
 
@@ -317,7 +313,6 @@ def test_poll_once_extracts_chiNext_kc50_to_turnover(tmp_db, stale_json, tmp_pat
          patch("src.tools.market_data_poller.fetch_realtime_with_fallback", side_effect=fake_realtime_fallback), \
          patch("src.tools.market_data_poller.fetch_realtime_yahoo", return_value=[]), \
          patch("src.tools.market_data_poller.fetch_market_turnover", side_effect=fake_turnover), \
-         patch("src.tools.market_data_poller.fetch_hkd_cny_rate", return_value=0.92), \
          patch.object(poller._futu_enricher, "enrich", return_value=({}, {})):
         result = poller.poll_once()
 

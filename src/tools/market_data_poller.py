@@ -396,33 +396,6 @@ def build_services(stocks: list[dict], watchlist: dict) -> list[dict]:
     return services
 
 
-EM_FX_API = "https://push2.eastmoney.com/api/qt/ulist.np/get"
-
-
-def fetch_hkd_cny_rate() -> float | None:
-    """从东方财富获取 HKD/CNY 实时汇率"""
-    try:
-        resp = requests.get(
-            EM_FX_API,
-            params={
-                "fltt": "2",
-                "secids": "119.HKDCNY",
-                "fields": "f2",
-                "ut": EM_UT,
-            },
-            timeout=5,
-        )
-        data = resp.json()
-        diff = (data.get("data") or {}).get("diff") or []
-        if diff and isinstance(diff[0], dict):
-            rate = diff[0].get("f2")
-            if isinstance(rate, (int, float)) and rate > 0:
-                return round(float(rate), 4)
-    except Exception as e:
-        logger.warning(f"获取 HKD/CNY 汇率失败: {e}")
-    return None
-
-
 SINA_INDEX_URL = "https://hq.sinajs.cn/list=s_sh000001,s_sz399001,s_sz399006,s_sh000688"
 SINA_HEADERS = {"Referer": "https://finance.sina.com.cn"}
 
@@ -555,7 +528,7 @@ def fetch_market_turnover() -> dict | None:
 def poll_once() -> bool:
     """执行一次抓取+写入，返回是否成功
 
-    即使个股行情抓取失败，也尝试写入大盘数据（成交额/汇率），
+    即使个股行情抓取失败，也尝试写入大盘数据（成交额），
     确保 dashboard 至少能看到市场概览。
     """
     global _amo_history, _market_amo_history, _market_amo_12d
@@ -701,20 +674,6 @@ def poll_once() -> bool:
                 f"港股指数: hkIndex={hk_idx.get('hkIndex')} hkTech={hk_idx.get('hkTech')}"
             )
 
-    # 有港股持仓时获取汇率（失败时从旧数据继承）
-    has_hk = any(s.startswith("HK") for s in symbols)
-    hkd_cny_rate = fetch_hkd_cny_rate() if has_hk else None
-    if has_hk and hkd_cny_rate is None:
-        try:
-            old_rate = json.loads(OUTPUT_PATH.read_text(encoding="utf-8")).get(
-                "hkdCnyRate"
-            )
-            if old_rate:
-                hkd_cny_rate = old_rate
-                logger.info(f"汇率获取失败，继承上次值: {hkd_cny_rate}")
-        except Exception:
-            pass
-
     # 合并旧数据中缺失的 service（盘前 price=0 被跳过的股票保留昨日收盘价）
     new_ids = {s["id"] for s in services}
     try:
@@ -750,7 +709,6 @@ def poll_once() -> bool:
         "ts": int(time.time() * 1000),
         "_updated_by": socket.gethostname(),
         "settings": settings,
-        "hkdCnyRate": hkd_cny_rate,
         "marketTurnover": turnover,
         # 数据源元数据，供 Data Freshness Watchdog 检测降级
         "_source": {
