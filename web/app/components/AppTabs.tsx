@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { ReactNode } from "react";
 
-export type AppTabKey = "holdings" | "watching" | "alerts" | "daily" | "sim" | "sector" | "manage";
+export type AppTabKey = "holdings" | "watching" | "starred" | "alerts" | "daily" | "sim" | "sector" | "manage";
 
 type TabItem = { key: AppTabKey; label: string; href: string };
 
 const TAB_ITEMS: TabItem[] = [
   { key: "holdings", label: "holdings", href: "/" },
+  { key: "starred", label: "starred", href: "/starred" },
   { key: "watching", label: "watching", href: "/watching" },
   { key: "alerts", label: "alerts", href: "/alerts" },
   { key: "daily", label: "daily", href: "/daily" },
