@@ -602,7 +602,7 @@ def _build_llm_prompt(stats: dict, per_stock: list[dict], l1_displays: list[str]
 
 ## 逐股速览
 - **代码 名称** — 一句话总结，自然穿插1-2个关键数据（如"tick偏卖28%+主力流出0.51亿，空头格局"）
-（只覆盖有信号的标的，无信号的跳过）
+（重要：只覆盖有微观数据的标的。如果某股票在"持仓标的"或"重点自选"中没有微观数据行，则**绝对不能**出现在逐股速览中，也不可编造数据填充）
 
 ## 操作建议
 1. ...
@@ -804,6 +804,15 @@ def _build_llm_prompt(stats: dict, per_stock: list[dict], l1_displays: list[str]
         for d in l1_displays[-10:]:  # Limit to last 10
             lines.append(f"- {d}")
 
+    # 添加有微观数据的股票白名单
+    if digest_map:
+        codes_with_micro = sorted(digest_map.keys())
+        lines.append("")
+        lines.append("## 有微观数据的股票代码列表")
+        lines.append("以下股票有 L2 微观数据（tick/大单/资金流），逐股速览只能包含这些股票：")
+        lines.append(", ".join(codes_with_micro))
+        lines.append("**严禁为不在此列表中的股票编造微观数据。**")
+
     user_msg = "\n".join(lines)
 
     return [
@@ -824,12 +833,14 @@ def _compute_l2_digest(date_str: str) -> list[dict]:
     try:
         conn = get_connection()
 
-        # 1. 取每只股票当日最后一条 session_snapshot
+        # 1. 取每只股票交易时间内的最后一条 session_snapshot
+        # 使用 16:00:00 作为 cutoff，避免收盘后 tick 数据被清零的问题
         rows = conn.execute(
             "SELECT code, session_json FROM session_snapshots "
-            "WHERE date = ? AND ts = ("
+            "WHERE date = ? AND time <= '16:00:00' AND ts = ("
             "  SELECT MAX(ts) FROM session_snapshots ss "
-            "  WHERE ss.date = session_snapshots.date AND ss.code = session_snapshots.code"
+            "  WHERE ss.date = session_snapshots.date AND ss.code = session_snapshots.code "
+            "  AND ss.time <= '16:00:00'"
             ") ORDER BY code",
             (date_str,),
         ).fetchall()
