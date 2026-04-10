@@ -191,6 +191,8 @@ export async function GET() {
 
         return {
           ...s,
+          // 优先使用 config 中的名称（用户可能修改过）
+          ...(entry.name ? { name: entry.name as string } : {}),
           type,
           cost,
           shares,
@@ -210,10 +212,11 @@ export async function GET() {
 
     data.settings = settings;
 
-    // 读 alert events + indicator cache（notifier 写入 SQLite，web 只读）
+    // 读 alert events - 直接使用本地 SQLite（Turso 用于 Python 端双写）
     try {
       const now = new Date();
       const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      
       const db = new Database(SIM_DB_PATH, { readonly: true });
       data.alertEvents = db
         .prepare(
@@ -221,7 +224,6 @@ export async function GET() {
           "FROM alert_events WHERE date = ? ORDER BY ts",
         )
         .all(today);
-
       // 读 indicator_cache 并附到 services
       try {
         const indRows = db.prepare(

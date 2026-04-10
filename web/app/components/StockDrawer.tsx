@@ -885,7 +885,7 @@ export function StockDrawer({
           }}
         >
           <span style={{ color: D.cyan, fontWeight: "bold" }}>
-            {symbol}&nbsp;&nbsp;{configEntry?.name || service?.name}
+            {symbol}&nbsp;&nbsp;{configEntry?.alias || configEntry?.name || service?.name}
           </span>
           <button
             onClick={onClose}
