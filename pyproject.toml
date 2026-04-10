@@ -27,6 +27,7 @@ dependencies = [
     "playwright>=1.52.0,<2.0.0",
     "rich>=13.7.0",
     "futu-api>=9.6.5608,<10.0.0",
+    "libsql-client>=0.3.1",
 ]
 
 [project.optional-dependencies]
