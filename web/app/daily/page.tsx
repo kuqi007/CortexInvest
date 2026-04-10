@@ -19,6 +19,12 @@ interface DailySummary {
   morning?: MorningBriefing | null;
 }
 
+interface CloseEvent {
+  time: string;
+  message: string;
+  display: string;
+}
+
 function stripBold(s: string) {
   return s.replace(/\*\*([^*]+)\*\*/g, "$1");
 }
@@ -134,8 +140,10 @@ function NewsCard({ news }: { news: MorningBriefing["global_news"] }) {
 
 export default function DailyPage() {
   const [data, setData] = useState<DailySummary | null>(null);
+  const [closeEvent, setCloseEvent] = useState<CloseEvent | null>(null);
   const [briefingOpen, setBriefingOpen] = useState(true);
   const [summaryOpen, setSummaryOpen] = useState(true);
+  const [closeOpen, setCloseOpen] = useState(true);
   const [loading, setLoading] = useState(true);
 
   const fetchData = useCallback(async () => {
@@ -145,6 +153,16 @@ export default function DailyPage() {
       if (json.data) setData(json.data);
     } catch {
       // non-critical
+    }
+  }, []);
+
+  const fetchCloseEvent = useCallback(async () => {
+    try {
+      const res = await fetch("/api/close-events", { cache: "no-store" });
+      const json = await res.json();
+      if (json.data) setCloseEvent(json.data);
+    } catch {
+      // non-critical
     } finally {
       setLoading(false);
     }
@@ -152,9 +170,13 @@ export default function DailyPage() {
 
   useEffect(() => {
     fetchData();
-    const t = setInterval(fetchData, 60_000);
+    fetchCloseEvent();
+    const t = setInterval(() => {
+      fetchData();
+      fetchCloseEvent();
+    }, 60_000);
     return () => clearInterval(t);
-  }, [fetchData]);
+  }, [fetchData, fetchCloseEvent]);
 
   const morning = data?.morning;
   const hasReport = data?.report && data.date === new Date().toISOString().slice(0, 10);
@@ -180,6 +202,46 @@ export default function DailyPage() {
           <div style={{ color: D.comment }}>Loading...</div>
         ) : (
           <>
+            {/* Market Close Notification Card */}
+            {closeEvent && (
+              <div
+                style={{
+                  border: `1px solid ${D.yellow}44`,
+                  borderRadius: 6,
+                  marginBottom: 16,
+                  background: "#21222c",
+                }}
+              >
+                <div
+                  onClick={() => setCloseOpen(!closeOpen)}
+                  style={{
+                    padding: "10px 16px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    userSelect: "none",
+                    borderBottom: closeOpen ? `1px solid ${D.yellow}33` : "none",
+                  }}
+                >
+                  <span style={{ color: D.yellow, fontSize: 12 }}>
+                    {closeOpen ? "\u25be" : "\u25b8"}
+                  </span>
+                  <span style={{ color: D.yellow, fontWeight: 700, fontSize: 13 }}>
+                    收盘通知 — {closeEvent.time}
+                  </span>
+                </div>
+
+                {closeOpen && (
+                  <div style={{ padding: "16px 20px", lineHeight: 1.7 }}>
+                    <div style={{ color: D.fg, whiteSpace: "pre-wrap" }}>
+                      {closeEvent.display}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Morning Briefing Card */}
             {morning && (
               <div

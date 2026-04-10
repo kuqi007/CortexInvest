@@ -1732,13 +1732,17 @@ def check_market_open_close(
     # ── Market close notification: 15:01 ~ 15:15 window ──
     if not sent_close and 1501 <= t <= 1515 and quotes:
         summary = _build_close_summary(quotes, config, hkd_cny_rate)
-        alerts.append(
-            {
-                "title": "收盘",
-                "message": summary,
-                "_stealth": summary,  # close summary is already compact enough
-            }
-        )
+        close_alert = {
+            "title": "收盘",
+            "message": summary,
+            "_stealth": summary,  # close summary is already compact enough
+            "symbol": "MARKET",   # 特殊标记，表示市场收盘
+            "_kind": "market_close",
+            "_change_pct": 0,
+        }
+        alerts.append(close_alert)
+        # 保存到数据库，供 web 端显示
+        write_alert_events([close_alert])
         sent_close = True
 
     return sent_open, sent_close, alerts
