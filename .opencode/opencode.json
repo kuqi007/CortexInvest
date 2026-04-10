@@ -7,10 +7,6 @@
     ".claude/rules/quant-engineer.md",
     "AGENTS.md"
   ],
-  "plugin": [
-    "./.opencode/plugins",
-    "superpowers@git+https://github.com/obra/superpowers.git"
-  ],
   "agent": {
     "finance-ux-reviewer": {
       "description": "Professional financial UX/UI review for dashboards, trading tools, and fintech applications",
