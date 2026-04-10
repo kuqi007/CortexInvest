@@ -22,17 +22,17 @@ export async function GET() {
          FROM alert_events 
          WHERE date = ? AND kind = 'market_close'
          ORDER BY ts DESC
-         LIMIT 1`
+         LIMIT 10`
       )
       .all(today);
     
     db.close();
 
     if (rows.length === 0) {
-      return NextResponse.json({ data: null });
+      return NextResponse.json({ data: [] });
     }
 
-    const event = rows[0] as {
+    const events = (rows as Array<{
       ts: number;
       time: string;
       symbol: string;
@@ -41,15 +41,13 @@ export async function GET() {
       message: string;
       display: string;
       change_pct: number;
-    };
+    }>).map(event => ({
+      time: event.time,
+      message: event.message,
+      display: event.display || event.message,
+    }));
 
-    return NextResponse.json({
-      data: {
-        time: event.time,
-        message: event.message,
-        display: event.display || event.message,
-      },
-    });
+    return NextResponse.json({ data: events });
   } catch (error) {
     console.error("Failed to read close events:", error);
     return NextResponse.json({ data: null }, { status: 500 });

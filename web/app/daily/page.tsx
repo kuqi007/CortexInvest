@@ -202,7 +202,45 @@ export default function DailyPage() {
           <div style={{ color: D.comment }}>Loading...</div>
         ) : (
           <>
-            {/* Market Close Notification Card */}
+            {/* 1. Daily Summary Card - 信号日报 (最上面) */}
+            {hasReport && data.report && (
+              <div
+                style={{
+                  border: `1px solid ${D.purple}44`,
+                  borderRadius: 6,
+                  marginBottom: 16,
+                  background: "#21222c",
+                }}
+              >
+                <div
+                  onClick={() => setSummaryOpen(!summaryOpen)}
+                  style={{
+                    padding: "10px 16px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    userSelect: "none",
+                    borderBottom: summaryOpen ? `1px solid ${D.purple}33` : "none",
+                  }}
+                >
+                  <span style={{ color: D.purple, fontSize: 12 }}>
+                    {summaryOpen ? "\u25be" : "\u25b8"}
+                  </span>
+                  <span style={{ color: D.purple, fontWeight: 700, fontSize: 13 }}>
+                    信号日报 — {data.date}
+                  </span>
+                </div>
+
+                {summaryOpen && (
+                  <div style={{ padding: "16px 20px", lineHeight: 1.7 }}>
+                    <TerminalMarkdown text={data.report} />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 2. Market Close Notification Card - 收盘简报 (中间) */}
             {closeEvent && (
               <div
                 style={{
@@ -228,7 +266,7 @@ export default function DailyPage() {
                     {closeOpen ? "\u25be" : "\u25b8"}
                   </span>
                   <span style={{ color: D.yellow, fontWeight: 700, fontSize: 13 }}>
-                    收盘通知 — {closeEvent.time}
+                    收盘简报 — {closeEvent.time}
                   </span>
                 </div>
 
@@ -242,13 +280,12 @@ export default function DailyPage() {
               </div>
             )}
 
-            {/* Morning Briefing Card */}
+            {/* 3. Morning Briefing Card - 早间简报 (最下面) */}
             {morning && (
               <div
                 style={{
                   border: `1px solid ${D.cyan}44`,
                   borderRadius: 6,
-                  marginBottom: 16,
                   background: "#21222c",
                 }}
               >
@@ -311,48 +348,11 @@ export default function DailyPage() {
               </div>
             )}
 
-            {/* Daily Summary Card */}
-            {hasReport && data.report && (
-              <div
-                style={{
-                  border: `1px solid ${D.purple}44`,
-                  borderRadius: 6,
-                  background: "#21222c",
-                }}
-              >
-                <div
-                  onClick={() => setSummaryOpen(!summaryOpen)}
-                  style={{
-                    padding: "10px 16px",
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    userSelect: "none",
-                    borderBottom: summaryOpen ? `1px solid ${D.purple}33` : "none",
-                  }}
-                >
-                  <span style={{ color: D.purple, fontSize: 12 }}>
-                    {summaryOpen ? "\u25be" : "\u25b8"}
-                  </span>
-                  <span style={{ color: D.purple, fontWeight: 700, fontSize: 13 }}>
-                    信号日报 — {data.date}
-                  </span>
-                </div>
-
-                {summaryOpen && (
-                  <div style={{ padding: "16px 20px", lineHeight: 1.7 }}>
-                    <TerminalMarkdown text={data.report} />
-                  </div>
-                )}
-              </div>
-            )}
-
-            {!morning && !hasReport && (
+            {!morning && !hasReport && !closeEvent && (
               <div style={{ color: D.comment, padding: "20px 0" }}>
                 # 暂无数据
                 <br />
-                早间简报在 8:30 前生成，收盘后生成信号日报。
+                早间简报在 8:30 前生成，收盘后生成收盘简报和信号日报。
               </div>
             )}
           </>
