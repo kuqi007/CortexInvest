@@ -3,7 +3,7 @@ import Database from "better-sqlite3";
 import { readFileSync, writeFileSync, renameSync, existsSync } from "fs";
 import { join } from "path";
 
-import { SIM_DB_PATH } from "../../lib/db";
+import { openConfigDb, openTradingDb } from "../../lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -275,7 +275,7 @@ async function refreshLiveRotation(category: string): Promise<void> {
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 
     // Write to DB (need writable connection)
-    const wdb = new Database(SIM_DB_PATH);
+    const wdb = openTradingDb();
     try {
       // Delete today's data for this category and re-insert (ranks may have changed)
       wdb.prepare("DELETE FROM sector_rotation WHERE date = ? AND category = ?").run(today, category);
@@ -301,7 +301,8 @@ async function refreshLiveRotation(category: string): Promise<void> {
 /* ── GET /api/sector ── */
 
 export async function GET(request: NextRequest) {
-  let db: InstanceType<typeof Database> | null = null;
+  let configDb: InstanceType<typeof Database> | null = null;
+  let tradingDb: InstanceType<typeof Database> | null = null;
   try {
     const url = request.nextUrl;
     const category = url.searchParams.get("category") || "industry";
@@ -312,12 +313,13 @@ export async function GET(request: NextRequest) {
     // Refresh live data from Sina (throttled, trading hours only)
     await refreshLiveRotation(category);
 
-    db = new Database(SIM_DB_PATH, { readonly: true });
+    configDb = openConfigDb(true);
+    tradingDb = openTradingDb(true);
 
     // ── Rotation matrix ──
 
     // Get distinct dates for this category
-    const dateRows = db
+    const dateRows = tradingDb
       .prepare(
         `SELECT DISTINCT date FROM sector_rotation
          WHERE category = ?
@@ -342,7 +344,7 @@ export async function GET(request: NextRequest) {
         for (let displayRank = 1; displayRank <= topN; displayRank++) {
           const cells: Array<{ board: string; change: number }> = [];
           for (const date of dates) {
-            const row = db
+            const row = tradingDb
               .prepare(
                 `SELECT board_name, change_pct FROM sector_rotation
                  WHERE category = ? AND date = ?
@@ -361,7 +363,7 @@ export async function GET(request: NextRequest) {
         }
       } else {
         // 涨幅排序 (default): use stored rank
-        const allRows = db
+        const allRows = tradingDb
           .prepare(
             `SELECT date, board_name, change_pct, rank FROM sector_rotation
              WHERE category = ? AND date IN (${datePlaceholders}) AND rank <= ?
@@ -401,7 +403,7 @@ export async function GET(request: NextRequest) {
     } | null = null;
 
     if (boardFilter) {
-      const boardRows = db
+      const boardRows = tradingDb
         .prepare(
           `SELECT date, rank, change_pct FROM sector_rotation
            WHERE category = ? AND board_name = ?
@@ -431,11 +433,11 @@ export async function GET(request: NextRequest) {
 
     // ── Custom indices (tag-aggregated from DB) ──
 
-    const tagRows = db
+    const tagRows = configDb
       .prepare("SELECT tag, star, watch, baseline_value, parent, created_at FROM tag_meta")
       .all() as TagMetaRow[];
 
-    const stockRows = db
+    const stockRows = configDb
       .prepare(
         `SELECT symbol, name, tags FROM monitor_watchlist
          WHERE hidden = 0 AND tags IS NOT NULL AND tags != '[]'`,
@@ -510,7 +512,7 @@ export async function GET(request: NextRequest) {
 
     // ── Load stock_daily once for real-time index aggregation ──
     // { code → { date → change_pct } }
-    const sdRows = db
+    const sdRows = tradingDb
       .prepare(
         `SELECT date, code, change_pct FROM stock_daily
          WHERE date >= date('now', '-60 days')
@@ -615,7 +617,7 @@ export async function GET(request: NextRequest) {
       // Status from latest alert
       let status: string = "watching";
       try {
-        const latestAlert = db
+        const latestAlert = tradingDb
           .prepare(
             `SELECT alert_type FROM sector_alerts
              WHERE index_id = ?
@@ -690,7 +692,7 @@ export async function GET(request: NextRequest) {
 
     let alerts: AlertRow[] = [];
     try {
-      alerts = db
+      alerts = tradingDb
         .prepare(
           `SELECT ts, date, index_id, index_name, alert_type,
                   cumulative_pct, slope, r_squared, message, display
@@ -700,8 +702,10 @@ export async function GET(request: NextRequest) {
         .all() as AlertRow[];
     } catch { /* table may not exist */ }
 
-    db.close();
-    db = null;
+    configDb.close();
+    tradingDb.close();
+    configDb = null;
+    tradingDb = null;
 
     // Read config meta (alert_rules, rotation) from sector_config.json
     const configMeta = readSectorConfigMeta();
@@ -730,7 +734,10 @@ export async function GET(request: NextRequest) {
     );
   } finally {
     try {
-      db?.close();
+      configDb?.close();
+    } catch { /* already closed */ }
+    try {
+      tradingDb?.close();
     } catch { /* already closed */ }
   }
 }
@@ -752,13 +759,14 @@ export async function POST(request: NextRequest) {
             { status: 400 },
           );
         }
-        db = new Database(SIM_DB_PATH);
+        db = openConfigDb();
         // Check if already exists
         const existing = db
           .prepare("SELECT tag FROM tag_meta WHERE tag = ?")
           .get(tag.trim());
         if (existing) {
           db.close();
+          db = null;
           return NextResponse.json(
             { error: `Tag "${tag}" already exists` },
             { status: 400 },
@@ -781,7 +789,7 @@ export async function POST(request: NextRequest) {
             { status: 400 },
           );
         }
-        db = new Database(SIM_DB_PATH);
+        db = openConfigDb();
         const spResult = db
           .prepare("UPDATE tag_meta SET parent = ?, updated_at = datetime('now') WHERE tag = ?")
           .run(spParent?.trim() || null, spTag);
@@ -804,51 +812,54 @@ export async function POST(request: NextRequest) {
             { status: 400 },
           );
         }
-        db = new Database(SIM_DB_PATH);
-        // Delete from tag_meta
-        const result = db
-          .prepare("DELETE FROM tag_meta WHERE tag = ?")
-          .run(tag);
-        if (result.changes === 0) {
-          db.close();
-          return NextResponse.json(
-            { error: `Tag "${tag}" not found` },
-            { status: 404 },
-          );
-        }
-        // Strip tag from all stocks in monitor_watchlist
-        const rows = db
-          .prepare(
-            `SELECT symbol, tags FROM monitor_watchlist
-             WHERE tags IS NOT NULL AND tags != '[]'`,
-          )
-          .all() as { symbol: string; tags: string }[];
-        const updateStmt = db.prepare(
-          "UPDATE monitor_watchlist SET tags = ?, updated_at = ? WHERE symbol = ?",
-        );
-        const now = Date.now();
-        const tx = db.transaction(() => {
-          for (const row of rows) {
-            try {
-              const tags: string[] = JSON.parse(row.tags || "[]");
-              const idx = tags.indexOf(tag);
-              if (idx !== -1) {
-                tags.splice(idx, 1);
-                updateStmt.run(JSON.stringify(tags), now, row.symbol);
-              }
-            } catch { /* invalid json */ }
+        const configDb2 = openConfigDb();
+        const tradingDb2 = openTradingDb();
+        try {
+          // Delete from tag_meta (config)
+          const result = configDb2
+            .prepare("DELETE FROM tag_meta WHERE tag = ?")
+            .run(tag);
+          if (result.changes === 0) {
+            return NextResponse.json(
+              { error: `Tag "${tag}" not found` },
+              { status: 404 },
+            );
           }
-        });
-        tx();
-        // Delete associated DB rows
-        try {
-          db.prepare("DELETE FROM sector_daily WHERE index_id = ?").run(tag);
-        } catch { /* table may not exist */ }
-        try {
-          db.prepare("DELETE FROM sector_alerts WHERE index_id = ?").run(tag);
-        } catch { /* table may not exist */ }
-        db.close();
-        db = null;
+          // Strip tag from all stocks in monitor_watchlist (config)
+          const rows = configDb2
+            .prepare(
+              `SELECT symbol, tags FROM monitor_watchlist
+               WHERE tags IS NOT NULL AND tags != '[]'`,
+            )
+            .all() as { symbol: string; tags: string }[];
+          const updateStmt = configDb2.prepare(
+            "UPDATE monitor_watchlist SET tags = ?, updated_at = ? WHERE symbol = ?",
+          );
+          const now = Date.now();
+          const tx = configDb2.transaction(() => {
+            for (const row of rows) {
+              try {
+                const tags: string[] = JSON.parse(row.tags || "[]");
+                const idx = tags.indexOf(tag);
+                if (idx !== -1) {
+                  tags.splice(idx, 1);
+                  updateStmt.run(JSON.stringify(tags), now, row.symbol);
+                }
+              } catch { /* invalid json */ }
+            }
+          });
+          tx();
+          // Delete associated DB rows (trading)
+          try {
+            tradingDb2.prepare("DELETE FROM sector_daily WHERE index_id = ?").run(tag);
+          } catch { /* table may not exist */ }
+          try {
+            tradingDb2.prepare("DELETE FROM sector_alerts WHERE index_id = ?").run(tag);
+          } catch { /* table may not exist */ }
+        } finally {
+          configDb2.close();
+          tradingDb2.close();
+        }
         return NextResponse.json({ ok: true, action: "delete-tag", tag });
       }
 
@@ -862,47 +873,51 @@ export async function POST(request: NextRequest) {
           );
         }
         // Look up the tag name: try tag_meta directly first (id might be tag name)
-        db = new Database(SIM_DB_PATH);
-        const tagRow = db
-          .prepare("SELECT tag FROM tag_meta WHERE tag = ?")
-          .get(id) as { tag: string } | undefined;
-        const tagName = tagRow?.tag || id;
+        const configDb3 = openConfigDb();
+        const tradingDb3 = openTradingDb();
+        try {
+          const tagRow = configDb3
+            .prepare("SELECT tag FROM tag_meta WHERE tag = ?")
+            .get(id) as { tag: string } | undefined;
+          const tagName = tagRow?.tag || id;
 
-        // Delete from tag_meta
-        db.prepare("DELETE FROM tag_meta WHERE tag = ?").run(tagName);
-        // Strip tag from stocks
-        const stocksWithTag = db
-          .prepare(
-            `SELECT symbol, tags FROM monitor_watchlist
-             WHERE tags IS NOT NULL AND tags != '[]'`,
-          )
-          .all() as { symbol: string; tags: string }[];
-        const updStmt = db.prepare(
-          "UPDATE monitor_watchlist SET tags = ?, updated_at = ? WHERE symbol = ?",
-        );
-        const nowTs = Date.now();
-        const delTx = db.transaction(() => {
-          for (const row of stocksWithTag) {
-            try {
-              const tags: string[] = JSON.parse(row.tags || "[]");
-              const tidx = tags.indexOf(tagName);
-              if (tidx !== -1) {
-                tags.splice(tidx, 1);
-                updStmt.run(JSON.stringify(tags), nowTs, row.symbol);
-              }
-            } catch { /* invalid json */ }
-          }
-        });
-        delTx();
-        // Delete DB rows
-        try {
-          db.prepare("DELETE FROM sector_daily WHERE index_id = ?").run(tagName);
-        } catch { /* table may not exist */ }
-        try {
-          db.prepare("DELETE FROM sector_alerts WHERE index_id = ?").run(tagName);
-        } catch { /* table may not exist */ }
-        db.close();
-        db = null;
+          // Delete from tag_meta (config)
+          configDb3.prepare("DELETE FROM tag_meta WHERE tag = ?").run(tagName);
+          // Strip tag from stocks (config)
+          const stocksWithTag = configDb3
+            .prepare(
+              `SELECT symbol, tags FROM monitor_watchlist
+               WHERE tags IS NOT NULL AND tags != '[]'`,
+            )
+            .all() as { symbol: string; tags: string }[];
+          const updStmt = configDb3.prepare(
+            "UPDATE monitor_watchlist SET tags = ?, updated_at = ? WHERE symbol = ?",
+          );
+          const nowTs = Date.now();
+          const delTx = configDb3.transaction(() => {
+            for (const row of stocksWithTag) {
+              try {
+                const tags: string[] = JSON.parse(row.tags || "[]");
+                const tidx = tags.indexOf(tagName);
+                if (tidx !== -1) {
+                  tags.splice(tidx, 1);
+                  updStmt.run(JSON.stringify(tags), nowTs, row.symbol);
+                }
+              } catch { /* invalid json */ }
+            }
+          });
+          delTx();
+          // Delete DB rows (trading)
+          try {
+            tradingDb3.prepare("DELETE FROM sector_daily WHERE index_id = ?").run(tagName);
+          } catch { /* table may not exist */ }
+          try {
+            tradingDb3.prepare("DELETE FROM sector_alerts WHERE index_id = ?").run(tagName);
+          } catch { /* table may not exist */ }
+        } finally {
+          configDb3.close();
+          tradingDb3.close();
+        }
         return NextResponse.json({ ok: true, action: "delete", id });
       }
 
@@ -914,7 +929,7 @@ export async function POST(request: NextRequest) {
             { status: 400 },
           );
         }
-        db = new Database(SIM_DB_PATH);
+        db = openConfigDb();
         const wResult = db
           .prepare("UPDATE tag_meta SET watch = ?, updated_at = datetime('now') WHERE tag = ?")
           .run(value ? 1 : 0, id);
@@ -937,7 +952,7 @@ export async function POST(request: NextRequest) {
             { status: 400 },
           );
         }
-        db = new Database(SIM_DB_PATH);
+        db = openConfigDb();
         const sResult = db
           .prepare("UPDATE tag_meta SET star = ?, updated_at = datetime('now') WHERE tag = ?")
           .run(value ? 1 : 0, id);
@@ -960,33 +975,37 @@ export async function POST(request: NextRequest) {
             { status: 400 },
           );
         }
-        db = new Database(SIM_DB_PATH);
-        // Get latest index value from sector_daily
-        const latestRow = db
-          .prepare(
-            `SELECT index_value FROM sector_daily
-             WHERE index_id = ?
-             ORDER BY date DESC LIMIT 1`,
-          )
-          .get(id) as { index_value: number } | undefined;
-        const newBaseline = latestRow?.index_value || 100;
-        const rbResult = db
-          .prepare("UPDATE tag_meta SET baseline_value = ?, updated_at = datetime('now') WHERE tag = ?")
-          .run(newBaseline, id);
-        db.close();
-        db = null;
-        if (rbResult.changes === 0) {
-          return NextResponse.json(
-            { error: `Tag "${id}" not found` },
-            { status: 404 },
-          );
+        // Read latest index value from trading DB, write baseline to config DB
+        const tradingDb4 = openTradingDb(true);
+        const configDb4 = openConfigDb();
+        try {
+          const latestRow = tradingDb4
+            .prepare(
+              `SELECT index_value FROM sector_daily
+               WHERE index_id = ?
+               ORDER BY date DESC LIMIT 1`,
+            )
+            .get(id) as { index_value: number } | undefined;
+          const newBaseline = latestRow?.index_value || 100;
+          const rbResult = configDb4
+            .prepare("UPDATE tag_meta SET baseline_value = ?, updated_at = datetime('now') WHERE tag = ?")
+            .run(newBaseline, id);
+          if (rbResult.changes === 0) {
+            return NextResponse.json(
+              { error: `Tag "${id}" not found` },
+              { status: 404 },
+            );
+          }
+          return NextResponse.json({
+            ok: true,
+            action: "reset-baseline",
+            id,
+            baseline: newBaseline,
+          });
+        } finally {
+          tradingDb4.close();
+          configDb4.close();
         }
-        return NextResponse.json({
-          ok: true,
-          action: "reset-baseline",
-          id,
-          baseline: newBaseline,
-        });
       }
 
       case "config": {
