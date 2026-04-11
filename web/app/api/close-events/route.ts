@@ -1,8 +1,5 @@
 import { NextResponse } from "next/server";
-import Database from "better-sqlite3";
-import { join } from "path";
-
-const SIM_DB_PATH = join(process.cwd(), "..", "src", "data", "sim_trading.db");
+import { openTradingDb } from "../../lib/db";
 
 /**
  * GET /api/close-events
@@ -12,7 +9,7 @@ const SIM_DB_PATH = join(process.cwd(), "..", "src", "data", "sim_trading.db");
  */
 export async function GET() {
   try {
-    const db = new Database(SIM_DB_PATH, { readonly: true });
+    const db = openTradingDb(true);
     
     const today = new Date().toISOString().slice(0, 10);
     

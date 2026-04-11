@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { readFileSync } from "fs";
 import { join } from "path";
-import Database from "better-sqlite3";
-import { SIM_DB_PATH } from "../../lib/db";
+import { openTradingDb } from "../../lib/db";
 
 const DATA_PATH = join(process.cwd(), "..", "src", "data", "market_data.json");
 const CONFIG_PATH = join(process.cwd(), "..", "src", "data", "monitor_config.json");
@@ -65,7 +64,7 @@ function readMonitorConfigFromDb(): {
   settings: Record<string, number>;
   empty: boolean;
 } {
-  const db = new Database(SIM_DB_PATH, { readonly: true });
+  const db = openTradingDb(true);
   try {
     const watchRows = db
       .prepare(
@@ -217,7 +216,7 @@ export async function GET() {
       const now = new Date();
       const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
       
-      const db = new Database(SIM_DB_PATH, { readonly: true });
+      const db = openTradingDb(true);
       data.alertEvents = db
         .prepare(
           "SELECT ts, time, symbol, kind, level, message, display, change_pct " +

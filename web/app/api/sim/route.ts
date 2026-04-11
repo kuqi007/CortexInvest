@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
-import Database from "better-sqlite3";
 import { join } from "path";
 
 import { readFileSync } from "fs";
-import { SIM_DB_PATH } from "../../lib/db";
+import { openTradingDb } from "../../lib/db";
 
 const MARKET_DATA_PATH = join(process.cwd(), "..", "src", "data", "market_data.json");
 const CONFIG_PATH = join(process.cwd(), "..", "src", "data", "monitor_config.json");
@@ -191,7 +190,7 @@ function round(n: number, d: number): number {
 
 export async function GET() {
   try {
-    const db = new Database(SIM_DB_PATH, { readonly: true });
+    const db = openTradingDb(true);
 
     const trades = db
       .prepare(
@@ -385,7 +384,7 @@ export async function GET() {
     // Trade plan events from SQLite
     let planEvents: Record<string, unknown>[] = [];
     try {
-      const evDb = new Database(SIM_DB_PATH, { readonly: true });
+      const evDb = openTradingDb(true);
       planEvents = evDb
         .prepare("SELECT * FROM trade_plan_events ORDER BY ts DESC LIMIT 50")
         .all() as Record<string, unknown>[];
