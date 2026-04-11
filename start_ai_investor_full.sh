@@ -113,6 +113,10 @@ do_start() {
   # 检查 terminal-notifier 依赖
   _check_terminal_notifier
 
+  # DB split migration (idempotent, skips if already done)
+  echo "Checking DB migration..."
+  uv run python scripts/migrate_split_db.py
+
   # 早间简报（Python 内部检查日期）
   cd "$DIR"
   uv run python -c "from src.tools.daily_summary_generator import generate_morning_briefing; generate_morning_briefing()" >> "$DIR/logs/morning_briefing.log" 2>&1
