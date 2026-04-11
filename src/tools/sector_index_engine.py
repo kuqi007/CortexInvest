@@ -26,7 +26,7 @@ import re
 import akshare as ak
 import requests as _requests
 
-from src.sim_trading.db import get_connection, init_db
+from src.sim_trading.db import get_config_connection, get_connection, init_db
 
 logger = logging.getLogger("sector_engine")
 
@@ -73,7 +73,7 @@ def _load_tag_indices() -> dict:
                    "star": True, "watch": True, "baseline_value": 100,
                    "created_at": "2026-02-27", "parent": None}}
     """
-    conn = get_connection()
+    conn = get_config_connection()
     try:
         # Get all tags from tag_meta (including parent column)
         tags = conn.execute(

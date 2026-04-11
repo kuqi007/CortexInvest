@@ -15,14 +15,12 @@ Usage:
 from __future__ import annotations
 
 import json
-import sqlite3
 from pathlib import Path
 from typing import Any
 
-from src.sim_trading.db import CONFIG_DB_PATH
+from src.sim_trading.db import get_config_connection
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-DB_PATH = CONFIG_DB_PATH
 JSON_PATH = PROJECT_ROOT / "src" / "data" / "monitor_config.json"
 
 
@@ -47,9 +45,8 @@ def _int_or_none(v: Any) -> int | None:
 def _read_from_db() -> dict[str, Any] | None:
     """Read config from SQLite. Returns None if DB/table not available."""
     try:
-        conn = sqlite3.connect(str(DB_PATH))
-        conn.row_factory = sqlite3.Row
-        
+        conn = get_config_connection()
+
         # Check if table exists
         cursor = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='monitor_watchlist'"
@@ -57,22 +54,22 @@ def _read_from_db() -> dict[str, Any] | None:
         if not cursor.fetchone():
             conn.close()
             return None
-        
+
         # Read watchlist
         rows = conn.execute(
             """
-            SELECT symbol, name, alias, list_type, cost, shares, lot, 
+            SELECT symbol, name, alias, list_type, cost, shares, lot,
                    hidden, star, dip_buy, tags, watch_price, watch_price_date
             FROM monitor_watchlist
             ORDER BY symbol
             """
         ).fetchall()
-        
+
         # Read settings
         settings_rows = conn.execute(
             "SELECT key, value FROM monitor_settings ORDER BY key"
         ).fetchall()
-        
+
         conn.close()
         
         watchlist: dict[str, dict[str, Any]] = {}

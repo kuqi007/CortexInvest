@@ -1147,14 +1147,16 @@ def check_mainline_alerts() -> list[dict]:
     Same algorithm as sector_index_engine.detect_mainline but returns alert dicts
     instead of writing to sector_alerts table.
     """
-    from src.sim_trading.db import get_connection
+    from src.sim_trading.db import get_config_connection, get_connection
 
     today_str = datetime.now().strftime("%Y-%m-%d")
 
-    conn = get_connection()
+    # tag_meta is in config.db, sector_daily is in trading.db
+    cfg_conn = get_config_connection()
+    trading_conn = get_connection()
     try:
-        # Load tag indices from DB (tag_meta + monitor_watchlist)
-        tags = conn.execute(
+        # Load tag indices from config DB
+        tags = cfg_conn.execute(
             "SELECT tag, star, watch, baseline_value, created_at FROM tag_meta"
         ).fetchall()
         if not tags:
@@ -1176,8 +1178,8 @@ def check_mainline_alerts() -> list[dict]:
             if not watch:
                 continue
 
-            # Get last N days of index values
-            daily_rows = conn.execute(
+            # Get last N days of index values (sector_daily is in trading.db)
+            daily_rows = trading_conn.execute(
                 "SELECT date, index_value FROM sector_daily"
                 " WHERE index_id = ? AND date <= ?"
                 " ORDER BY date DESC LIMIT ?",
@@ -1261,7 +1263,8 @@ def check_mainline_alerts() -> list[dict]:
         logger.warning("check_mainline_alerts failed: %s", e)
         return []
     finally:
-        conn.close()
+        cfg_conn.close()
+        trading_conn.close()
 
 
 def write_alert_events(alerts: list[dict]):
@@ -2255,11 +2258,11 @@ class WatchDriftTracker:
 
         quotes = {symbol: {"price": float, "name": str, ...}}
         """
-        from src.sim_trading.db import get_connection
+        from src.sim_trading.db import get_config_connection
 
         alerts = []
         try:
-            conn = get_connection()
+            conn = get_config_connection()
             rows = conn.execute(
                 "SELECT symbol, name, watch_price, tags, star, list_type, hidden "
                 "FROM monitor_watchlist WHERE watch_price IS NOT NULL AND watch_price > 0"
@@ -2303,11 +2306,11 @@ class WatchDriftTracker:
 
         Reads tag_meta to get baseline and star/watch status.
         """
-        from src.sim_trading.db import get_connection
+        from src.sim_trading.db import get_config_connection
 
         alerts = []
         try:
-            conn = get_connection()
+            conn = get_config_connection()
             tags = conn.execute(
                 "SELECT tag, star, watch, baseline_value FROM tag_meta WHERE watch = 1"
             ).fetchall()

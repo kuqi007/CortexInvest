@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from . import db as db_mod
+from . import futu_position_sync as futu_sync_mod
 from .futu_position_sync import FutuPositionSync, _get_watch_row
 
 
@@ -240,6 +241,7 @@ class TestFutuSyncRecordsChange:
         """FutuPositionSync.sync_live_state writes a log entry when shares/cost change."""
         old_override = db_mod._db_path_override
         old_get_conn = db_mod.get_connection
+        old_fps_get_config = futu_sync_mod.get_config_connection
 
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             tname = f.name
@@ -264,6 +266,7 @@ class TestFutuSyncRecordsChange:
             test_conn.commit()
 
             db_mod.get_connection = lambda: test_conn
+            futu_sync_mod.get_config_connection = lambda: test_conn
 
             mock_adapter = MagicMock()
             mock_pos = MockFutuPosition(
@@ -283,9 +286,15 @@ class TestFutuSyncRecordsChange:
             sync._prev_positions = {}
             sync.sync_live_state()
 
-            row = test_conn.execute(
-                "SELECT * FROM position_change_log WHERE symbol='HK00700'"
-            ).fetchone()
+            # sync_live_state closes patched conns; read back via new handle
+            verify = sqlite3.connect(tname)
+            verify.row_factory = sqlite3.Row
+            try:
+                row = verify.execute(
+                    "SELECT * FROM position_change_log WHERE symbol='HK00700'"
+                ).fetchone()
+            finally:
+                verify.close()
 
             assert row is not None, "sync_live_state should have written a log entry"
             assert row["source"] == "sync"
@@ -293,16 +302,17 @@ class TestFutuSyncRecordsChange:
             assert row["shares_to"] == 500
             assert row["cost_from"] == 350.0
             assert row["cost_to"] == 345.0
-
-            test_conn.close()
         finally:
             db_mod._db_path_override = old_override
             db_mod.get_connection = old_get_conn
+            futu_sync_mod.get_config_connection = old_fps_get_config
             import os
             os.unlink(tname)
 
     def test_sync_no_record_when_unchanged(self, tmp_db):
         """No log entry when Futu returns same shares/cost as DB."""
+        original_get_connection = db_mod.get_connection
+        original_fps_get_config = futu_sync_mod.get_config_connection
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             tname = f.name
 
@@ -323,8 +333,8 @@ class TestFutuSyncRecordsChange:
                    "[]", None, now_ts, now_ts))
             test_conn.commit()
 
-            original_get_connection = db_mod.get_connection
             db_mod.get_connection = lambda: test_conn
+            futu_sync_mod.get_config_connection = lambda: test_conn
 
             mock_adapter = MagicMock()
             mock_pos = MockFutuPosition(
@@ -344,14 +354,17 @@ class TestFutuSyncRecordsChange:
             sync._prev_positions = {}
             sync.sync_live_state()
 
-            count = test_conn.execute(
-                "SELECT COUNT(*) FROM position_change_log WHERE symbol='HK00700'"
-            ).fetchone()[0]
+            verify = sqlite3.connect(tname)
+            try:
+                count = verify.execute(
+                    "SELECT COUNT(*) FROM position_change_log WHERE symbol='HK00700'"
+                ).fetchone()[0]
+            finally:
+                verify.close()
             assert count == 0, "No log entry should be written when nothing changed"
-
-            test_conn.close()
         finally:
             db_mod._db_path_override = None
             db_mod.get_connection = original_get_connection
+            futu_sync_mod.get_config_connection = original_fps_get_config
             import os
             os.unlink(tname)

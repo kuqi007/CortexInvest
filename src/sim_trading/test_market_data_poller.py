@@ -27,7 +27,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 @pytest.fixture()
 def tmp_db(tmp_path):
     """Temp DB with monitor_watchlist + monitor_settings tables."""
-    db = tmp_path / "sim_trading.db"
+    db = tmp_path / "config.db"
     conn = sqlite3.connect(str(db))
     conn.executescript("""
         CREATE TABLE monitor_watchlist (
@@ -72,13 +72,19 @@ def stale_json(tmp_path):
     return cfg
 
 
+def _config_db_patch(tmp_db):
+    """Return a patch for db._config_db_path_override to use tmp_db."""
+    import src.sim_trading.db as db_mod
+    return patch.object(db_mod, "_config_db_path_override", str(tmp_db))
+
+
 # ─── 1. load_watchlist_from_db ───────────────────────────────────────────────
 
 def test_load_watchlist_reads_from_db(tmp_db, stale_json):
     """DB has 3 entries; stale JSON has 1. Must return DB data."""
     import src.tools.market_data_poller as poller
 
-    with patch.object(poller, "DB_PATH", tmp_db), \
+    with _config_db_patch(tmp_db), \
          patch.object(poller, "CONFIG_PATH", stale_json):
         watchlist, settings = poller.load_watchlist_from_db()
 
@@ -95,7 +101,7 @@ def test_load_watchlist_fields(tmp_db, stale_json):
     """Verify field mapping from DB columns to watchlist dict."""
     import src.tools.market_data_poller as poller
 
-    with patch.object(poller, "DB_PATH", tmp_db), \
+    with _config_db_patch(tmp_db), \
          patch.object(poller, "CONFIG_PATH", stale_json):
         watchlist, _ = poller.load_watchlist_from_db()
 
@@ -110,7 +116,7 @@ def test_load_settings_from_db(tmp_db, stale_json):
     """Settings should be read from monitor_settings table."""
     import src.tools.market_data_poller as poller
 
-    with patch.object(poller, "DB_PATH", tmp_db), \
+    with _config_db_patch(tmp_db), \
          patch.object(poller, "CONFIG_PATH", stale_json):
         _, settings = poller.load_watchlist_from_db()
 
@@ -122,7 +128,7 @@ def test_load_watchlist_fallback_to_json_when_db_missing(stale_json, tmp_path):
     import src.tools.market_data_poller as poller
 
     missing_db = tmp_path / "nonexistent.db"
-    with patch.object(poller, "DB_PATH", missing_db), \
+    with _config_db_patch(missing_db), \
          patch.object(poller, "CONFIG_PATH", stale_json):
         watchlist, settings = poller.load_watchlist_from_db()
 
@@ -147,7 +153,7 @@ def test_backfill_writes_to_db_not_json(tmp_db, stale_json):
     stocks = [{"code": "000001", "name": "平安银行", "price": 12.5}]
     json_before = stale_json.read_text()
 
-    with patch.object(poller, "DB_PATH", tmp_db):
+    with _config_db_patch(tmp_db):
         updated = poller._backfill_missing_names(stocks, watchlist)
 
     assert updated is True
@@ -169,7 +175,7 @@ def test_backfill_skips_already_named(tmp_db):
     watchlist = {"002080": {"name": "中材科技", "type": "holding"}}
     stocks = [{"code": "002080", "name": "中材科技NEW", "price": 46.0}]
 
-    with patch.object(poller, "DB_PATH", tmp_db):
+    with _config_db_patch(tmp_db):
         updated = poller._backfill_missing_names(stocks, watchlist)
 
     assert updated is False
@@ -195,7 +201,7 @@ def test_backfill_returns_false_when_no_updates_needed(tmp_db):
         {"code": "HK09988", "name": "阿里巴巴", "price": 80.0},
     ]
 
-    with patch.object(poller, "DB_PATH", tmp_db):
+    with _config_db_patch(tmp_db):
         result = poller._backfill_missing_names(stocks, watchlist)
 
     assert result is False
@@ -230,7 +236,7 @@ def test_poll_once_uses_db_watchlist(tmp_db, stale_json, tmp_path):
             for s in symbols if s not in INDEX_CODES
         ], False)  # (stocks, is_sina_fallback)
 
-    with patch.object(poller, "DB_PATH", tmp_db), \
+    with _config_db_patch(tmp_db), \
          patch.object(poller, "CONFIG_PATH", stale_json), \
          patch.object(poller, "OUTPUT_PATH", output), \
          patch(
@@ -307,7 +313,7 @@ def test_poll_once_extracts_chiNext_kc50_to_turnover(tmp_db, stale_json, tmp_pat
             "kc50": 1020.30, "kc50Pct": -0.32,
         }
 
-    with patch.object(poller, "DB_PATH", tmp_db), \
+    with _config_db_patch(tmp_db), \
          patch.object(poller, "CONFIG_PATH", stale_json), \
          patch.object(poller, "OUTPUT_PATH", output), \
          patch("src.tools.market_data_poller.fetch_realtime_with_fallback", side_effect=fake_realtime_fallback), \
@@ -370,7 +376,7 @@ class TestMarketHoursGating:
 
         with patch("src.tools.monitor_lock.MonitorLock", return_value=self._mock_lock()), \
              patch("src.tools.stock_notifier.is_any_market_open", return_value=True), \
-             patch.object(poller, "DB_PATH", tmp_db), \
+             _config_db_patch(tmp_db), \
              patch.object(poller, "CONFIG_PATH", stale_json), \
              patch.object(poller, "load_watchlist_from_db",
                           return_value=({"002080": {"name": "中材科技"}}, {"poll_interval": 1})), \
@@ -404,7 +410,7 @@ class TestMarketHoursGating:
         with patch("src.tools.monitor_lock.MonitorLock", return_value=self._mock_lock()), \
              patch("src.tools.stock_notifier.is_any_market_open", return_value=False), \
              patch("src.tools.trading_calendar.is_trading_day", return_value=False), \
-             patch.object(poller, "DB_PATH", tmp_db), \
+             _config_db_patch(tmp_db), \
              patch.object(poller, "CONFIG_PATH", stale_json), \
              patch.object(poller, "load_watchlist_from_db",
                           return_value=({"002080": {"name": "中材科技"}}, {"poll_interval": 30})), \
@@ -442,7 +448,7 @@ class TestMarketHoursGating:
         with patch("src.tools.monitor_lock.MonitorLock", return_value=self._mock_lock()), \
              patch("src.tools.stock_notifier.is_any_market_open", return_value=False), \
              patch("src.tools.trading_calendar.is_trading_day", return_value=True), \
-             patch.object(poller, "DB_PATH", tmp_db), \
+             _config_db_patch(tmp_db), \
              patch.object(poller, "CONFIG_PATH", stale_json), \
              patch.object(poller, "load_watchlist_from_db",
                           return_value=({"002080": {"name": "中材科技"}}, {"poll_interval": 30})), \
@@ -470,7 +476,7 @@ class TestMarketHoursGating:
 
         with patch("src.tools.monitor_lock.MonitorLock", return_value=self._mock_lock()), \
              patch("src.tools.stock_notifier.is_any_market_open", side_effect=fake_is_open), \
-             patch.object(poller, "DB_PATH", tmp_db), \
+             _config_db_patch(tmp_db), \
              patch.object(poller, "CONFIG_PATH", stale_json), \
              patch.object(poller, "load_watchlist_from_db",
                           return_value=({"HK09988": {"name": "阿里巴巴"}, "002080": {"name": "中材科技"}}, {"poll_interval": 1})), \
@@ -496,7 +502,7 @@ class TestMarketHoursGating:
 
         with patch("src.tools.monitor_lock.MonitorLock", return_value=self._mock_lock()), \
              patch("src.tools.stock_notifier.is_any_market_open", side_effect=fake_is_open), \
-             patch.object(poller, "DB_PATH", tmp_db), \
+             _config_db_patch(tmp_db), \
              patch.object(poller, "CONFIG_PATH", stale_json), \
              patch.object(poller, "load_watchlist_from_db",
                           return_value=({"002080": {"name": "中材科技"}}, {"poll_interval": 1})), \
@@ -523,7 +529,7 @@ def test_poll_once_index_results_empty_on_fetch_failure(tmp_db, stale_json, tmp_
     def fake_realtime_fallback(symbols):
         return ([], True)  # Empty + sina fallback
 
-    with patch.object(poller, "DB_PATH", tmp_db), \
+    with _config_db_patch(tmp_db), \
          patch.object(poller, "CONFIG_PATH", stale_json), \
          patch.object(poller, "OUTPUT_PATH", output), \
          patch("src.tools.market_data_poller.fetch_realtime_with_fallback", side_effect=fake_realtime_fallback), \
