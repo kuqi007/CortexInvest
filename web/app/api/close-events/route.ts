@@ -8,22 +8,19 @@ import { openTradingDb } from "../../lib/db";
  * Filtered by kind = 'market_close' for the current date.
  */
 export async function GET() {
+  const db = openTradingDb(true);
   try {
-    const db = openTradingDb(true);
-    
     const today = new Date().toISOString().slice(0, 10);
-    
+
     const rows = db
       .prepare(
-        `SELECT ts, time, symbol, kind, level, message, display, change_pct 
-         FROM alert_events 
+        `SELECT ts, time, symbol, kind, level, message, display, change_pct
+         FROM alert_events
          WHERE date = ? AND kind = 'market_close'
          ORDER BY ts DESC
          LIMIT 10`
       )
       .all(today);
-    
-    db.close();
 
     if (rows.length === 0) {
       return NextResponse.json({ data: [] });
@@ -48,5 +45,7 @@ export async function GET() {
   } catch (error) {
     console.error("Failed to read close events:", error);
     return NextResponse.json({ data: null }, { status: 500 });
+  } finally {
+    db.close();
   }
 }

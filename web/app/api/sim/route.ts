@@ -189,8 +189,8 @@ function round(n: number, d: number): number {
 /* ── Route Handler ── */
 
 export async function GET() {
+  const db = openTradingDb(true);
   try {
-    const db = openTradingDb(true);
 
     const trades = db
       .prepare(
@@ -235,8 +235,6 @@ export async function GET() {
         )
         .all() as TradeRow[];
     } catch { /* */ }
-
-    db.close();
 
     // Enrich live positions with name + change% from market_data + config
     let marketLookup: Record<string, { name: string; change: number; chgAmt: number; price: number }> = {};
@@ -385,10 +383,13 @@ export async function GET() {
     let planEvents: Record<string, unknown>[] = [];
     try {
       const evDb = openTradingDb(true);
-      planEvents = evDb
-        .prepare("SELECT * FROM trade_plan_events ORDER BY ts DESC LIMIT 50")
-        .all() as Record<string, unknown>[];
-      evDb.close();
+      try {
+        planEvents = evDb
+          .prepare("SELECT * FROM trade_plan_events ORDER BY ts DESC LIMIT 50")
+          .all() as Record<string, unknown>[];
+      } finally {
+        evDb.close();
+      }
     } catch { /* table may not exist yet */ }
 
     return NextResponse.json({
@@ -425,5 +426,7 @@ export async function GET() {
       { error: String(e), summary: null, trades: [], daily_pnl: [], per_strategy: {}, per_stock: {}, positions: {}, live: { positions: [], trades: [], n_positions: 0, total_unrealized: 0, total_market_value: 0, realized_pnl: 0, total_pnl: 0, total_return: 0, current_equity: 0, cash: 0, initial_capital: 0, total_trades: 0, win_rate: 0, profit_factor: 0, total_commission: 0, today_pnl: 0, today_return: 0 } },
       { status: 500 },
     );
+  } finally {
+    db.close();
   }
 }

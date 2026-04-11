@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { openTradingDb } from "../../lib/db";
+import { openConfigDb, openTradingDb } from "../../lib/db";
 
 const DATA_PATH = join(process.cwd(), "..", "src", "data", "market_data.json");
 const CONFIG_PATH = join(process.cwd(), "..", "src", "data", "monitor_config.json");
@@ -64,7 +64,7 @@ function readMonitorConfigFromDb(): {
   settings: Record<string, number>;
   empty: boolean;
 } {
-  const db = openTradingDb(true);
+  const db = openConfigDb(true);
   try {
     const watchRows = db
       .prepare(
@@ -215,32 +215,34 @@ export async function GET() {
     try {
       const now = new Date();
       const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-      
-      const db = openTradingDb(true);
-      data.alertEvents = db
-        .prepare(
-          "SELECT ts, time, symbol, kind, level, message, display, change_pct " +
-          "FROM alert_events WHERE date = ? ORDER BY ts",
-        )
-        .all(today);
-      // 读 indicator_cache 并附到 services
-      try {
-        const indRows = db.prepare(
-          "SELECT symbol, data_json FROM indicator_cache WHERE date = ?"
-        ).all(today) as { symbol: string; data_json: string }[];
-        const indMap: Record<string, unknown> = {};
-        for (const r of indRows) {
-          try { indMap[r.symbol] = JSON.parse(r.data_json); } catch { /* skip */ }
-        }
-        if (Object.keys(indMap).length > 0) {
-          for (const svc of data.services) {
-            const ind = indMap[svc.id];
-            if (ind) (svc as Record<string, unknown>).indicators = ind;
-          }
-        }
-      } catch { /* indicator_cache table may not exist yet */ }
 
-      db.close();
+      const db = openTradingDb(true);
+      try {
+        data.alertEvents = db
+          .prepare(
+            "SELECT ts, time, symbol, kind, level, message, display, change_pct " +
+            "FROM alert_events WHERE date = ? ORDER BY ts",
+          )
+          .all(today);
+        // 读 indicator_cache 并附到 services
+        try {
+          const indRows = db.prepare(
+            "SELECT symbol, data_json FROM indicator_cache WHERE date = ?"
+          ).all(today) as { symbol: string; data_json: string }[];
+          const indMap: Record<string, unknown> = {};
+          for (const r of indRows) {
+            try { indMap[r.symbol] = JSON.parse(r.data_json); } catch { /* skip */ }
+          }
+          if (Object.keys(indMap).length > 0) {
+            for (const svc of data.services) {
+              const ind = indMap[svc.id];
+              if (ind) (svc as Record<string, unknown>).indicators = ind;
+            }
+          }
+        } catch { /* indicator_cache table may not exist yet */ }
+      } finally {
+        db.close();
+      }
     } catch {
       data.alertEvents = [];
     }
