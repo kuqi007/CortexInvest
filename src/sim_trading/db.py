@@ -1,12 +1,79 @@
-"""Database schema and connection for sim_trading.db (SQLite)."""
+"""Database schema and connection for config.db + trading.db (SQLite).
+
+Split from single sim_trading.db into:
+- config.db: monitor config tables (DELETE mode for OneDrive sync)
+- trading.db: all operational data (WAL mode for performance)
+"""
 
 import sqlite3
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent.parent / "data" / "sim_trading.db"
-_db_path_override: str | None = None  # set to ":memory:" in tests
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+CONFIG_DB_PATH = DATA_DIR / "config.db"
+TRADING_DB_PATH = DATA_DIR / "trading.db"
+LEGACY_DB_PATH = DATA_DIR / "sim_trading.db"
 
-SCHEMA = """
+_db_path_override: str | None = None  # set to ":memory:" in tests (trading db)
+_config_db_path_override: str | None = None  # for tests
+
+# Backward compat
+DB_PATH = TRADING_DB_PATH
+
+CONFIG_SCHEMA = """
+-- Monitor 配置（DB 为主，JSON 为快照）
+CREATE TABLE IF NOT EXISTS monitor_watchlist (
+    symbol TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    list_type TEXT NOT NULL CHECK (list_type IN ('holding', 'watching')),
+    cost REAL,
+    shares INTEGER,
+    lot INTEGER,
+    hidden INTEGER NOT NULL DEFAULT 0,
+    star INTEGER NOT NULL DEFAULT 0,
+    dip_buy INTEGER NOT NULL DEFAULT 0,
+    tags TEXT DEFAULT '[]',
+    watch_price REAL,
+    watch_price_date TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_monitor_watchlist_type ON monitor_watchlist(list_type);
+CREATE INDEX IF NOT EXISTS idx_monitor_watchlist_updated ON monitor_watchlist(updated_at);
+
+CREATE TABLE IF NOT EXISTS monitor_settings (
+    key TEXT PRIMARY KEY,
+    value REAL NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS tag_meta (
+    tag TEXT PRIMARY KEY,
+    star INTEGER DEFAULT 0,
+    watch INTEGER DEFAULT 1,
+    baseline_value REAL DEFAULT 100,
+    parent TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- 持仓变更记录
+CREATE TABLE IF NOT EXISTS position_change_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    ts TEXT NOT NULL,
+    source TEXT NOT NULL,
+    shares_from INTEGER,
+    shares_to INTEGER,
+    cost_from REAL,
+    cost_to REAL
+);
+CREATE INDEX IF NOT EXISTS idx_pcl_symbol ON position_change_log(symbol);
+CREATE INDEX IF NOT EXISTS idx_pcl_ts ON position_change_log(ts);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pcl_unique
+    ON position_change_log(symbol, ts, source, shares_from, shares_to, cost_from, cost_to);
+"""
+
+TRADING_SCHEMA = """
 -- 历史信号归档
 CREATE TABLE IF NOT EXISTS signals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -263,42 +330,6 @@ CREATE TABLE IF NOT EXISTS trade_plan_events (
 CREATE INDEX IF NOT EXISTS idx_tpe_date ON trade_plan_events(date);
 CREATE INDEX IF NOT EXISTS idx_tpe_plan ON trade_plan_events(plan_id);
 
--- Monitor 配置（DB 为主，JSON 为快照）
-CREATE TABLE IF NOT EXISTS monitor_watchlist (
-    symbol TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    list_type TEXT NOT NULL CHECK (list_type IN ('holding', 'watching')),
-    cost REAL,
-    shares INTEGER,
-    lot INTEGER,
-    hidden INTEGER NOT NULL DEFAULT 0,
-    star INTEGER NOT NULL DEFAULT 0,
-    dip_buy INTEGER NOT NULL DEFAULT 0,
-    tags TEXT DEFAULT '[]',
-    watch_price REAL,
-    watch_price_date TEXT,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_monitor_watchlist_type ON monitor_watchlist(list_type);
-CREATE INDEX IF NOT EXISTS idx_monitor_watchlist_updated ON monitor_watchlist(updated_at);
-
-CREATE TABLE IF NOT EXISTS monitor_settings (
-    key TEXT PRIMARY KEY,
-    value REAL NOT NULL,
-    updated_at INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS tag_meta (
-    tag TEXT PRIMARY KEY,
-    star INTEGER DEFAULT 0,
-    watch INTEGER DEFAULT 1,
-    baseline_value REAL DEFAULT 100,
-    parent TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now'))
-);
-
 -- Futu 模拟盘订单审计追踪
 CREATE TABLE IF NOT EXISTS futu_orders (
     order_id TEXT PRIMARY KEY,
@@ -338,28 +369,32 @@ CREATE TABLE IF NOT EXISTS market_amo_history (
     total_yuan REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_amo_history_date ON market_amo_history(date);
-
--- 持仓变更记录
-CREATE TABLE IF NOT EXISTS position_change_log (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    symbol TEXT NOT NULL,
-    ts TEXT NOT NULL,
-    source TEXT NOT NULL,
-    shares_from INTEGER,
-    shares_to INTEGER,
-    cost_from REAL,
-    cost_to REAL
-);
-CREATE INDEX IF NOT EXISTS idx_pcl_symbol ON position_change_log(symbol);
-CREATE INDEX IF NOT EXISTS idx_pcl_ts ON position_change_log(ts);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_pcl_unique
-    ON position_change_log(symbol, ts, source, shares_from, shares_to, cost_from, cost_to);
 """
+
+# Backward compat
+SCHEMA = CONFIG_SCHEMA + TRADING_SCHEMA
+
+
+def get_config_connection() -> sqlite3.Connection:
+    """Config DB — DELETE mode for OneDrive sync."""
+    if _config_db_path_override is not None:
+        path = _config_db_path_override
+    elif _db_path_override is not None:
+        path = _db_path_override  # Fallback for backward compatibility in tests
+    else:
+        path = str(CONFIG_DB_PATH)
+
+    use_uri = path.startswith("file:")
+    conn = sqlite3.connect(path, timeout=10, uri=use_uri, isolation_level=None)
+    conn.execute("PRAGMA journal_mode=DELETE")
+    conn.execute("PRAGMA busy_timeout=5000")
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
 def get_connection() -> sqlite3.Connection:
-    """Get a SQLite connection with WAL mode for concurrent read/write."""
-    path = _db_path_override if _db_path_override is not None else str(DB_PATH)
+    """Trading DB — WAL mode for performance. (existing API, now points to trading.db)"""
+    path = _db_path_override if _db_path_override is not None else str(TRADING_DB_PATH)
     use_uri = path.startswith("file:")
     conn = sqlite3.connect(path, timeout=10, uri=use_uri, isolation_level=None)
     conn.execute("PRAGMA journal_mode=WAL")
@@ -368,26 +403,10 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
-def init_db():
-    """Create all tables if they don't exist."""
-    conn = get_connection()
-    conn.executescript(SCHEMA)
-    # Migration: add daily_score column if missing (existing DBs)
-    try:
-        conn.execute("SELECT daily_score FROM live_state LIMIT 1")
-    except sqlite3.OperationalError:
-        try:
-            conn.execute("ALTER TABLE live_state ADD COLUMN daily_score INTEGER DEFAULT 0")
-        except sqlite3.OperationalError:
-            pass  # column already exists
-    # Migration: add name column to live_state if missing
-    try:
-        conn.execute("SELECT name FROM live_state LIMIT 1")
-    except sqlite3.OperationalError:
-        try:
-            conn.execute("ALTER TABLE live_state ADD COLUMN name TEXT DEFAULT ''")
-        except sqlite3.OperationalError:
-            pass
+def init_config_db():
+    """Create config tables if they don't exist."""
+    conn = get_config_connection()
+    conn.executescript(CONFIG_SCHEMA)
     # Migration: add tags, watch_price, watch_price_date columns to monitor_watchlist
     existing_cols = {
         row[1]
@@ -408,14 +427,6 @@ def init_db():
             conn.execute("ALTER TABLE monitor_watchlist ADD COLUMN watch_price_date TEXT")
         except sqlite3.OperationalError:
             pass
-    # Migration: add atr_at_entry column to live_state if missing
-    try:
-        conn.execute("SELECT atr_at_entry FROM live_state LIMIT 1")
-    except sqlite3.OperationalError:
-        try:
-            conn.execute("ALTER TABLE live_state ADD COLUMN atr_at_entry REAL DEFAULT 0")
-        except sqlite3.OperationalError:
-            pass
     # Migration: add parent column to tag_meta if missing
     tag_meta_cols = {
         row[1]
@@ -430,12 +441,58 @@ def init_db():
     conn.close()
 
 
-if __name__ == "__main__":
-    init_db()
-    print(f"Database initialized at {DB_PATH}")
+def init_trading_db():
+    """Create all trading tables if they don't exist."""
     conn = get_connection()
-    tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-    for t in tables:
-        count = conn.execute(f"SELECT COUNT(*) FROM {t['name']}").fetchone()[0]
-        print(f"  {t['name']}: {count} rows")
+    conn.executescript(TRADING_SCHEMA)
+    # Migration: add daily_score column if missing (existing DBs)
+    try:
+        conn.execute("SELECT daily_score FROM live_state LIMIT 1")
+    except sqlite3.OperationalError:
+        try:
+            conn.execute("ALTER TABLE live_state ADD COLUMN daily_score INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
+    # Migration: add name column to live_state if missing
+    try:
+        conn.execute("SELECT name FROM live_state LIMIT 1")
+    except sqlite3.OperationalError:
+        try:
+            conn.execute("ALTER TABLE live_state ADD COLUMN name TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
+    # Migration: add atr_at_entry column to live_state if missing
+    try:
+        conn.execute("SELECT atr_at_entry FROM live_state LIMIT 1")
+    except sqlite3.OperationalError:
+        try:
+            conn.execute("ALTER TABLE live_state ADD COLUMN atr_at_entry REAL DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
+    conn.commit()
     conn.close()
+
+
+def init_db():
+    """Backward compatible init for existing tests. Initializes both."""
+    init_config_db()
+    init_trading_db()
+
+
+def init_all_dbs():
+    """Explicitly initialize both databases (used in main)."""
+    init_config_db()
+    init_trading_db()
+
+
+if __name__ == "__main__":
+    init_all_dbs()
+    for label, path in [("Config", CONFIG_DB_PATH), ("Trading", TRADING_DB_PATH)]:
+        print(f"\n{label} DB at {path}")
+        conn = sqlite3.connect(str(path))
+        conn.row_factory = sqlite3.Row
+        tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        for t in tables:
+            count = conn.execute(f"SELECT COUNT(*) FROM {t['name']}").fetchone()[0]
+            print(f"  {t['name']}: {count} rows")
+        conn.close()
