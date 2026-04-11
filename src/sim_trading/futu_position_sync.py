@@ -124,35 +124,36 @@ class FutuPositionSync:
                     ),
                 )
 
-            conn.commit()
+                # ── 持仓变更记录（按标的，须与当前 fp 同次循环内写入）──
+                old_row = _get_watch_row(config_conn, code)
+                if old_row:
+                    old_shares = old_row.get("shares")
+                    old_cost = old_row.get("cost")
+                    new_shares = fp.quantity
+                    new_cost = fp.avg_price if fp.avg_price > 0 else None
+                    if old_shares != new_shares or old_cost != new_cost:
+                        now_iso = datetime.now().isoformat(timespec="seconds")
+                        try:
+                            config_conn.execute("""
+                                INSERT OR IGNORE INTO position_change_log
+                                  (symbol, ts, source, shares_from, shares_to, cost_from, cost_to)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                            """, (code, now_iso, "sync",
+                                   old_shares,
+                                   new_shares if new_shares > 0 else None,
+                                   old_cost,
+                                   new_cost))
+                            config_conn.commit()
+                        except Exception as pcl_err:
+                            logger.warning(f"position_change_log write failed: {pcl_err}")
 
-            # ── 持仓变更记录 ──
-            old_row = _get_watch_row(config_conn, code)
-            if old_row:
-                old_shares = old_row.get("shares")
-                old_cost = old_row.get("cost")
-                new_shares = fp.quantity
-                new_cost = fp.avg_price if fp.avg_price > 0 else None
-                if old_shares != new_shares or old_cost != new_cost:
-                    now_iso = datetime.now().isoformat(timespec="seconds")
-                    try:
-                        config_conn.execute("""
-                            INSERT OR IGNORE INTO position_change_log
-                              (symbol, ts, source, shares_from, shares_to, cost_from, cost_to)
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
-                        """, (code, now_iso, "sync",
-                               old_shares,
-                               new_shares if new_shares > 0 else None,
-                               old_cost,
-                               new_cost))
-                        config_conn.commit()
-                    except Exception as pcl_err:
-                        logger.warning(f"position_change_log write failed: {pcl_err}")
+            conn.commit()
         except Exception as e:
             logger.error(f"sync_live_state failed: {e}")
         finally:
             conn.close()
-            config_conn.close()
+            if config_conn is not conn:
+                config_conn.close()
 
         # 更新前一快照（用于 detect_and_save_closed）
         self._prev_positions = positions

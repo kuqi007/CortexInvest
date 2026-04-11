@@ -386,7 +386,11 @@ def get_config_connection() -> sqlite3.Connection:
 
     use_uri = path.startswith("file:")
     conn = sqlite3.connect(path, timeout=10, uri=use_uri, isolation_level=None)
-    conn.execute("PRAGMA journal_mode=DELETE")
+    # Only set DELETE mode when using the real config.db path.
+    # In test mode with _db_path_override, skip to avoid WAL/DELETE conflict
+    # on the same file.
+    if _config_db_path_override is not None or _db_path_override is None:
+        conn.execute("PRAGMA journal_mode=DELETE")
     conn.execute("PRAGMA busy_timeout=5000")
     conn.row_factory = sqlite3.Row
     return conn

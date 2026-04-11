@@ -42,7 +42,6 @@ _futu_enricher = FutuL2Enricher()
 
 CONFIG_PATH = PROJECT_ROOT / "src" / "data" / "monitor_config.json"
 OUTPUT_PATH = PROJECT_ROOT / "src" / "data" / "market_data.json"
-DB_PATH = PROJECT_ROOT / "src" / "data" / "sim_trading.db"
 
 # 确保数据库 schema 包含所有表（包括新增的 market_amo_history）
 init_db()
@@ -71,7 +70,7 @@ def _load_amo_history_from_db(codes: list[str]) -> dict[str, list[float]]:
     if not codes:
         return history
     try:
-        conn = sqlite3.connect(str(DB_PATH))
+        conn = get_connection()
         placeholders = ",".join("?" * len(codes))
         rows = conn.execute(
             f"""
@@ -149,7 +148,7 @@ def _load_market_amo_from_db() -> list[float]:
     hist[0] = 最新（今日），hist[1:] = 历史，用于 AMO 计算。
     """
     try:
-        conn = sqlite3.connect(str(DB_PATH))
+        conn = get_connection()
         rows = conn.execute(
             "SELECT total_yuan FROM market_amo_history ORDER BY date DESC LIMIT 12"
         ).fetchall()
@@ -164,7 +163,7 @@ def _load_market_amo_from_db() -> list[float]:
 def _save_market_amo_to_db(date_str: str, total_yuan: float):
     """Upsert 今日大盘成交额到 SQLite。"""
     try:
-        conn = sqlite3.connect(str(DB_PATH))
+        conn = get_connection()
         conn.execute(
             "INSERT OR REPLACE INTO market_amo_history (date, total_yuan) VALUES (?, ?)",
             (date_str, total_yuan),
@@ -212,8 +211,7 @@ def load_watchlist_from_db() -> tuple[dict, dict]:
     watchlist: dict = {}
     settings: dict = {}
     try:
-        conn = sqlite3.connect(str(DB_PATH))
-        conn.row_factory = sqlite3.Row
+        conn = get_config_connection()
         # watchlist
         rows = conn.execute(
             "SELECT symbol, name, list_type, cost, shares, lot, "
