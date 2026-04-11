@@ -13,7 +13,6 @@ import json
 import logging
 import time
 from datetime import datetime, timedelta
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -181,7 +180,7 @@ def fetch_kline_akshare(symbol: str, days: int = 80) -> pd.DataFrame | None:
 # 指标缓存 (SQLite)
 # ---------------------------------------------------------------------------
 
-DB_PATH = Path(__file__).resolve().parent.parent / "data" / "sim_trading.db"
+from src.sim_trading.db import get_connection
 
 _CREATE_CACHE_TABLE = """
 CREATE TABLE IF NOT EXISTS indicator_cache (
@@ -195,8 +194,7 @@ CREATE TABLE IF NOT EXISTS indicator_cache (
 
 
 def _ensure_cache_table():
-    import sqlite3
-    con = sqlite3.connect(str(DB_PATH))
+    con = get_connection()
     con.execute(_CREATE_CACHE_TABLE)
     con.commit()
     con.close()
@@ -210,8 +208,6 @@ def refresh_indicator_cache(watchlist: dict | None = None, live_quotes: dict | N
         watchlist: {symbol: {name, type, ...}} — None 时从 DB 读取
         live_quotes: {symbol: {price, volume, ...}} — 盘中实时行情，用于 live_price 预估
     """
-    import sqlite3
-
     if watchlist is None:
         from src.utils.config_reader import read_monitor_config
         try:
@@ -261,7 +257,7 @@ def refresh_indicator_cache(watchlist: dict | None = None, live_quotes: dict | N
             continue
 
     if rows:
-        con = sqlite3.connect(str(DB_PATH))
+        con = get_connection()
         con.executemany(
             "INSERT OR REPLACE INTO indicator_cache (symbol, date, data_json, updated_at) VALUES (?, ?, ?, ?)",
             rows,
@@ -273,10 +269,8 @@ def refresh_indicator_cache(watchlist: dict | None = None, live_quotes: dict | N
 
 def read_indicator_cache() -> dict[str, dict]:
     """从 SQLite 读取今日指标缓存。返回 {symbol: indicators_dict}。"""
-    import sqlite3
     try:
-        con = sqlite3.connect(str(DB_PATH))
-        con.row_factory = sqlite3.Row
+        con = get_connection()
         today = datetime.now().strftime("%Y-%m-%d")
         cur = con.execute("SELECT symbol, data_json FROM indicator_cache WHERE date = ?", (today,))
         result = {}

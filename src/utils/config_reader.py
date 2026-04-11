@@ -19,8 +19,10 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from src.sim_trading.db import CONFIG_DB_PATH
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-DB_PATH = PROJECT_ROOT / "src" / "data" / "sim_trading.db"
+DB_PATH = CONFIG_DB_PATH
 JSON_PATH = PROJECT_ROOT / "src" / "data" / "monitor_config.json"
 
 
