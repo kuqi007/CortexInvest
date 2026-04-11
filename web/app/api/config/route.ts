@@ -2,10 +2,10 @@ import { NextResponse } from "next/server";
 import { readFileSync, writeFileSync, renameSync } from "fs";
 import { join } from "path";
 import Database from "better-sqlite3";
+import { openConfigDb } from "../../lib/db";
 
 const CONFIG_PATH = join(process.cwd(), "..", "src", "data", "monitor_config.json");
 const ALERT_PATH = join(process.cwd(), "..", "src", "data", "alert_config.json");
-const SIM_DB_PATH = join(process.cwd(), "..", "src", "data", "sim_trading.db");
 
 import type { WatchEntry, MonitorConfig } from "../../types";
 import { EM_UT } from "../../theme";
@@ -138,13 +138,7 @@ type WatchRow = {
 };
 
 function openMonitorDb(readonly = false): MonitorDb {
-  if (readonly) {
-    return new Database(SIM_DB_PATH, { readonly: true });
-  }
-  const db = new Database(SIM_DB_PATH);
-  db.pragma("journal_mode = WAL");
-  db.pragma("busy_timeout = 15000");
-  return db;
+  return openConfigDb(readonly);
 }
 
 function ensureMonitorTables(db: MonitorDb) {
