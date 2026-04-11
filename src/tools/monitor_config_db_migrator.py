@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from src.sim_trading.db import get_connection, init_db
+from src.sim_trading.db import get_config_connection, init_db
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 MONITOR_CONFIG_PATH = DATA_DIR / "monitor_config.json"
@@ -94,7 +94,7 @@ def read_monitor_config(path: Path = MONITOR_CONFIG_PATH) -> dict[str, Any]:
 
 def import_json_to_db(cfg: dict[str, Any]) -> tuple[int, int]:
     now_ts = int(time.time())
-    conn = get_connection()
+    conn = get_config_connection()
     try:
         with conn:
             conn.execute("DELETE FROM monitor_watchlist")
@@ -139,7 +139,7 @@ def import_json_to_db(cfg: dict[str, Any]) -> tuple[int, int]:
 
 
 def read_config_from_db() -> dict[str, Any]:
-    conn = get_connection()
+    conn = get_config_connection()
     try:
         watch_rows = conn.execute(
             """

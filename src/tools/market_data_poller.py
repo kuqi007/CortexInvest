@@ -25,7 +25,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 # 东方财富 push API 公开 token（所有 quant 库共用）
 EM_UT = "fa5fd1943c7b386f172d6893dbfba10b"
 
-from src.sim_trading.db import init_db
+from src.sim_trading.db import init_db, get_connection, get_config_connection
 from src.tools.futu_enricher import FutuL2Enricher
 from src.tools.stock_monitor import (
     fetch_realtime_eastmoney,
@@ -290,8 +290,7 @@ def _backfill_missing_names(stocks: list[dict], watchlist: dict) -> bool:
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
-        conn = sqlite3.connect(str(DB_PATH))
-        conn.execute("PRAGMA journal_mode=WAL")
+        conn = get_config_connection()
         cur = conn.cursor()
         for code, name in updates.items():
             cur.execute(
@@ -789,6 +788,13 @@ def main():
                 continue
 
             poll_once()
+            # Checkpoint trading.db WAL so OneDrive can sync
+            try:
+                chk_conn = get_connection()
+                chk_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                chk_conn.close()
+            except Exception:
+                pass
     except KeyboardInterrupt:
         print("\nPoller 已停止")
 

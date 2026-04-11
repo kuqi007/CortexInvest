@@ -38,7 +38,8 @@ except ImportError:
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-DB_PATH = PROJECT_ROOT / "src" / "data" / "sim_trading.db"
+from src.sim_trading.db import get_config_connection
+
 JSON_PATH = PROJECT_ROOT / "src" / "data" / "monitor_config.json"
 
 
@@ -145,7 +146,7 @@ def import_stocks_to_db(stocks: list[dict[str, Any]], force_type: str | None = N
     Returns:
         (added_count, updated_count)
     """
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = get_config_connection()
     now_ts = int(time.time())
     
     added = 0
@@ -222,7 +223,7 @@ def import_stocks_to_db(stocks: list[dict[str, Any]], force_type: str | None = N
 
 def export_to_json():
     """导出数据库到 JSON 备份"""
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = get_config_connection()
     conn.row_factory = sqlite3.Row
     
     rows = conn.execute(
