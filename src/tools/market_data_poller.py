@@ -747,16 +747,22 @@ def main():
         sys.exit(1)
     print(f"[POLLER] 成功获取锁 {lock.hostname}")
 
+    from src.tools.stock_notifier import is_any_market_open
+    from src.tools.trading_calendar import is_trading_day
+
     watchlist, settings = load_watchlist_from_db()
     interval = settings.get("poll_interval", 30)
+    has_hk = any(s.startswith("HK") for s in watchlist)
+    IDLE_INTERVAL = 300  # 休市时 5 分钟检查一次
 
     print("Market Data Poller 启动")
     print(f"  标的数: {len(watchlist)}")
-    print(f"  轮询间隔: {interval}s")
+    print(f"  港股: {'是' if has_hk else '否'}")
+    print(f"  轮询间隔: {interval}s (休市 {IDLE_INTERVAL}s)")
     print(f"  输出文件: {OUTPUT_PATH}")
     print("  按 Ctrl+C 退出\n")
 
-    # 启动时立即执行一次
+    # 启动时立即执行一次（确保有初始数据）
     poll_once()
 
     try:
@@ -767,8 +773,21 @@ def main():
                 print("[POLLER] 锁丢失，退出")
                 break
             # 每轮重新读取 DB，这样 watchlist 变化能自动生效
-            _, settings = load_watchlist_from_db()
+            watchlist, settings = load_watchlist_from_db()
             interval = settings.get("poll_interval", 30)
+            has_hk = any(s.startswith("HK") for s in watchlist)
+
+            # 休市判断：非交易日或交易时段外，降低轮询频率
+            if not is_any_market_open(has_hk):
+                cn_trading = is_trading_day("CN")
+                hk_trading = is_trading_day("HK") if has_hk else False
+                if not cn_trading and not hk_trading:
+                    logger.info("非交易日，跳过轮询")
+                else:
+                    logger.info("交易时段外，跳过轮询")
+                interval = IDLE_INTERVAL
+                continue
+
             poll_once()
     except KeyboardInterrupt:
         print("\nPoller 已停止")

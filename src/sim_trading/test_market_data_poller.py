@@ -335,6 +335,182 @@ def test_poll_once_extracts_chiNext_kc50_to_turnover(tmp_db, stale_json, tmp_pat
     assert "002080" in svc_ids
 
 
+# ─── 5. Main loop: market hours gating ─────────────────────────────────────
+
+class TestMarketHoursGating:
+    """Tests for poller main loop skipping poll_once during market-closed hours."""
+
+    @staticmethod
+    def _mock_lock():
+        """Create a fake MonitorLock that always acquires."""
+        from unittest.mock import MagicMock
+        lock = MagicMock()
+        lock.try_acquire.return_value = True
+        lock.hostname = "test-host"
+        lock.refresh_heartbeat.return_value = True
+        return lock
+
+    def test_trading_hours_calls_poll_once(self, tmp_db, stale_json):
+        """During trading hours, poll_once should be called in the loop."""
+        import src.tools.market_data_poller as poller
+
+        call_count = 0
+
+        def fake_poll_once():
+            nonlocal call_count
+            call_count += 1
+
+        sleep_count = 0
+
+        def fake_sleep(secs):
+            nonlocal sleep_count
+            sleep_count += 1
+            if sleep_count >= 2:  # first sleep passes, second raises to break loop
+                raise InterruptedError
+
+        with patch("src.tools.monitor_lock.MonitorLock", return_value=self._mock_lock()), \
+             patch("src.tools.stock_notifier.is_any_market_open", return_value=True), \
+             patch.object(poller, "DB_PATH", tmp_db), \
+             patch.object(poller, "CONFIG_PATH", stale_json), \
+             patch.object(poller, "load_watchlist_from_db",
+                          return_value=({"002080": {"name": "中材科技"}}, {"poll_interval": 1})), \
+             patch.object(poller, "poll_once", side_effect=fake_poll_once), \
+             patch("src.tools.market_data_poller.time.sleep", side_effect=fake_sleep):
+
+            try:
+                poller.main()
+            except (InterruptedError, SystemExit, KeyboardInterrupt):
+                pass
+
+        assert call_count == 2, f"poll_once should be called twice (startup + loop), got {call_count}"
+
+    def test_non_trading_day_skips_poll_once(self, tmp_db, stale_json):
+        """On weekends/holidays, poll_once should NOT be called in the loop."""
+        import src.tools.market_data_poller as poller
+
+        call_count = 0
+
+        def fake_poll_once():
+            nonlocal call_count
+            call_count += 1
+
+        sleep_calls = []
+
+        def fake_sleep(secs):
+            sleep_calls.append(secs)
+            if len(sleep_calls) >= 3:
+                raise KeyboardInterrupt
+
+        with patch("src.tools.monitor_lock.MonitorLock", return_value=self._mock_lock()), \
+             patch("src.tools.stock_notifier.is_any_market_open", return_value=False), \
+             patch("src.tools.trading_calendar.is_trading_day", return_value=False), \
+             patch.object(poller, "DB_PATH", tmp_db), \
+             patch.object(poller, "CONFIG_PATH", stale_json), \
+             patch.object(poller, "load_watchlist_from_db",
+                          return_value=({"002080": {"name": "中材科技"}}, {"poll_interval": 30})), \
+             patch.object(poller, "poll_once", side_effect=fake_poll_once), \
+             patch("src.tools.market_data_poller.time.sleep", side_effect=fake_sleep):
+
+            try:
+                poller.main()
+            except (KeyboardInterrupt, SystemExit):
+                pass
+
+        # poll_once called once at startup, but NOT in the loop
+        assert call_count == 1, f"poll_once should only be called at startup, got {call_count} calls"
+        # Sleep interval should be IDLE_INTERVAL (300) in the loop
+        loop_sleeps = [s for s in sleep_calls if s == 300]
+        assert len(loop_sleeps) >= 1, f"Expected 300s sleep during non-trading day, got {sleep_calls}"
+
+    def test_after_hours_skips_poll_once(self, tmp_db, stale_json):
+        """Trading day but outside trading hours (e.g. 20:00), poll_once should be skipped."""
+        import src.tools.market_data_poller as poller
+
+        call_count = 0
+
+        def fake_poll_once():
+            nonlocal call_count
+            call_count += 1
+
+        sleep_calls = []
+
+        def fake_sleep(secs):
+            sleep_calls.append(secs)
+            if len(sleep_calls) >= 2:
+                raise KeyboardInterrupt
+
+        with patch("src.tools.monitor_lock.MonitorLock", return_value=self._mock_lock()), \
+             patch("src.tools.stock_notifier.is_any_market_open", return_value=False), \
+             patch("src.tools.trading_calendar.is_trading_day", return_value=True), \
+             patch.object(poller, "DB_PATH", tmp_db), \
+             patch.object(poller, "CONFIG_PATH", stale_json), \
+             patch.object(poller, "load_watchlist_from_db",
+                          return_value=({"002080": {"name": "中材科技"}}, {"poll_interval": 30})), \
+             patch.object(poller, "poll_once", side_effect=fake_poll_once), \
+             patch("src.tools.market_data_poller.time.sleep", side_effect=fake_sleep):
+
+            try:
+                poller.main()
+            except (KeyboardInterrupt, SystemExit):
+                pass
+
+        assert call_count == 1, "poll_once should only run at startup, not during after-hours loop"
+        loop_sleeps = [s for s in sleep_calls if s == 300]
+        assert len(loop_sleeps) >= 1, "After-hours should use 300s idle interval"
+
+    def test_has_hk_detected_from_watchlist(self, tmp_db, stale_json):
+        """has_hk should be True when watchlist contains HK-prefixed symbols."""
+        import src.tools.market_data_poller as poller
+
+        has_hk_args = []
+
+        def fake_is_open(hk):
+            has_hk_args.append(hk)
+            raise KeyboardInterrupt
+
+        with patch("src.tools.monitor_lock.MonitorLock", return_value=self._mock_lock()), \
+             patch("src.tools.stock_notifier.is_any_market_open", side_effect=fake_is_open), \
+             patch.object(poller, "DB_PATH", tmp_db), \
+             patch.object(poller, "CONFIG_PATH", stale_json), \
+             patch.object(poller, "load_watchlist_from_db",
+                          return_value=({"HK09988": {"name": "阿里巴巴"}, "002080": {"name": "中材科技"}}, {"poll_interval": 1})), \
+             patch.object(poller, "poll_once"), \
+             patch("src.tools.market_data_poller.time.sleep", side_effect=lambda s: None):
+
+            try:
+                poller.main()
+            except (KeyboardInterrupt, SystemExit):
+                pass
+
+        assert any(a is True for a in has_hk_args), f"has_hk should be True, got {has_hk_args}"
+
+    def test_no_hk_detected_from_watchlist(self, tmp_db, stale_json):
+        """has_hk should be False when watchlist has no HK-prefixed symbols."""
+        import src.tools.market_data_poller as poller
+
+        has_hk_args = []
+
+        def fake_is_open(hk):
+            has_hk_args.append(hk)
+            raise KeyboardInterrupt
+
+        with patch("src.tools.monitor_lock.MonitorLock", return_value=self._mock_lock()), \
+             patch("src.tools.stock_notifier.is_any_market_open", side_effect=fake_is_open), \
+             patch.object(poller, "DB_PATH", tmp_db), \
+             patch.object(poller, "CONFIG_PATH", stale_json), \
+             patch.object(poller, "load_watchlist_from_db",
+                          return_value=({"002080": {"name": "中材科技"}}, {"poll_interval": 1})), \
+             patch.object(poller, "poll_once"), \
+             patch("src.tools.market_data_poller.time.sleep", side_effect=lambda s: None):
+
+            try:
+                poller.main()
+            except (KeyboardInterrupt, SystemExit):
+                pass
+
+        assert any(a is False for a in has_hk_args), f"has_hk should be False, got {has_hk_args}"
+
+
 def test_poll_once_index_results_empty_on_fetch_failure(tmp_db, stale_json, tmp_path):
     """
     When fetch_realtime_with_fallback returns empty list (fetch failure),
