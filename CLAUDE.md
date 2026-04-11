@@ -43,9 +43,6 @@ L1(star,4%,3%,弹窗+声) → L2(holding,6%,5%,弹窗) → L3(watching,threshold
 | [docs/SIM_TRADING.md](docs/SIM_TRADING.md) | 模拟交易 v3、评分系统 |
 | [docs/MONITORING.md](docs/MONITORING.md) | Poller、Notifier、L2 Daemon |
 | [docs/SECTOR.md](docs/SECTOR.md) | 板块指数、主线检测 |
-| [docs/API.md](docs/API.md) | Web API 路由 |
-| [docs/DATABASE.md](docs/DATABASE.md) | SQLite 表结构 |
 | [.claude/rules/sim-trading-safety.md](.claude/rules/sim-trading-safety.md) | 风控硬线、测试覆盖要求 |
 | [docs/notification-system.md](docs/notification-system.md) | 告警分级、时段、dispatch |
 | [docs/futu-api.md](docs/futu-api.md) | Futu API 参数陷阱、额度（调 Futu 接口前必读） |
-| [docs/quant-engineer.md](docs/quant-engineer.md) | 量化分析角色定义（分析信号/策略时加载） |

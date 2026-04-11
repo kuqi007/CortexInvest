@@ -4,7 +4,6 @@
     ".claude/rules/sim-trading-safety.md",
     "docs/futu-api.md",
     "docs/notification-system.md",
-    "docs/quant-engineer.md",
     "AGENTS.md"
   ],
   "agent": {
