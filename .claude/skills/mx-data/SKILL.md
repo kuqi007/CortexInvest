@@ -1,15 +1,16 @@
 ---
-name: eastmoney_fin_data
-display_name: 妙想金融数据 (Eastmoney)
+name: mx-data
+display_name: 妙想金融数据 (MXSKILLS)
+title: 妙想金融数据 skill
 description: 基于东方财富权威数据库的金融数据查询工具，支持行情、财务及关联关系数据。
-homepage: https://marketing.dfcfs.com/views/finskillshub/indexIoMv0EzE
+homepage: https://dl.dfcfs.com/m/itc4
 author: 东方财富妙想团队
 version: 1.0.0
 env:
-  - MX_APIKEY: "通过东方财富妙想平台获取的 API Key"
+  - MX_APIKEY: "通过东方财富妙想Skills页面获取的 API Key"
 ---
 
-# eastmoney_fin_data 妙想金融数据 skill
+# mx-data 妙想金融数据 skill
 
 本 Skill 基于**东方财富权威数据库**及**最新行情底层数据**构建，支持通过**自然语言**查询以下三类数据：
 
@@ -25,33 +26,82 @@ env:
 ## 配置
 
 - **API Key**: 通过环境变量 `MX_APIKEY` 设置
-- **默认输出目录**: `/root/.claude/workspace/mx_data/output/`（自动创建）
+- **默认输出目录**: `/root/.openclaw/workspace/mx_data/output/`（自动创建）
 - **输出文件名前缀**: `mx_data_`
 - **输出文件**:
   - `mx_data_{query}.xlsx` - Excel 文件，每个数据表一个 sheet（多 sheet）
   - `mx_data_{query}_description.txt` - 查询结果描述文件
   - `mx_data_{query}_raw.json` - API 原始 JSON 数据
 
-## 使用方式
+## 使用方式（直接 Python 脚本调用）
 
-1. 在妙想Skills页面获取apikey。(链接:https://marketing.dfcfs.com/views/finskillshub/indexIoMv0EzE)
-2. 将apikey存到环境变量，命名为MX_APIKEY，检查本地环境变量中是否存在，若存在可直接用。
-3. 使用post请求如下接口，务必使用post请求。
+1. 在妙想Skills页面获取apikey。(链接:https://dl.dfcfs.com/m/itc4)
+2. 将apikey存到环境变量，命名为MX_APIKEY：
+   ```bash
+   export MX_APIKEY=your_apikey_here
+   ```
+3. 直接运行 Python 脚本查询，支持自然语言问句：
+
+```bash
+# ==================== 常用调用示例 ====================
+
+# 1. 个股实时行情查询
+python ./mx_data.py "东方财富最新价"
+python ./mx_data.py "贵州茅台今日收盘价 涨跌幅"
+python ./mx_data.py "宁德时代主力资金流向"
+
+# 2. 历史行情数据查询
+python ./mx_data.py "贵州茅台近五年年报收盘价"
+python ./mx_data.py "比亚迪近一年每个交易日的开盘价收盘价成交量"
+
+# 3. 财务数据查询
+python ./mx_data.py "贵州茅台近三年净利润 营业收入"
+python ./mx_data.py "东方财富每股收益 净资产收益率 近五年"
+python ./mx_data.py "万科A资产负债率 毛利率 近三年"
+
+# 4. 上市公司基本信息
+python ./mx_data.py "比亚迪公司简介 主营业务 成立时间"
+python ./mx_data.py "贵州茅台董事长是谁 总股本多少"
+
+# 5. 股东信息
+python ./mx_data.py "贵州茅台十大股东"
+python ./mx_data.py "比亚迪机构持股比例"
+# 6. 板块/指数行情
+python ./mx_data.py "沪深300指数最新点位 涨跌幅"
+python ./mx_data.py "新能源板块成分股平均涨跌幅"
+
+# 7. 指定输出目录（可选）
+python ./mx_data.py "贵州茅台近五年年报" /path/to/output
+```
+
    > ⚠️ **安全注意事项**
    >
    > - **外部请求**: 本 Skill 会将您的查询文本发送至东方财富官方 API 域名 ( `mkapi2.dfcfs.com` ) 以获取金融数据。
    > - **凭据保护**: API Key 仅通过环境变量 `MX_APIKEY` 在服务端或受信任的运行环境中使用，不会在前端明文暴露。
 
-```javascript
-curl -X POST --location 'https://mkapi2.dfcfs.com/finskillshub/api/claw/query' \
---header 'Content-Type: application/json' \
---header 'apikey: YOUR_API_KEY' \
---data '{"toolQuery": "东方财富最新价"}'
-```
-
 ## 数据限制说明
 
 请谨慎查询大数据范围的数据，如某只股票3年的每日最新价，可能会导致返回内容过多，模型上下文爆炸问题。
+
+## 输出说明
+
+脚本执行后会：
+1. 在终端输出查询结果预览（前20行）
+2. 自动创建输出目录 `/root/.openclaw/workspace/mx_data/output/`
+3. 保存完整数据到 Excel 文件（多 sheet）
+4. 保存原始 JSON 响应供二次处理
+5. 保存描述文件记录查询条件和结果统计
+
+## 异常情形与处理方式
+
+| 异常情形 | 可能原因 | 处理方式 |
+|----------|----------|----------|
+| **connect: Connection refused** | 网络无法访问 mkapi2.dfcfs.com | 检查服务器网络配置，确保能访问公网 |
+| **401 Unauthorized / code=114 / API密钥不存在** | API Key 错误或已失效 | 前往妙想Skills页面重新获取 API Key 并更新环境变量 |
+| **code=113 / 今日调用次数已达上限** | 当日调用次数超限 | 前往妙想Skills页面获取更多调用次数 |
+| **数据结果为空 / No dataTable found** | 查询条件太严格或查询内容不支持 | 放宽查询条件，或确认查询内容是否正确 |
+| **返回数据行数过多 / 输出过大** | 查询范围过大（如多年每日数据） | 缩小查询时间范围，减少返回数据量 |
+| **JSON解析错误** | 网络中断或返回内容不完整 | 检查网络后重试 |
 
 ## 返回结果字段释义
 
