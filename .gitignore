@@ -99,6 +99,7 @@ src/data/archive/
 
 # playwright test results & screenshots
 web/test-results/
+.playwright-mcp/
 web/screenshots/*.png
 web/screenshots/final/
 web/screenshots/hk-sort/

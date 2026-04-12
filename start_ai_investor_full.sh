@@ -113,9 +113,14 @@ do_start() {
   # 检查 terminal-notifier 依赖
   _check_terminal_notifier
 
-  # DB split migration (idempotent, skips if already done)
-  echo "Checking DB migration..."
-  uv run python scripts/migrate_split_db.py
+  # DB split migration (skip Python if already done)
+  DATA_DIR="$DIR/src/data"
+  if [ -f "$DATA_DIR/config.db" ] && [ -f "$DATA_DIR/trading.db" ]; then
+    : # already migrated
+  else
+    echo "Checking DB migration..."
+    uv run python scripts/migrate_split_db.py
+  fi
 
   # 早间简报（Python 内部检查日期）
   cd "$DIR"
