@@ -38,8 +38,8 @@ def get_row_counts(db_path: Path) -> dict[str, int]:
 
 
 def main():
-    # Already migrated?
-    if CONFIG_DB.exists() and TRADING_DB.exists() and not LEGACY_DB.exists():
+    # Already migrated? Only check config.db + trading.db (OneDrive may restore sim_trading.db)
+    if CONFIG_DB.exists() and TRADING_DB.exists():
         print("Already migrated. Nothing to do.")
         return
 
