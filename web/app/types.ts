@@ -10,6 +10,7 @@ export interface WatchEntry {
   hidden?: boolean;
   star?: boolean;
   dip_buy?: boolean;
+  pin_order?: number;
   tags?: string[];
   watch_price?: number;
   watch_price_date?: string;
@@ -47,6 +48,7 @@ export interface Service {
   hidden?: boolean;
   star?: boolean;
   dip_buy?: boolean;
+  pin_order?: number;
   tags?: string[];
   watch_price?: number;
   watch_price_date?: string;

@@ -1,0 +1,8 @@
+金融数据查询结果说明
+========================================
+查询内容: 兴森科技机构评级 目标价 一致预期 近90天
+数据文件路径: /Users/zhul1/Documents/dev/openWorkspace/ai-investor/兴森科技_分析数据/mx_data_兴森科技机构评级_目标价_一致预期_近90天.xlsx
+描述文件路径: /Users/zhul1/Documents/dev/openWorkspace/ai-investor/兴森科技_分析数据/mx_data_兴森科技机构评级_目标价_一致预期_近90天_description.txt
+数据行数: 10
+表数量: 2
+Sheet 列表: 兴森科技(002436.SZ)机构评级统计, 兴森科技(002436.SZ)一致预测(评级综合值周期：30)

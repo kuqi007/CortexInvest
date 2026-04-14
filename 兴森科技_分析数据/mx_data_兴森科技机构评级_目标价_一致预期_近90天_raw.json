@@ -1,0 +1,520 @@
+{
+  "success": true,
+  "status": 0,
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "requestId": null,
+    "message": "OK",
+    "status": 0,
+    "code": 0,
+    "data": {
+      "protocolType": "SEARCH_DATA",
+      "id": "86931fca-196c-47db-95ac-a6cc9d178f04",
+      "refSeq": null,
+      "keyEntityList": null,
+      "searchDataResultDTO": {
+        "questionId": "e33533e6-bec0-4bc2-b96f-7bd8ccaf9177",
+        "dataTableDTOList": [
+          {
+            "code": "002436.SZ",
+            "entityName": "时间段",
+            "table": {
+              "headName": [
+                "综合评级",
+                "评级买入家数",
+                "评级增持家数",
+                "评级中性家数",
+                "评级减持家数",
+                "评级卖出家数",
+                "评级机构总家数"
+              ],
+              "row0": [
+                "-",
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "row1": [
+                "-",
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "row2": [
+                "增持",
+                0,
+                1,
+                0,
+                0,
+                0,
+                1
+              ],
+              "row3": [
+                "买入",
+                6,
+                3,
+                0,
+                0,
+                0,
+                9
+              ],
+              "row4": [
+                "买入",
+                10,
+                4,
+                0,
+                0,
+                0,
+                14
+              ]
+            },
+            "rawTable": {
+              "headName": [
+                "综合评级",
+                "评级买入家数",
+                "评级增持家数",
+                "评级中性家数",
+                "评级减持家数",
+                "评级卖出家数",
+                "评级机构总家数"
+              ],
+              "row0": [
+                "-",
+                "0",
+                "0",
+                "0",
+                "0",
+                "0",
+                "0"
+              ],
+              "row1": [
+                "-",
+                "0",
+                "0",
+                "0",
+                "0",
+                "0",
+                "0"
+              ],
+              "row2": [
+                "增持",
+                "0",
+                "1",
+                "0",
+                "0",
+                "0",
+                "1"
+              ],
+              "row3": [
+                "买入",
+                "6",
+                "3",
+                "0",
+                "0",
+                "0",
+                "9"
+              ],
+              "row4": [
+                "买入",
+                "10",
+                "4",
+                "0",
+                "0",
+                "0",
+                "14"
+              ]
+            },
+            "truncateRawTable": {},
+            "nameMap": {
+              "headName": "时间段",
+              "row0": "1月内",
+              "row1": "2月内",
+              "row2": "3月内",
+              "row3": "6月内",
+              "row4": "1年内"
+            },
+            "headNameMap": {},
+            "field": {
+              "returnCode": "RPT_HSF10_RES_ORGRATING",
+              "returnName": "机构评级统计",
+              "classCode": "007202",
+              "checkedRelatedIndicators": false,
+              "startDate": "2026-01-13 00:00:00",
+              "endDate": "2026-04-13 00:00:00",
+              "fuzzy": false,
+              "dateGranularity": "DAY",
+              "defineType": -1,
+              "isLoopN": false,
+              "isGroup": false,
+              "returnSourceCode": "DATE_TYPE,COMPRE_RATING,RATING_BUY_NUM,RATING_ADD_NUM,RATING_NEUTRAL_NUM,RATING_REDUCE_NUM,RATING_SALE_NUM,RATING_ORG_NUM",
+              "returnSourceName": "时间段,综合评级,评级买入家数,评级增持家数,评级中性家数,评级减持家数,评级卖出家数,评级机构总家数",
+              "tableType": "10"
+            },
+            "macroAttributeExcelMap": {},
+            "fieldSet": [
+              {
+                "returnCode": "RPT_HSF10_RES_ORGRATING",
+                "returnName": "机构评级统计",
+                "classCode": "007202",
+                "checkedRelatedIndicators": false,
+                "startDate": "2026-01-13 00:00:00",
+                "endDate": "2026-04-13 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "DAY",
+                "defineType": -1,
+                "isLoopN": false,
+                "isGroup": false,
+                "returnSourceCode": "DATE_TYPE,COMPRE_RATING,RATING_BUY_NUM,RATING_ADD_NUM,RATING_NEUTRAL_NUM,RATING_REDUCE_NUM,RATING_SALE_NUM,RATING_ORG_NUM",
+                "returnSourceName": "时间段,综合评级,评级买入家数,评级增持家数,评级中性家数,评级减持家数,评级卖出家数,评级机构总家数",
+                "tableType": "10"
+              }
+            ],
+            "dataTableType": "F10_TABLE",
+            "inputTitle": "兴森科技(002436.SZ)机构评级统计",
+            "rowInfo": {},
+            "colInfo": {},
+            "indicatorOrder": [
+              "row0",
+              "row1",
+              "row2",
+              "row3",
+              "row4"
+            ],
+            "tipFlags": [],
+            "hasThumbnail": true,
+            "indicatorLimited": false,
+            "dataPositionEnum": "MetricLeftTimeTop",
+            "orderCol": {},
+            "jumpUrlList": [
+              {
+                "choiceUrl": "EM://quoteloader?view=quotestockview&securitycode=002436.SZ&type=f10&weburlposition=#/ylyc/pjtj",
+                "typeName": "F10基本资料",
+                "securityName": "兴森科技"
+              }
+            ],
+            "dataTypeEnum": "F10",
+            "dateRuleSet": [],
+            "freqConvert": false,
+            "deleteInfo": [],
+            "macroCodeMap": {},
+            "entityTagDTO": {
+              "entityId": "1000007431",
+              "entityType": "SEC",
+              "entityTypeCode": "058001001",
+              "entityTypeName": "A股",
+              "classCode": "002001",
+              "className": "沪深京股票",
+              "fullName": "兴森科技",
+              "secuCode": "002436",
+              "market": "0",
+              "marketChar": ".SZ",
+              "correct": false,
+              "hasKLine": false,
+              "valuation": false
+            },
+            "entityTagDTOList": [
+              {
+                "entityId": "1000007431",
+                "entityType": "SEC",
+                "entityTypeCode": "058001001",
+                "entityTypeName": "A股",
+                "classCode": "002001",
+                "className": "沪深京股票",
+                "fullName": "兴森科技",
+                "secuCode": "002436",
+                "market": "0",
+                "marketChar": ".SZ",
+                "correct": false,
+                "hasKLine": false,
+                "valuation": false
+              }
+            ],
+            "indexTable": false,
+            "edbThirdData": false,
+            "dataUpdate": {},
+            "supportsTimeSeries": false,
+            "estimatedTokens": 0,
+            "summaryTips": {
+              "periodicalReport": null
+            },
+            "nestEntityListMap": {},
+            "excelTimeTruncate": false,
+            "frontendEntityName": "兴森科技",
+            "frontendEntityCode": "002436.SZ",
+            "frontendTitle": "机构评级统计",
+            "frontendDesc": "",
+            "indicatorCount": 0,
+            "fieldParameterStr": "",
+            "tdayEnum": "NORMAL"
+          },
+          {
+            "code": "002436.SZ",
+            "entityName": "年份",
+            "table": {
+              "营业总收入(元)": [
+                "53.54亿",
+                "53.6亿",
+                "58.17亿"
+              ],
+              "营业总收入增长率(%)": [
+                "6.23",
+                "0.11",
+                "8.53"
+              ],
+              "归母净利润(元)": [
+                "5.256亿",
+                "2.112亿",
+                "-1.983亿"
+              ],
+              "归母净利润增长率(%)": [
+                "-15.42",
+                "-59.82",
+                "-193.88"
+              ],
+              "EPS(稀释)": [
+                "0.33",
+                "0.13",
+                "-0.12"
+              ],
+              "基准股本(股)": [
+                "16.9亿",
+                "16.9亿",
+                "16.9亿"
+              ],
+              "ROE(摊薄)(%)": [
+                "8.04",
+                "3.96",
+                "-4.02"
+              ],
+              "ROA(%)": [
+                "4.82",
+                "0.92",
+                "-3.71"
+              ],
+              "PE": [
+                "31.11",
+                "117.83",
+                "-94.67"
+              ],
+              "PEG": [
+                "-2.02",
+                "-1.97",
+                "0.49"
+              ],
+              "headName": [
+                "2022A",
+                "2023A",
+                "2024A"
+              ]
+            },
+            "rawTable": {
+              "营业总收入(元)": [
+                "5353854994.29",
+                "5359923893.28",
+                "5817324197.22"
+              ],
+              "营业总收入增长率(%)": [
+                "6.227554510249",
+                "0.113355684763",
+                "8.533708930335"
+              ],
+              "归母净利润(元)": [
+                "525633105.29",
+                "211212047.25",
+                "-198289785.26"
+              ],
+              "归母净利润增长率(%)": [
+                "-15.423723972853",
+                "-59.817590421085",
+                "-193.881853730292"
+              ],
+              "EPS(稀释)": [
+                "0.33",
+                "0.13",
+                "-0.12"
+              ],
+              "基准股本(股)": [
+                "1689546322",
+                "1689594682",
+                "1689599079"
+              ],
+              "ROE(摊薄)(%)": [
+                "8.0389764968",
+                "3.9597753569",
+                "-4.0176337126"
+              ],
+              "ROA(%)": [
+                "4.8229656768",
+                "0.9248066461",
+                "-3.7117023934"
+              ],
+              "PE": [
+                "31.11449320076",
+                "117.829890091603",
+                "-94.666731032447"
+              ],
+              "PEG": [
+                "-2.017313928558",
+                "-1.969820069015",
+                "0.488270197603"
+              ],
+              "headName": [
+                "2022A",
+                "2023A",
+                "2024A"
+              ]
+            },
+            "truncateRawTable": {},
+            "nameMap": {
+              "营业总收入(元)": "营业总收入(元)",
+              "营业总收入增长率(%)": "营业总收入增长率(%)",
+              "归母净利润(元)": "归母净利润(元)",
+              "归母净利润增长率(%)": "归母净利润增长率(%)",
+              "EPS(稀释)": "EPS(稀释)",
+              "基准股本(股)": "基准股本(股)",
+              "ROE(摊薄)(%)": "ROE(摊薄)(%)",
+              "ROA(%)": "ROA(%)",
+              "PE": "PE",
+              "PEG": "PEG",
+              "headName": "headName"
+            },
+            "headNameMap": {},
+            "field": {
+              "returnCode": "RPT_HSF9_RES_CONSISPREDICT",
+              "returnName": "一致预测",
+              "classCode": "007202",
+              "checkedRelatedIndicators": false,
+              "startDate": "2026-01-13 00:00:00",
+              "endDate": "2026-04-13 00:00:00",
+              "fuzzy": false,
+              "dateGranularity": "DAY",
+              "defineType": -1,
+              "isLoopN": false,
+              "isGroup": false,
+              "returnSourceCode": "SECUCODE,SECURITY_NAME_ABBR,CYCLE,YEAR,OPERATE_INCOME,OPERATE_INCOME_RATIO,PARENT_NETPROFIT,PARENT_NETPROFIT_RATIO,EPS,TOTAL_SHARES,ROE,ROA,PE,PEG",
+              "returnSourceName": "证券代码(带后缀),证券名称,评级综合值周期,年份,营业总收入(元),营业总收入增长率(%),归母净利润(元),归母净利润增长率(%),EPS(稀释),基准股本(股),ROE(摊薄)(%),ROA(%),PE,PEG",
+              "headName": "YEAR",
+              "tableType": "10"
+            },
+            "macroAttributeExcelMap": {},
+            "fieldSet": [
+              {
+                "returnCode": "RPT_HSF9_RES_CONSISPREDICT",
+                "returnName": "一致预测",
+                "classCode": "007202",
+                "checkedRelatedIndicators": false,
+                "startDate": "2026-01-13 00:00:00",
+                "endDate": "2026-04-13 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "DAY",
+                "defineType": -1,
+                "isLoopN": false,
+                "isGroup": false,
+                "returnSourceCode": "SECUCODE,SECURITY_NAME_ABBR,CYCLE,YEAR,OPERATE_INCOME,OPERATE_INCOME_RATIO,PARENT_NETPROFIT,PARENT_NETPROFIT_RATIO,EPS,TOTAL_SHARES,ROE,ROA,PE,PEG",
+                "returnSourceName": "证券代码(带后缀),证券名称,评级综合值周期,年份,营业总收入(元),营业总收入增长率(%),归母净利润(元),归母净利润增长率(%),EPS(稀释),基准股本(股),ROE(摊薄)(%),ROA(%),PE,PEG",
+                "headName": "YEAR",
+                "tableType": "10"
+              }
+            ],
+            "dataTableType": "F10_TABLE",
+            "inputTitle": "兴森科技(002436.SZ)一致预测(评级综合值周期：30)",
+            "rowInfo": {},
+            "colInfo": {},
+            "indicatorOrder": [
+              "营业总收入(元)",
+              "营业总收入增长率(%)",
+              "归母净利润(元)",
+              "归母净利润增长率(%)",
+              "EPS(稀释)",
+              "基准股本(股)",
+              "ROE(摊薄)(%)",
+              "ROA(%)",
+              "PE",
+              "PEG"
+            ],
+            "tipFlags": [],
+            "hasThumbnail": true,
+            "indicatorLimited": false,
+            "dataPositionEnum": "MetricLeftTimeTop",
+            "orderCol": {},
+            "jumpUrlList": [],
+            "dataTypeEnum": "F9",
+            "dateRuleSet": [],
+            "freqConvert": false,
+            "deleteInfo": [],
+            "macroCodeMap": {},
+            "entityTagDTO": {
+              "entityId": "1000007431",
+              "entityType": "SEC",
+              "entityTypeCode": "058001001",
+              "entityTypeName": "A股",
+              "classCode": "002001",
+              "className": "沪深京股票",
+              "fullName": "兴森科技",
+              "secuCode": "002436",
+              "market": "0",
+              "marketChar": ".SZ",
+              "correct": false,
+              "hasKLine": false,
+              "valuation": false
+            },
+            "entityTagDTOList": [
+              {
+                "entityId": "1000007431",
+                "entityType": "SEC",
+                "entityTypeCode": "058001001",
+                "entityTypeName": "A股",
+                "classCode": "002001",
+                "className": "沪深京股票",
+                "fullName": "兴森科技",
+                "secuCode": "002436",
+                "market": "0",
+                "marketChar": ".SZ",
+                "correct": false,
+                "hasKLine": false,
+                "valuation": false
+              }
+            ],
+            "indexTable": false,
+            "edbThirdData": false,
+            "dataUpdate": {},
+            "supportsTimeSeries": false,
+            "estimatedTokens": 0,
+            "summaryTips": {
+              "periodicalReport": null
+            },
+            "nestEntityListMap": {},
+            "excelTimeTruncate": false,
+            "frontendEntityName": "兴森科技",
+            "frontendEntityCode": "002436.SZ",
+            "frontendTitle": "一致预测(评级综合值周期：30)",
+            "frontendDesc": "",
+            "indicatorCount": 0,
+            "fieldParameterStr": "",
+            "tdayEnum": "NORMAL"
+          }
+        ],
+        "condition": {
+          "search_data_task_0": [
+            "兴森科技",
+            "机构评级统计一致预测",
+            "2026-01-13至2026-04-13"
+          ]
+        },
+        "entityTagDTOList": []
+      },
+      "entityName": null,
+      "message": null,
+      "tableTruncated": false
+    },
+    "stack": null
+  },
+  "requestId": "73dd44473cc64b89b6c6d96a4e159718"
+}

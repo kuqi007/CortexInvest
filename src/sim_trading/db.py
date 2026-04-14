@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS monitor_watchlist (
     tags TEXT DEFAULT '[]',
     watch_price REAL,
     watch_price_date TEXT,
+    pin_order INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
@@ -418,7 +419,9 @@ def init_config_db():
     }
     if "tags" not in existing_cols:
         try:
-            conn.execute("ALTER TABLE monitor_watchlist ADD COLUMN tags TEXT DEFAULT '[]'")
+            conn.execute(
+                "ALTER TABLE monitor_watchlist ADD COLUMN tags TEXT DEFAULT '[]'"
+            )
         except sqlite3.OperationalError:
             pass
     if "watch_price" not in existing_cols:
@@ -428,17 +431,30 @@ def init_config_db():
             pass
     if "watch_price_date" not in existing_cols:
         try:
-            conn.execute("ALTER TABLE monitor_watchlist ADD COLUMN watch_price_date TEXT")
+            conn.execute(
+                "ALTER TABLE monitor_watchlist ADD COLUMN watch_price_date TEXT"
+            )
         except sqlite3.OperationalError:
             pass
     # Migration: add parent column to tag_meta if missing
     tag_meta_cols = {
-        row[1]
-        for row in conn.execute("PRAGMA table_info(tag_meta)").fetchall()
+        row[1] for row in conn.execute("PRAGMA table_info(tag_meta)").fetchall()
     }
     if "parent" not in tag_meta_cols:
         try:
             conn.execute("ALTER TABLE tag_meta ADD COLUMN parent TEXT")
+        except sqlite3.OperationalError:
+            pass
+    # Migration: add pin_order column to monitor_watchlist if missing
+    wl_cols = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(monitor_watchlist)").fetchall()
+    }
+    if "pin_order" not in wl_cols:
+        try:
+            conn.execute(
+                "ALTER TABLE monitor_watchlist ADD COLUMN pin_order INTEGER NOT NULL DEFAULT 0"
+            )
         except sqlite3.OperationalError:
             pass
     conn.commit()
@@ -454,7 +470,9 @@ def init_trading_db():
         conn.execute("SELECT daily_score FROM live_state LIMIT 1")
     except sqlite3.OperationalError:
         try:
-            conn.execute("ALTER TABLE live_state ADD COLUMN daily_score INTEGER DEFAULT 0")
+            conn.execute(
+                "ALTER TABLE live_state ADD COLUMN daily_score INTEGER DEFAULT 0"
+            )
         except sqlite3.OperationalError:
             pass
     # Migration: add name column to live_state if missing
@@ -470,7 +488,9 @@ def init_trading_db():
         conn.execute("SELECT atr_at_entry FROM live_state LIMIT 1")
     except sqlite3.OperationalError:
         try:
-            conn.execute("ALTER TABLE live_state ADD COLUMN atr_at_entry REAL DEFAULT 0")
+            conn.execute(
+                "ALTER TABLE live_state ADD COLUMN atr_at_entry REAL DEFAULT 0"
+            )
         except sqlite3.OperationalError:
             pass
     conn.commit()
@@ -495,7 +515,9 @@ if __name__ == "__main__":
         print(f"\n{label} DB at {path}")
         conn = sqlite3.connect(str(path))
         conn.row_factory = sqlite3.Row
-        tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        tables = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
         for t in tables:
             count = conn.execute(f"SELECT COUNT(*) FROM {t['name']}").fetchone()[0]
             print(f"  {t['name']}: {count} rows")

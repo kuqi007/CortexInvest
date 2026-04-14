@@ -26,6 +26,7 @@ type DbWatchRow = {
   tags: string | null;
   watch_price: number | null;
   watch_price_date: string | null;
+  pin_order: number;
 };
 
 function mergeSplitLists(
@@ -68,7 +69,7 @@ function readMonitorConfigFromDb(): {
   try {
     const watchRows = db
       .prepare(
-        `SELECT symbol, name, alias, list_type, cost, shares, hidden, star, dip_buy, tags, watch_price, watch_price_date
+        `SELECT symbol, name, alias, list_type, cost, shares, hidden, star, dip_buy, tags, watch_price, watch_price_date, pin_order
          FROM monitor_watchlist`,
       )
       .all() as DbWatchRow[];
@@ -94,6 +95,7 @@ function readMonitorConfigFromDb(): {
         tags: parsedTags,
         watch_price: r.watch_price,
         watch_price_date: r.watch_price_date,
+        pin_order: r.pin_order,
       };
     }
 
@@ -205,6 +207,7 @@ export async function GET() {
           ...(entry.tags ? { tags: entry.tags } : {}),
           ...(entry.watch_price != null ? { watch_price: Number(entry.watch_price) } : {}),
           ...(entry.watch_price_date ? { watch_price_date: entry.watch_price_date } : {}),
+          ...((entry as Record<string, unknown>).pin_order != null ? { pin_order: (entry as Record<string, unknown>).pin_order } : {}),
         };
       }).filter(Boolean);
     }

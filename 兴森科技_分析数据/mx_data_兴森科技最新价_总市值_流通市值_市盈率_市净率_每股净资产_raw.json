@@ -1,0 +1,792 @@
+{
+  "success": true,
+  "status": 0,
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "requestId": null,
+    "message": "OK",
+    "status": 0,
+    "code": 0,
+    "data": {
+      "protocolType": "SEARCH_DATA",
+      "id": "98937cc6-6574-4c18-aba3-80c722cd5aac",
+      "refSeq": null,
+      "keyEntityList": null,
+      "searchDataResultDTO": {
+        "questionId": "f504db44-b1b2-427d-8c5f-2b9142b7ac72",
+        "dataTableDTOList": [
+          {
+            "code": "002436.SZ",
+            "entityName": "兴森科技(002436.SZ)",
+            "table": {
+              "f21": [
+                "381.1亿"
+              ],
+              "f20": [
+                "428.8亿"
+              ],
+              "f23": [
+                "7.95"
+              ],
+              "f2": [
+                "25.23"
+              ],
+              "f115": [
+                "-1218"
+              ],
+              "headName": [
+                "2026-04-13 14:35"
+              ]
+            },
+            "rawTable": {
+              "f21": [
+                "38109845769"
+              ],
+              "f20": [
+                "42882763994"
+              ],
+              "f23": [
+                "7.95"
+              ],
+              "f2": [
+                "25.23"
+              ],
+              "f115": [
+                "-1218.39"
+              ],
+              "headName": [
+                "2026-04-13 14:35"
+              ]
+            },
+            "truncateRawTable": {},
+            "nameMap": {
+              "f21": "流通市值",
+              "headNameSub": "数据来源",
+              "f20": "总市值",
+              "f23": "市净率",
+              "f2": "最新价",
+              "f115": "市盈率(TTM)"
+            },
+            "headNameMap": {},
+            "field": {
+              "returnCode": "LTSZ_f21_3",
+              "returnName": "流通市值",
+              "classCode": "007001",
+              "checkedRelatedIndicators": true,
+              "startDate": "2026-04-13 00:00:00",
+              "endDate": "2026-04-13 00:00:00",
+              "fuzzy": true,
+              "defineType": 0,
+              "isLoopN": false,
+              "apiCode": "3",
+              "isGroup": false,
+              "returnSourceCode": "f21",
+              "returnSourceName": "流通市值",
+              "graph": "1",
+              "unit": "1",
+              "tableType": "2"
+            },
+            "entityCodes": [
+              "002436.SZ"
+            ],
+            "macroAttributeExcelMap": {},
+            "fieldSet": [
+              {
+                "returnCode": "SYLTTM_f115_3",
+                "returnName": "市盈率(TTM)",
+                "classCode": "007001",
+                "checkedRelatedIndicators": true,
+                "startDate": "2026-04-13 00:00:00",
+                "endDate": "2026-04-13 00:00:00",
+                "fuzzy": true,
+                "defineType": 0,
+                "isLoopN": false,
+                "apiCode": "3",
+                "isGroup": false,
+                "returnSourceCode": "f115",
+                "returnSourceName": "市盈率(TTM)",
+                "graph": "2",
+                "unit": "1",
+                "tableType": "2"
+              },
+              {
+                "returnCode": "ZXJ_f2_3",
+                "returnName": "最新价",
+                "classCode": "007001",
+                "checkedRelatedIndicators": true,
+                "startDate": "2026-04-13 00:00:00",
+                "endDate": "2026-04-13 00:00:00",
+                "fuzzy": true,
+                "defineType": 0,
+                "isLoopN": false,
+                "apiCode": "3",
+                "isGroup": false,
+                "returnSourceCode": "f2",
+                "returnSourceName": "最新价",
+                "graph": "2",
+                "unit": "0",
+                "tableType": "2"
+              },
+              {
+                "returnCode": "LTSZ_f21_3",
+                "returnName": "流通市值",
+                "classCode": "007001",
+                "checkedRelatedIndicators": true,
+                "startDate": "2026-04-13 00:00:00",
+                "endDate": "2026-04-13 00:00:00",
+                "fuzzy": true,
+                "defineType": 0,
+                "isLoopN": false,
+                "apiCode": "3",
+                "isGroup": false,
+                "returnSourceCode": "f21",
+                "returnSourceName": "流通市值",
+                "graph": "1",
+                "unit": "1",
+                "tableType": "2"
+              },
+              {
+                "returnCode": "ZSZ_f20_3",
+                "returnName": "总市值",
+                "classCode": "007001",
+                "checkedRelatedIndicators": true,
+                "startDate": "2026-04-13 00:00:00",
+                "endDate": "2026-04-13 00:00:00",
+                "fuzzy": true,
+                "defineType": 0,
+                "isLoopN": false,
+                "apiCode": "3",
+                "isGroup": false,
+                "returnSourceCode": "f20",
+                "returnSourceName": "总市值",
+                "graph": "1",
+                "unit": "1",
+                "tableType": "2"
+              },
+              {
+                "returnCode": "SJL_f23_3",
+                "returnName": "市净率",
+                "classCode": "007001",
+                "checkedRelatedIndicators": true,
+                "startDate": "2026-04-13 00:00:00",
+                "endDate": "2026-04-13 00:00:00",
+                "fuzzy": true,
+                "defineType": 0,
+                "isLoopN": false,
+                "apiCode": "3",
+                "isGroup": false,
+                "returnSourceCode": "f23",
+                "returnSourceName": "市净率",
+                "graph": "2",
+                "unit": "1",
+                "tableType": "2"
+              }
+            ],
+            "dataTableType": "NORM_TABLE",
+            "rowInfo": {},
+            "colInfo": {},
+            "indicatorOrder": [
+              "f21",
+              "f20",
+              "f23",
+              "f2",
+              "f115"
+            ],
+            "tipFlags": [
+              "0"
+            ],
+            "dataType": "行情数据",
+            "title": "兴森科技(002436.SZ)当前的流通市值、总市值等",
+            "hasThumbnail": true,
+            "indicatorLimited": false,
+            "dataPositionEnum": "MetricLeftTimeTop",
+            "orderCol": {},
+            "jumpUrlList": [],
+            "dataTypeEnum": "HQ",
+            "dateRuleSet": [],
+            "freqConvert": false,
+            "deleteInfo": [],
+            "macroCodeMap": {},
+            "entityTagDTO": {
+              "entityId": "1000007431",
+              "entityType": "SEC",
+              "entityTypeCode": "058001001",
+              "entityTypeName": "A股",
+              "classCode": "002001",
+              "className": "沪深京股票",
+              "fullName": "兴森科技",
+              "secuCode": "002436",
+              "market": "0",
+              "marketChar": ".SZ",
+              "correct": false,
+              "hasKLine": false,
+              "valuation": false
+            },
+            "entityTagDTOList": [
+              {
+                "entityId": "1000007431",
+                "entityType": "SEC",
+                "entityTypeCode": "058001001",
+                "entityTypeName": "A股",
+                "classCode": "002001",
+                "className": "沪深京股票",
+                "fullName": "兴森科技",
+                "secuCode": "002436",
+                "market": "0",
+                "marketChar": ".SZ",
+                "correct": false,
+                "hasKLine": true,
+                "valuation": false
+              }
+            ],
+            "indexTable": false,
+            "edbThirdData": false,
+            "dataUpdate": {
+              "2026-04-13 14:35": false
+            },
+            "supportsTimeSeries": false,
+            "estimatedTokens": 0,
+            "summaryTips": {
+              "periodicalReport": null
+            },
+            "nestEntityListMap": {},
+            "excelTimeTruncate": false,
+            "frontendEntityName": "",
+            "frontendEntityCode": "",
+            "frontendTitle": "",
+            "frontendDesc": "",
+            "indicatorCount": 0,
+            "fieldParameterStr": "",
+            "tdayEnum": "NORMAL"
+          },
+          {
+            "code": "002436.SZ",
+            "entityName": "兴森科技(002436.SZ)",
+            "table": {
+              "100000000043007": [
+                "346.5亿元",
+                "333.5亿元",
+                "328.5亿元",
+                "306.2亿元"
+              ],
+              "headName": [
+                "2026-04-10",
+                "2026-04-09",
+                "2026-04-08",
+                "2026-04-07"
+              ]
+            },
+            "rawTable": {
+              "100000000043007": [
+                "34650807052.64",
+                "33351779412.479996",
+                "32853315318",
+                "30617779379.12"
+              ],
+              "headName": [
+                "2026-04-10",
+                "2026-04-09",
+                "2026-04-08",
+                "2026-04-07"
+              ]
+            },
+            "truncateRawTable": {},
+            "nameMap": {
+              "100000000043007": "流通市值",
+              "headNameSub": "数据来源"
+            },
+            "headNameMap": {},
+            "field": {
+              "returnCode": "100000000043007",
+              "returnName": "流通市值",
+              "classCode": "007101",
+              "checkedRelatedIndicators": true,
+              "startDate": "2026-04-13 00:00:00",
+              "endDate": "2026-04-13 00:00:00",
+              "fuzzy": true,
+              "dateGranularity": "DAY",
+              "defineType": 0,
+              "isLoopN": false,
+              "quantType": "1",
+              "isGroup": false,
+              "returnSourceCode": "CIRCULATE_MV",
+              "returnSourceName": "流通市值",
+              "graph": "2",
+              "unit": "1",
+              "tableType": "1",
+              "unitName": "元",
+              "unitDesc": "101:元:元"
+            },
+            "entityCodes": [
+              "002436.SZ"
+            ],
+            "macroAttributeExcelMap": {},
+            "fieldSet": [
+              {
+                "returnCode": "100000000043007",
+                "returnName": "流通市值",
+                "classCode": "007101",
+                "checkedRelatedIndicators": true,
+                "startDate": "2026-04-13 00:00:00",
+                "endDate": "2026-04-13 00:00:00",
+                "fuzzy": true,
+                "dateGranularity": "DAY",
+                "defineType": 0,
+                "isLoopN": false,
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "CIRCULATE_MV",
+                "returnSourceName": "流通市值",
+                "graph": "2",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "元",
+                "unitDesc": "101:元:元"
+              }
+            ],
+            "dataTableType": "NORM_TABLE",
+            "rowInfo": {},
+            "colInfo": {},
+            "indicatorOrder": [
+              "100000000043007"
+            ],
+            "tipFlags": [],
+            "dataType": "数据浏览器",
+            "title": "兴森科技(002436.SZ)的流通市值",
+            "hasThumbnail": true,
+            "indicatorLimited": false,
+            "dataPositionEnum": "MetricLeftTimeTop",
+            "orderCol": {},
+            "jumpUrlList": [
+              {
+                "choiceUrl": "EM://stockdatacenter?type=browser&modType=STOCK&code=002436.SZ&indId=100000000043007|121:2026-04-07,100000000043007|121:2026-04-08,100000000043007|121:2026-04-09,100000000043007|121:2026-04-10",
+                "typeName": "股票数据浏览器"
+              }
+            ],
+            "dataTypeEnum": "DATA_BROWSER",
+            "dateRuleSet": [],
+            "freqConvert": false,
+            "deleteInfo": [],
+            "macroCodeMap": {},
+            "entityTagDTO": {
+              "entityId": "1000007431",
+              "entityType": "SEC",
+              "entityTypeCode": "058001001",
+              "entityTypeName": "A股",
+              "classCode": "002001",
+              "className": "沪深京股票",
+              "fullName": "兴森科技",
+              "secuCode": "002436",
+              "market": "0",
+              "marketChar": ".SZ",
+              "correct": false,
+              "hasKLine": false,
+              "valuation": false
+            },
+            "entityTagDTOList": [
+              {
+                "entityId": "1000007431",
+                "entityType": "SEC",
+                "entityTypeCode": "058001001",
+                "entityTypeName": "A股",
+                "classCode": "002001",
+                "className": "沪深京股票",
+                "fullName": "兴森科技",
+                "secuCode": "002436",
+                "market": "0",
+                "marketChar": ".SZ",
+                "correct": false,
+                "hasKLine": false,
+                "valuation": false
+              }
+            ],
+            "indexTable": false,
+            "edbThirdData": false,
+            "dataUpdate": {
+              "2026-04-10": false
+            },
+            "supportsTimeSeries": false,
+            "estimatedTokens": 0,
+            "summaryTips": {
+              "periodicalReport": null
+            },
+            "nestEntityListMap": {},
+            "excelTimeTruncate": false,
+            "frontendEntityName": "",
+            "frontendEntityCode": "",
+            "frontendTitle": "",
+            "frontendDesc": "",
+            "indicatorCount": 0,
+            "fieldParameterStr": "",
+            "tdayEnum": "NORMAL"
+          },
+          {
+            "code": "002436.SZ",
+            "entityName": "兴森科技(002436.SZ)",
+            "table": {
+              "326809": [
+                "389.9亿元",
+                "375.3亿元",
+                "369.7亿元",
+                "344.5亿元"
+              ],
+              "325898": [
+                "22.94元",
+                "22.08元",
+                "21.75元",
+                "20.27元"
+              ],
+              "headName": [
+                "2026-04-10(日)",
+                "2026-04-09(日)",
+                "2026-04-08(日)",
+                "2026-04-07(日)"
+              ]
+            },
+            "rawTable": {
+              "326809": [
+                "38990511535.22",
+                "37528792271.04",
+                "36967899995.25",
+                "34452383122.01"
+              ],
+              "325898": [
+                "22.94",
+                "22.08",
+                "21.75",
+                "20.27"
+              ],
+              "headName": [
+                "2026-04-10",
+                "2026-04-09",
+                "2026-04-08",
+                "2026-04-07"
+              ]
+            },
+            "truncateRawTable": {},
+            "nameMap": {
+              "326809": "总市值",
+              "headNameSub": "数据来源",
+              "325898": "收盘价"
+            },
+            "headNameMap": {},
+            "field": {
+              "returnCode": "326809",
+              "returnName": "总市值",
+              "classCode": "007121",
+              "checkedRelatedIndicators": true,
+              "startDate": "2026-04-13 00:00:00",
+              "endDate": "2026-04-13 00:00:00",
+              "fuzzy": true,
+              "dateGranularity": "DAY",
+              "defineType": 0,
+              "isLoopN": false,
+              "fixedParamValue": "CurType=2,Period=1",
+              "isGroup": false,
+              "returnSourceCode": "MV",
+              "returnSourceName": "总市值(全品种)_序列",
+              "graph": "0",
+              "unit": "1",
+              "tableType": "20",
+              "unitName": "元",
+              "unitDesc": "元"
+            },
+            "entityCodes": [
+              "002436.SZ"
+            ],
+            "macroAttributeExcelMap": {},
+            "fieldSet": [
+              {
+                "returnCode": "326809",
+                "returnName": "总市值",
+                "classCode": "007121",
+                "checkedRelatedIndicators": true,
+                "startDate": "2026-04-13 00:00:00",
+                "endDate": "2026-04-13 00:00:00",
+                "fuzzy": true,
+                "dateGranularity": "DAY",
+                "defineType": 0,
+                "isLoopN": false,
+                "fixedParamValue": "CurType=2,Period=1",
+                "isGroup": false,
+                "returnSourceCode": "MV",
+                "returnSourceName": "总市值(全品种)_序列",
+                "graph": "0",
+                "unit": "1",
+                "tableType": "20",
+                "unitName": "元",
+                "unitDesc": "元"
+              },
+              {
+                "returnCode": "325898",
+                "returnName": "收盘价",
+                "classCode": "007121",
+                "checkedRelatedIndicators": true,
+                "startDate": "2026-04-13 00:00:00",
+                "endDate": "2026-04-13 00:00:00",
+                "fuzzy": true,
+                "dateGranularity": "DAY",
+                "defineType": 0,
+                "isLoopN": false,
+                "fixedParamValue": "AdjustFlag=1,CurType=2,Period=1",
+                "isGroup": false,
+                "returnSourceCode": "CLOSE",
+                "returnSourceName": "收盘价(全品种)_序列",
+                "graph": "0",
+                "unit": "1",
+                "tableType": "20",
+                "unitName": "元",
+                "unitDesc": "元"
+              }
+            ],
+            "dataTableType": "NORM_TABLE",
+            "rowInfo": {},
+            "colInfo": {},
+            "indicatorOrder": [
+              "326809",
+              "325898"
+            ],
+            "tipFlags": [],
+            "dataType": "数据浏览器",
+            "title": "兴森科技(002436.SZ)的总市值、收盘价",
+            "hasThumbnail": true,
+            "indicatorLimited": false,
+            "dataPositionEnum": "MetricLeftTimeTop",
+            "orderCol": {},
+            "jumpUrlList": [
+              {
+                "choiceUrl": "EM://stockdatacenter?type=browser&modType=STOCK&code=002436.SZ&indId=100000000004751|121:GetLatestDay|261:101:元:元,100000000001098|121:GetLatestDay|513:1",
+                "typeName": "股票数据浏览器"
+              }
+            ],
+            "dataTypeEnum": "DATA_BROWSER",
+            "dateRuleSet": [],
+            "freqConvert": false,
+            "deleteInfo": [],
+            "macroCodeMap": {},
+            "entityTagDTO": {
+              "entityId": "1000007431",
+              "entityType": "SEC",
+              "entityTypeCode": "058001001",
+              "entityTypeName": "A股",
+              "classCode": "002001",
+              "className": "沪深京股票",
+              "fullName": "兴森科技",
+              "secuCode": "002436",
+              "market": "0",
+              "marketChar": ".SZ",
+              "correct": false,
+              "hasKLine": false,
+              "valuation": false
+            },
+            "entityTagDTOList": [
+              {
+                "entityId": "1000007431",
+                "entityType": "SEC",
+                "entityTypeCode": "058001001",
+                "entityTypeName": "A股",
+                "classCode": "002001",
+                "className": "沪深京股票",
+                "fullName": "兴森科技",
+                "secuCode": "002436",
+                "market": "0",
+                "marketChar": ".SZ",
+                "correct": false,
+                "hasKLine": false,
+                "valuation": false
+              }
+            ],
+            "indexTable": false,
+            "edbThirdData": false,
+            "dataUpdate": {
+              "2026-04-10": false
+            },
+            "supportsTimeSeries": false,
+            "estimatedTokens": 0,
+            "summaryTips": {
+              "periodicalReport": null
+            },
+            "nestEntityListMap": {},
+            "excelTimeTruncate": false,
+            "frontendEntityName": "",
+            "frontendEntityCode": "",
+            "frontendTitle": "",
+            "frontendDesc": "",
+            "indicatorCount": 0,
+            "fieldParameterStr": "",
+            "tdayEnum": "TDAY"
+          },
+          {
+            "code": "002436.SZ",
+            "entityName": "兴森科技(002436.SZ)",
+            "table": {
+              "100000000002940": [
+                "3.173",
+                "2.969",
+                "2.955"
+              ],
+              "headName": [
+                "2025三季报",
+                "2025中报",
+                "2025一季报"
+              ]
+            },
+            "rawTable": {
+              "100000000002940": [
+                "3.172581100392",
+                "2.968620972571",
+                "2.955225089897"
+              ],
+              "headName": [
+                "2025三季报",
+                "2025中报",
+                "2025一季报"
+              ]
+            },
+            "truncateRawTable": {},
+            "nameMap": {
+              "100000000002940": "每股净资产BPS",
+              "headNameSub": "数据来源"
+            },
+            "headNameMap": {},
+            "field": {
+              "returnCode": "100000000002940",
+              "returnName": "每股净资产BPS",
+              "classCode": "007101",
+              "checkedRelatedIndicators": true,
+              "startDate": "2025-04-13 00:00:00",
+              "endDate": "2026-04-13 00:00:00",
+              "fuzzy": true,
+              "dateGranularity": "QUARTER",
+              "defineType": 0,
+              "isLoopN": false,
+              "fixedParamValue": "DataAdjustType=1",
+              "quantType": "1",
+              "isGroup": false,
+              "returnSourceCode": "BPS",
+              "returnSourceName": "每股净资产BPS",
+              "graph": "2",
+              "unit": "1",
+              "tableType": "1"
+            },
+            "entityCodes": [
+              "002436.SZ"
+            ],
+            "macroAttributeExcelMap": {},
+            "fieldSet": [
+              {
+                "returnCode": "100000000002940",
+                "returnName": "每股净资产BPS",
+                "classCode": "007101",
+                "checkedRelatedIndicators": true,
+                "startDate": "2025-04-13 00:00:00",
+                "endDate": "2026-04-13 00:00:00",
+                "fuzzy": true,
+                "dateGranularity": "QUARTER",
+                "defineType": 0,
+                "isLoopN": false,
+                "fixedParamValue": "DataAdjustType=1",
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "BPS",
+                "returnSourceName": "每股净资产BPS",
+                "graph": "2",
+                "unit": "1",
+                "tableType": "1"
+              }
+            ],
+            "dataTableType": "NORM_TABLE",
+            "rowInfo": {},
+            "colInfo": {},
+            "indicatorOrder": [
+              "100000000002940"
+            ],
+            "tipFlags": [],
+            "dataType": "数据浏览器",
+            "title": "兴森科技(002436.SZ)的每股净资产BPS",
+            "hasThumbnail": true,
+            "indicatorLimited": false,
+            "dataPositionEnum": "MetricLeftTimeTop",
+            "orderCol": {},
+            "jumpUrlList": [
+              {
+                "choiceUrl": "EM://stockdatacenter?type=browser&modType=STOCK&code=002436.SZ&indId=100000000002940|100:2025-03-31,100000000002940|100:2025-06-30,100000000002940|100:2025-09-30",
+                "typeName": "股票数据浏览器"
+              }
+            ],
+            "dataTypeEnum": "DATA_BROWSER",
+            "dateRuleSet": [],
+            "freqConvert": false,
+            "deleteInfo": [],
+            "macroCodeMap": {},
+            "entityTagDTO": {
+              "entityId": "1000007431",
+              "entityType": "SEC",
+              "entityTypeCode": "058001001",
+              "entityTypeName": "A股",
+              "classCode": "002001",
+              "className": "沪深京股票",
+              "fullName": "兴森科技",
+              "secuCode": "002436",
+              "market": "0",
+              "marketChar": ".SZ",
+              "correct": false,
+              "hasKLine": false,
+              "valuation": false
+            },
+            "entityTagDTOList": [
+              {
+                "entityId": "1000007431",
+                "entityType": "SEC",
+                "entityTypeCode": "058001001",
+                "entityTypeName": "A股",
+                "classCode": "002001",
+                "className": "沪深京股票",
+                "fullName": "兴森科技",
+                "secuCode": "002436",
+                "market": "0",
+                "marketChar": ".SZ",
+                "correct": false,
+                "hasKLine": false,
+                "valuation": false
+              }
+            ],
+            "indexTable": false,
+            "edbThirdData": false,
+            "dataUpdate": {
+              "2025三季报": false
+            },
+            "supportsTimeSeries": false,
+            "estimatedTokens": 0,
+            "summaryTips": {
+              "periodicalReport": null
+            },
+            "nestEntityListMap": {},
+            "excelTimeTruncate": false,
+            "frontendEntityName": "",
+            "frontendEntityCode": "",
+            "frontendTitle": "",
+            "frontendDesc": "",
+            "indicatorCount": 0,
+            "fieldParameterStr": "",
+            "tdayEnum": "NORMAL"
+          }
+        ],
+        "condition": {
+          "search_data_task_0": [
+            "兴森科技",
+            "流通市值总市值市净率最新价收盘价每股净资产BPS市盈率(TTM)",
+            "2026-04-13至2026-04-13"
+          ]
+        },
+        "entityTagDTOList": []
+      },
+      "entityName": null,
+      "message": null,
+      "tableTruncated": false
+    },
+    "stack": null
+  },
+  "requestId": "8d9775991d08432cb69bf85850dac21d"
+}
