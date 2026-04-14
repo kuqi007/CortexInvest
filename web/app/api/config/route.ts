@@ -135,7 +135,6 @@ type WatchRow = {
   tags: string | null;
   watch_price: number | null;
   watch_price_date: string | null;
-  pin_order: number;
 };
 
 function openMonitorDb(readonly = false): MonitorDb {
@@ -174,9 +173,6 @@ function ensureMonitorTables(db: MonitorDb) {
   }
   if (!existingCols.has("watch_price_date")) {
     db.exec(`ALTER TABLE monitor_watchlist ADD COLUMN watch_price_date TEXT`);
-  }
-  if (!existingCols.has("pin_order")) {
-    db.exec(`ALTER TABLE monitor_watchlist ADD COLUMN pin_order INTEGER NOT NULL DEFAULT 0`);
   }
   db.exec(`
     CREATE TABLE IF NOT EXISTS monitor_settings (
@@ -227,7 +223,7 @@ function readConfigFromDb(db: MonitorDb, ensureSchema = true): MonitorConfig {
   const rows = db
     .prepare(
       `SELECT symbol, name, alias, list_type, cost, shares, lot, hidden, star, dip_buy,
-              tags, watch_price, watch_price_date, pin_order
+              tags, watch_price, watch_price_date
        FROM monitor_watchlist
        ORDER BY symbol`,
     )
@@ -267,7 +263,6 @@ function readConfigFromDb(db: MonitorDb, ensureSchema = true): MonitorConfig {
     if (r.watch_price_date != null) {
       (entry as WatchEntry & { watch_price_date?: string }).watch_price_date = r.watch_price_date;
     }
-    if (r.pin_order > 0) entry.pin_order = r.pin_order;
     watchlist[r.symbol] = entry;
     if (r.list_type === "holding") holdings[r.symbol] = entry;
     else watching[r.symbol] = entry;
@@ -295,7 +290,7 @@ function readWatchRow(db: MonitorDb, symbol: string): WatchRow | undefined {
   return db
     .prepare(
       `SELECT symbol, name, alias, list_type, cost, shares, lot, hidden, star, dip_buy,
-              tags, watch_price, watch_price_date, pin_order
+              tags, watch_price, watch_price_date
        FROM monitor_watchlist
        WHERE symbol = ?`,
     )
@@ -660,9 +655,9 @@ export async function POST(request: Request) {
         db.prepare(
           `INSERT INTO monitor_watchlist(
             symbol, name, list_type, cost, shares, lot, hidden, star, dip_buy,
-            tags, watch_price, watch_price_date, pin_order, created_at, updated_at
+            tags, watch_price, watch_price_date, created_at, updated_at
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(symbol) DO UPDATE SET
             name = excluded.name,
             list_type = excluded.list_type,
@@ -675,10 +670,9 @@ export async function POST(request: Request) {
             tags = excluded.tags,
             watch_price = excluded.watch_price,
             watch_price_date = excluded.watch_price_date,
-            pin_order = excluded.pin_order,
             updated_at = excluded.updated_at,
             created_at = monitor_watchlist.created_at`
-        ).run(code, name, listType, cost, shares, lot, hidden, star, 0, tagsJson, watchPrice, watchPriceDate, 0, nowTs, nowTs);
+        ).run(code, name, listType, cost, shares, lot, hidden, star, 0, tagsJson, watchPrice, watchPriceDate, nowTs, nowTs);
 
         // 告警写到 alert_config
         if (data?.above != null || data?.below != null) {
@@ -745,9 +739,6 @@ export async function POST(request: Request) {
         if (data?.hidden !== undefined) hidden = Boolean(data.hidden);
         if (data?.star !== undefined) star = Boolean(data.star);
         if (data?.dip_buy !== undefined) dipBuy = Boolean(data.dip_buy);
-        if ((data as WatchEntry & { pin_order?: number })?.pin_order !== undefined) {
-          // handled separately in pin action
-        }
         if (data?.alias !== undefined) alias = data.alias || null;
         if (Array.isArray(data?.tags)) {
           tagsJson = JSON.stringify(data.tags);
@@ -789,9 +780,9 @@ export async function POST(request: Request) {
         db.prepare(
           `UPDATE monitor_watchlist
            SET list_type = ?, cost = ?, shares = ?, lot = ?, hidden = ?, star = ?, dip_buy = ?,
-               alias = ?, tags = ?, watch_price = ?, watch_price_date = ?, pin_order = ?, updated_at = ?
+               alias = ?, tags = ?, watch_price = ?, watch_price_date = ?, updated_at = ?
            WHERE symbol = ?`
-        ).run(listType, cost, shares, lot, hidden ? 1 : 0, star ? 1 : 0, dipBuy ? 1 : 0, alias, tagsJson, watchPrice, watchPriceDate, existing.pin_order, nowTs, code);
+        ).run(listType, cost, shares, lot, hidden ? 1 : 0, star ? 1 : 0, dipBuy ? 1 : 0, alias, tagsJson, watchPrice, watchPriceDate, nowTs, code);
 
         // 告警写到 alert_config
         if (data?.above !== undefined || data?.below !== undefined) {
@@ -835,27 +826,6 @@ export async function POST(request: Request) {
             snapshotWarn
           ),
         });
-      }
-
-      case "pin": {
-        const { code, value } = body as { code?: string; value?: boolean };
-        if (!code) {
-          return NextResponse.json({ success: false, message: "Missing code" }, { status: 400 });
-        }
-        const row = readWatchRow(db, code);
-        if (!row) {
-          return NextResponse.json({ success: false, message: `${code} not in watchlist` }, { status: 400 });
-        }
-        const nowTs = Math.floor(Date.now() / 1000);
-        if (value) {
-          const maxRow = db.prepare("SELECT MAX(pin_order) as m FROM monitor_watchlist").get() as { m: number };
-          const nextOrder = (maxRow?.m ?? 0) + 1;
-          db.prepare("UPDATE monitor_watchlist SET pin_order = ?, updated_at = ? WHERE symbol = ?").run(nextOrder, nowTs, code);
-          return NextResponse.json({ success: true, message: `Pinned ${code} (order=${nextOrder})` });
-        } else {
-          db.prepare("UPDATE monitor_watchlist SET pin_order = 0, updated_at = ? WHERE symbol = ?").run(nowTs, code);
-          return NextResponse.json({ success: true, message: `Unpinned ${code}` });
-        }
       }
 
       case "remove": {

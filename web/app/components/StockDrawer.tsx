@@ -737,7 +737,6 @@ export function StockDrawer({
   // Optimistic overrides: take precedence over stale service data from 30s poll
   const [starOverride, setStarOverride] = useState<boolean | null>(null);
   const [dipOverride, setDipOverride] = useState<boolean | null>(null);
-  const [pinOverride, setPinOverride] = useState<boolean | null>(null);
   const [aliasOverride, setAliasOverride] = useState<string | null | undefined>(undefined);
 
   // Fresh config entry fetched directly from API (avoids stale MetricsProvider cache)
@@ -751,7 +750,6 @@ export function StockDrawer({
     dip_buy: boolean;
     tags: string[];
     name: string;
-    pin_order?: number;
   } | null>(null);
 
   // Fetch config from API when symbol changes (always fresh)
@@ -774,7 +772,6 @@ export function StockDrawer({
   useEffect(() => {
     setStarOverride(null);
     setDipOverride(null);
-    setPinOverride(null);
     setAliasOverride(undefined);
   }, [symbol]);
 
@@ -838,31 +835,7 @@ export function StockDrawer({
   // Optimistic values: override takes precedence over stale poll data
   const isStar = starOverride !== null ? starOverride : (configEntry?.star ?? false);
   const isDip = dipOverride !== null ? dipOverride : (configEntry?.dip_buy ?? false);
-  const isPinned = pinOverride !== null ? pinOverride : ((configEntry?.pin_order ?? 0) > 0);
   const aliasVal = aliasOverride !== undefined ? aliasOverride : (configEntry?.alias ?? null);
-
-  const handlePinToggle = async () => {
-    const newVal = !isPinned;
-    setPinOverride(newVal);
-    try {
-      const res = await fetch("/api/config", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "pin", code: symbol, value: newVal }),
-      });
-      const json = await res.json();
-      if (res.ok && json.success) {
-        onRefreshMetrics?.();
-      } else {
-        setToast({ msg: json.message || "操作失败", type: "err" });
-        setPinOverride(isPinned);
-      }
-    } catch {
-      setToast({ msg: "操作失败", type: "err" });
-      setPinOverride(isPinned);
-    }
-    setTimeout(() => setToast(null), 2000);
-  };
 
   return (
     <>
@@ -1032,42 +1005,6 @@ export function StockDrawer({
                   }} />
                 </span>
                 dip 回调监控
-              </span>
-              {/* pin toggle */}
-              <span
-                onClick={handlePinToggle}
-                title={isPinned ? "取消置顶" : "置顶"}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  cursor: "pointer",
-                  userSelect: "none",
-                  fontFamily: "JetBrains Mono, monospace",
-                  fontSize: 12,
-                  color: isPinned ? D.red : D.comment,
-                }}
-              >
-                <span style={{
-                  display: "inline-block",
-                  width: 28, height: 14,
-                  borderRadius: 7,
-                  background: isPinned ? D.red : D.currentLine,
-                  position: "relative",
-                  transition: "background 0.2s",
-                }}>
-                  <span style={{
-                    display: "inline-block",
-                    width: 10, height: 10,
-                    borderRadius: "50%",
-                    background: isPinned ? D.bg : D.comment,
-                    position: "absolute",
-                    top: 2,
-                    left: isPinned ? 16 : 2,
-                    transition: "left 0.2s",
-                  }} />
-                </span>
-                {isPinned ? "已置顶" : "置顶"}
               </span>
               {/* demote: holding → watching */}
               {configEntry?.type === "holding" && (

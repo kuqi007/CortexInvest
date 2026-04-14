@@ -121,15 +121,8 @@ function StarredPage() {
   }
 
   function applySort(list: Service[], st: SortState): Service[] {
-    const pinned = (s: Service) => s.pin_order ?? 0;
-    if (!st.key) return list.slice().sort((a, b) => {
-      const pp = pinned(b) - pinned(a);
-      if (pp !== 0) return pp;
-      return b.change - a.change;
-    });
+    if (!st.key) return list.slice().sort((a, b) => b.change - a.change);
     return list.slice().sort((a, b) => {
-      const pp = pinned(b) - pinned(a);
-      if (pp !== 0) return pp;
       const av = derivedVal(a, st.key!);
       const bv = derivedVal(b, st.key!);
       const cmp = av < bv ? -1 : av > bv ? 1 : 0;
