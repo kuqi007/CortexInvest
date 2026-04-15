@@ -9,7 +9,9 @@ Market data poller — 轻量守护脚本
     poetry run python src/tools/market_data_poller.py
 """
 
+import fcntl
 import json
+import os
 import socket
 import sqlite3
 import sys
@@ -798,4 +800,15 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    lock_path = f"/tmp/market_data_poller.{os.getuid()}.lock"
+    lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print(f"另一 market_data_poller 已在运行，退出。锁文件: {lock_path}")
+        os.close(lock_fd)
+        sys.exit(1)
+    try:
+        main()
+    finally:
+        os.close(lock_fd)

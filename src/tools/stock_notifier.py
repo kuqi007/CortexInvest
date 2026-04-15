@@ -12,7 +12,9 @@ Usage:
     poetry run python src/tools/stock_notifier.py
 """
 
+import fcntl
 import json
+import os
 import signal
 import sys
 import time
@@ -32,6 +34,7 @@ logger = setup_logger("stock_notifier")
 MARKET_DATA_PATH = PROJECT_ROOT / "src" / "data" / "market_data.json"
 # Config now read from DB (primary) or JSON (backup)
 from src.utils.config_reader import read_monitor_config
+
 ALERT_CONFIG_PATH = PROJECT_ROOT / "src" / "data" / "alert_config.json"
 L2_SIGNALS_PATH = PROJECT_ROOT / "src" / "data" / "l2_strategy_signals.json"
 
@@ -1739,7 +1742,7 @@ def check_market_open_close(
             "title": "收盘",
             "message": summary,
             "_stealth": summary,  # close summary is already compact enough
-            "symbol": "MARKET",   # 特殊标记，表示市场收盘
+            "symbol": "MARKET",  # 特殊标记，表示市场收盘
             "_kind": "market_close",
             "_change_pct": 0,
         }
@@ -2932,4 +2935,15 @@ def run():
 
 
 if __name__ == "__main__":
-    run()
+    lock_path = f"/tmp/stock_notifier.{os.getuid()}.lock"
+    lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print(f"另一 stock_notifier 已在运行，退出。锁文件: {lock_path}")
+        os.close(lock_fd)
+        sys.exit(1)
+    try:
+        run()
+    finally:
+        os.close(lock_fd)

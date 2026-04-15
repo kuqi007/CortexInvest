@@ -16,7 +16,9 @@ Usage:
     poetry run python src/tools/l2_strategy_daemon.py
 """
 
+import fcntl
 import json
+import os
 import signal
 import sys
 import time
@@ -37,6 +39,7 @@ logger = setup_logger("l2_daemon")
 # ── File paths ──
 # Config read from DB (primary) or JSON (backup)
 from src.utils.config_reader import read_monitor_config
+
 L2_CONFIG_PATH = PROJECT_ROOT / "src" / "data" / "l2_strategy_config.json"
 L2_SIGNALS_PATH = PROJECT_ROOT / "src" / "data" / "l2_strategy_signals.json"
 
@@ -330,4 +333,15 @@ def run():
 
 
 if __name__ == "__main__":
-    run()
+    lock_path = f"/tmp/l2_strategy_daemon.{os.getuid()}.lock"
+    lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print(f"另一 l2_strategy_daemon 已在运行，退出。锁文件: {lock_path}")
+        os.close(lock_fd)
+        sys.exit(1)
+    try:
+        run()
+    finally:
+        os.close(lock_fd)
