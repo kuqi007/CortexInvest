@@ -454,7 +454,7 @@ F. 其他一次性或低频事项
 
 **在进入 Step 3 估值之前，必须完成以下五项防守检查。任何一项亮红灯，必须在报告中显著标注，并调整估值结论。**
 
-详细执行规则见 `docs/skills/defense-check-reference.md`，包含：
+详细执行规则见 ./docs/defense-check-reference.md，包含：
 - **A. 毛利率趋势分析** — 趋势判断/分部检查/同行对比，红灯折价10-20%
 - **B. 竞争量化分析** — 7维度评分表，竞争折价15-25%，行业适配规则
 - **C. 公司治理评估** — 6项检查清单，治理折价10-15%，与执行风险折扣叠加关系
@@ -469,12 +469,12 @@ F. 其他一次性或低频事项
 
 | 方法 | 类型 | 参考文档 |
 |------|------|---------|
-| 方法1 | 价值股估值 | `docs/method-value.md` |
-| 方法2 | 成长股估值 | `docs/method-growth.md` |
-| 方法3 | 周期股估值 | `docs/method-cyclical.md` |
-| 方法4 | 转型股SOTP | `docs/method-transformation.md` |
-| 方法5 | 亏损股PS/终局 | `docs/method-lossmaking.md` |
-| 方法6 | 困境股估值 | `docs/method-distressed.md` |
+| 方法1 | 价值股估值 | ./docs/method-value.md |
+| 方法2 | 成长股估值 | ./docs/method-growth.md |
+| 方法3 | 周期股估值 | ./docs/method-cyclical.md |
+| 方法4 | 转型股SOTP | ./docs/method-transformation.md |
+| 方法5 | 亏损股PS/终局 | ./docs/method-lossmaking.md |
+| 方法6 | 困境股估值 | ./docs/method-distressed.md |
 
 ---
 
@@ -517,7 +517,7 @@ F. 其他一次性或低频事项
 
 **最后更新 catalog.json**: 在 `~/Documents/aiWorkspace/ai-investor/catalog.json` 中更新对应股票的 `latest_version`。
 
-详细报告模板和文件格式说明见 `docs/skills/report-template-reference.md`。
+详细报告模板和文件格式说明见 ./docs/report-template-reference.md。
 
 ---
 
@@ -590,14 +590,14 @@ F. 其他一次性或低频事项
 
 | 文件 | 内容 |
 |------|------|
-| `docs/method-value.md` | 价值股估值详解（PE/PB/股息率三档） |
-| `docs/method-growth.md` | 成长股估值详解（PEG/Forward PE/DCF/扭亏为盈规则） |
-| `docs/method-cyclical.md` | 周期股估值详解（周期位置判断/正常化PE） |
-| `docs/method-transformation.md` | SOTP估值详解（分部估值/执行风险折扣表） |
-| `docs/method-lossmaking.md` | 亏损股估值详解（PS倍数/终局估值） |
-| `docs/method-distressed.md` | 困境股估值详解（PB主锚/正常化PE辅助） |
-| `docs/skills/defense-check-reference.md` | Step 2.5 防守检查A-E详解 |
-| `docs/skills/report-template-reference.md` | Step 5 报告模板/valuation_result/metadata 格式 |
+| ./docs/method-value.md | 价值股估值详解（PE/PB/股息率三档） |
+| ./docs/method-growth.md | 成长股估值详解（PEG/Forward PE/DCF/扭亏为盈规则） |
+| ./docs/method-cyclical.md | 周期股估值详解（周期位置判断/正常化PE） |
+| ./docs/method-transformation.md | SOTP估值详解（分部估值/执行风险折扣表） |
+| ./docs/method-lossmaking.md | 亏损股估值详解（PS倍数/终局估值） |
+| ./docs/method-distressed.md | 困境股估值详解（PB主锚/正常化PE辅助） |
+| ./docs/defense-check-reference.md | Step 2.5 防守检查A-E详解 |
+| ./docs/report-template-reference.md | Step 5 报告模板/valuation_result/metadata 格式 |
 
 ---
 
@@ -638,6 +638,6 @@ for col_id, metric_name in name_map.items():
 
 *Version: Unified v1.5*
 *Core: One entry, smart classification, right method for right stock*
-*Changelog v1.5: v1.4骨架 + v1.3精肉合并（成长四维权重、利润率趋势评分细则、现金流质量评分、利润增速特殊处理(扭亏/亏损/由盈转亏)、扭亏为盈估值规则、恢复性增长PEG修正、竞争折价规则、稀释披露+质量评估、部分数据失败处理、方法6困境股、数据收集表细化）；附录拆分（Step2.5/6种方法/报告模板/示例解析出为独立参考文档），SKILL.md减少~600行，ghost ref全部修复；目录管理v2.2*
+*Changelog v1.5: v1.4骨架 + v1.3精肉合并（成长四维权重、利润率趋势评分细则、现金流质量评分、利润增速特殊处理(扭亏/亏损/由盈转亏)、扭亏为盈估值规则、恢复性增长PEG修正、竞争折价规则、稀释披露+质量评估、部分数据失败处理、方法6困境股、数据收集表细化）；附录拆分（Step2.5/6种方法/报告模板/示例解析出为独立参考文档），SKILL.md减少~600行，ghost ref全部修复；自包含迁移（所有参考文档移入 .claude/skills/stock-analysis-unified/docs/）；目录管理v2.2*
 *Changelog v1.4: 目录管理v2.2集成（代码做主键、版本化目录、valuation_result.json为truth source、catalog.json全局索引、metadata.json自动生成）*
 *Changelog v1.3: 毛利率趋势分析 + 竞争量化框架 + 公司治理评估 + 股本稀释检查 + 数据交叉校验 + 折扣率决策规则 + ESG/政策风险评估 + 周期顶部强制校验 + 周期+高分红混合类型 + 煤炭/矿业/AI行业适配 + 资源型央企竞争适配 + PS倍数扩展*
