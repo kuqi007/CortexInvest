@@ -11,6 +11,7 @@ export interface WatchEntry {
   star?: boolean;
   dip_buy?: boolean;
   tags?: string[];
+  pin_order?: number;
   watch_price?: number;
   watch_price_date?: string;
 }
@@ -50,6 +51,7 @@ export interface Service {
   tags?: string[];
   watch_price?: number;
   watch_price_date?: string;
+  pin_order?: number;
   /* Futu L2 enrichment (optional — absent when OpenD offline or A-share no permission) */
   mainNetInflow?: number;
   mainNetInflowPct?: number;

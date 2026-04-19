@@ -32,6 +32,7 @@ logger = logging.getLogger("l2_daemon.rt_sim")
 MARKET_DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "market_data.json"
 # Config read from DB (primary) or JSON (backup)
 from src.utils.config_reader import read_monitor_config
+
 PARAM_VERSION = "live"
 
 
@@ -43,9 +44,14 @@ class RealtimeSimEngine:
       - futu_trade=True: 下单走 Futu 模拟盘，影子 PM 用于风控
     """
 
-    def __init__(self, rules: dict, daily_tracker=None,
-                 futu_trade: bool = False,
-                 futu_host: str = '127.0.0.1', futu_port: int = 11111):
+    def __init__(
+        self,
+        rules: dict,
+        daily_tracker=None,
+        futu_trade: bool = False,
+        futu_host: str = "127.0.0.1",
+        futu_port: int = 11111,
+    ):
         init_db()
         self._rules = rules
         self._mapper = TradeSignalMapper(rules)
@@ -62,10 +68,16 @@ class RealtimeSimEngine:
         # v2: Daily score config
         self._daily_tracker = daily_tracker  # DailyIndicatorTracker reference
         self._score_cfg = rules.get("daily_score", {})
-        self._last_exit_ts: dict[str, int] = {}  # code → epoch ms of last exit (cooldown)
-        self._low_score_count: dict[str, int] = {}  # code → 连续低分天数（出场惯性保护）
+        self._last_exit_ts: dict[
+            str, int
+        ] = {}  # code → epoch ms of last exit (cooldown)
+        self._low_score_count: dict[
+            str, int
+        ] = {}  # code → 连续低分天数（出场惯性保护）
         self._new_positions_today = 0
-        self._dip_buy_notified_today: set[str] = set()  # codes already notified for dip_buy today
+        self._dip_buy_notified_today: set[str] = (
+            set()
+        )  # codes already notified for dip_buy today
         self._entry_evaluated_today = False
         self._exit_evaluated_today = False
         # Per-tick score cache: {code: score_dict}, cleared each tick
@@ -84,6 +96,7 @@ class RealtimeSimEngine:
             try:
                 from .futu_trade_adapter import FutuTradeAdapter
                 from .futu_position_sync import FutuPositionSync
+
                 host = futu_cfg.get("host", futu_host)
                 port = futu_cfg.get("port", futu_port)
                 self._futu = FutuTradeAdapter(host, port)
@@ -97,7 +110,9 @@ class RealtimeSimEngine:
                         f"A-share acc={self._futu.a_acc_id}"
                     )
                 else:
-                    logger.warning("Futu trade requested but connection failed, fallback to virtual")
+                    logger.warning(
+                        "Futu trade requested but connection failed, fallback to virtual"
+                    )
             except Exception as e:
                 logger.warning(f"Futu trade init failed: {e}, fallback to virtual")
                 self._futu_enabled = False
@@ -213,7 +228,9 @@ class RealtimeSimEngine:
                 ep, xp, qty = t["entry_price"], t["exit_price"], t["quantity"]
                 # Skip Futu-synced trades with missing entry/exit prices (no cash flow to replay)
                 if ep is None or xp is None:
-                    logger.debug(f"Skipping cash replay for trade {t['trade_id'] if 'trade_id' in t.keys() else '?'}: null entry/exit price")
+                    logger.debug(
+                        f"Skipping cash replay for trade {t['trade_id'] if 'trade_id' in t.keys() else '?'}: null entry/exit price"
+                    )
                     continue
                 sell_cost = t["commission"]
                 total_cost = t["total_cost"] or sell_cost
@@ -296,14 +313,20 @@ class RealtimeSimEngine:
         conn.execute(
             "DELETE FROM live_state WHERE code NOT IN ({})".format(
                 ",".join("?" for _ in current_codes)
-            ) if current_codes else "DELETE FROM live_state",
+            )
+            if current_codes
+            else "DELETE FROM live_state",
             list(current_codes) if current_codes else [],
         )
 
         for code, pos in self._pos_mgr.positions.items():
             current_price = prices.get(code, pos.entry_price)
             unrealized = (current_price - pos.entry_price) * pos.quantity
-            pnl_pct = (current_price - pos.entry_price) / pos.entry_price if pos.entry_price > 0 else 0
+            pnl_pct = (
+                (current_price - pos.entry_price) / pos.entry_price
+                if pos.entry_price > 0
+                else 0
+            )
 
             # v2: get daily score (uses per-tick cache)
             daily_score = self._get_score(code).get("total", 0)
@@ -316,12 +339,22 @@ class RealtimeSimEngine:
                     buy_cost_per_share, atr_at_entry, last_updated)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    code, "", pos.entry_price, pos.quantity, round(current_price, 4),
-                    pos.entry_time, pos.entry_date,
-                    round(pos.stop_loss, 4), round(pos.take_profit, 4) if pos.take_profit else None,
-                    pos.max_hold_days, pos.entry_strategy, pos.confidence,
+                    code,
+                    "",
+                    pos.entry_price,
+                    pos.quantity,
+                    round(current_price, 4),
+                    pos.entry_time,
+                    pos.entry_date,
+                    round(pos.stop_loss, 4),
+                    round(pos.take_profit, 4) if pos.take_profit else None,
+                    pos.max_hold_days,
+                    pos.entry_strategy,
+                    pos.confidence,
                     json.dumps(pos.trigger_signals),
-                    round(unrealized, 2), round(pnl_pct, 6), daily_score,
+                    round(unrealized, 2),
+                    round(pnl_pct, 6),
+                    daily_score,
                     round(pos.buy_cost_per_share, 6),
                     round(pos.atr_at_entry, 4),
                     now_ts,
@@ -344,16 +377,27 @@ class RealtimeSimEngine:
                     exit_reason, notes)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    trade["trade_id"], PARAM_VERSION,
-                    trade["code"], trade["action"], trade["direction"],
-                    trade["entry_price"], trade["exit_price"], trade["quantity"],
-                    trade["entry_time"], trade["exit_time"],
-                    trade["entry_date"], trade["exit_date"],
-                    trade.get("hold_days", 0), trade["pnl"], trade["pnl_pct"],
-                    trade["commission"], trade.get("total_cost", trade["commission"]),
+                    trade["trade_id"],
+                    PARAM_VERSION,
+                    trade["code"],
+                    trade["action"],
+                    trade["direction"],
+                    trade["entry_price"],
+                    trade["exit_price"],
+                    trade["quantity"],
+                    trade["entry_time"],
+                    trade["exit_time"],
+                    trade["entry_date"],
+                    trade["exit_date"],
+                    trade.get("hold_days", 0),
+                    trade["pnl"],
+                    trade["pnl_pct"],
+                    trade["commission"],
+                    trade.get("total_cost", trade["commission"]),
                     trade["confidence"],
                     json.dumps(trade.get("trigger_signals", [])),
-                    trade["exit_reason"], trade.get("notes", ""),
+                    trade["exit_reason"],
+                    trade.get("notes", ""),
                 ),
             )
             conn.commit()
@@ -502,16 +546,19 @@ class RealtimeSimEngine:
         in_exit_window = time_str >= exit_time
 
         # 1. Entry window: evaluate daily score for potential entries
-        if (in_entry_window
-                and not self._entry_evaluated_today
-                and self._new_positions_today < max_per_day):
+        if (
+            in_entry_window
+            and not self._entry_evaluated_today
+            and self._new_positions_today < max_per_day
+        ):
             self._evaluate_entries(today, prices, market)
             self._entry_evaluated_today = True
 
         # 1b. Dip-buy window — conviction + drawdown entry channel
         db_cfg = self._rules.get("dip_buy", {})
-        if (db_cfg.get("enabled")
-                and db_cfg.get("window_start", "09:45") <= time_str <= db_cfg.get("window_end", "14:30")):
+        if db_cfg.get("enabled") and db_cfg.get(
+            "window_start", "09:45"
+        ) <= time_str <= db_cfg.get("window_end", "14:30"):
             self._evaluate_dip_buy(today, prices, market)
 
         # 2. Consume new signals from DB — v2 only processes T3 + intraday exceptions
@@ -540,7 +587,8 @@ class RealtimeSimEngine:
         # broker.check_exits handles both Futu order submission and shadow PM close.
         if prices and self._broker.positions:
             exit_trades = self._broker.check_exits(
-                prices, self._day_index,
+                prices,
+                self._day_index,
                 ts=now_ts,
                 date=today,
                 cost_calculator=lambda p, q, a: self._engine.calc_cost(p, q, a),
@@ -563,7 +611,9 @@ class RealtimeSimEngine:
                     # Detect closes before syncing (uses prev vs current snapshot)
                     closed = self._futu_sync.detect_and_save_closed()
                     for c in closed:
-                        logger.info(f"Futu close detected: {c['code']} ({c['exit_reason']})")
+                        logger.info(
+                            f"Futu close detected: {c['code']} ({c['exit_reason']})"
+                        )
 
                     # Sync live state from Futu → SQLite
                     daily_scores = {
@@ -587,8 +637,9 @@ class RealtimeSimEngine:
 
         self._tick_count += 1
 
-    def _evaluate_entries(self, date: str, prices: dict[str, float],
-                          market: dict[str, dict]):
+    def _evaluate_entries(
+        self, date: str, prices: dict[str, float], market: dict[str, dict]
+    ):
         """入场窗口: 用日线评分选股开仓。
 
         - 遍历 watchlist 中的 HK holdings
@@ -622,7 +673,9 @@ class RealtimeSimEngine:
                 exit_dt = datetime.fromtimestamp(last_exit / 1000)
                 days_since = (datetime.now() - exit_dt).days
                 if days_since < cooldown_days:
-                    logger.debug(f"Cooldown active for {code}: {days_since}d < {cooldown_days}d")
+                    logger.debug(
+                        f"Cooldown active for {code}: {days_since}d < {cooldown_days}d"
+                    )
                     continue
             elif (now_ts - last_exit) < cooldown_min * 60 * 1000:
                 logger.debug(f"Cooldown active for {code}, skip entry")
@@ -656,8 +709,10 @@ class RealtimeSimEngine:
                     reward = tp - price
                     rr = reward / risk if risk > 0 else 0
                     if rr < rr_min:
-                        logger.debug(f"RR filter: {code} RR={rr:.2f} < {rr_min} "
-                                     f"(reward={reward:.2f}, risk={risk:.2f})")
+                        logger.debug(
+                            f"RR filter: {code} RR={rr:.2f} < {rr_min} "
+                            f"(reward={reward:.2f}, risk={risk:.2f})"
+                        )
                         continue
 
             candidates.append((code, score_result))
@@ -720,7 +775,9 @@ class RealtimeSimEngine:
             notional = exec_price * est_qty
             min_notional = cfg.get("min_notional", 30000)
             if notional < min_notional or est_qty <= 0:
-                logger.debug(f"Skip {code}: notional {notional:.0f} < min {min_notional}")
+                logger.debug(
+                    f"Skip {code}: notional {notional:.0f} < min {min_notional}"
+                )
                 continue
 
             cost_info = self._engine.calc_cost(exec_price, est_qty, "BUY")
@@ -743,9 +800,12 @@ class RealtimeSimEngine:
 
             # broker.open_position handles Futu-first (FutuBroker) or pure virtual
             pos = self._broker.open_position(
-                decision, exec_price, atr,
+                decision,
+                exec_price,
+                atr,
                 trade_cost=cost_info["total"],
-                date=date, ts=int(time.time() * 1000),
+                date=date,
+                ts=int(time.time() * 1000),
                 day_index=self._day_index,
             )
             if pos:
@@ -778,22 +838,45 @@ class RealtimeSimEngine:
                 codes.append(code)
         return codes
 
-    def _notify_dip_buy(self, code: str, drawdown_pct: float, price: float,
-                        score: int, high_20d: float, date: str,
-                        name: str = ""):
+    def _notify_dip_buy(
+        self,
+        code: str,
+        drawdown_pct: float,
+        price: float,
+        score: int,
+        high_20d: float,
+        date: str,
+        name: str = "",
+    ):
         """Send macOS notification + write alert_event for dip_buy opportunity."""
         now_ts = int(time.time() * 1000)
+        now_time = datetime.fromtimestamp(now_ts / 1000).strftime("%H:%M:%S")
         label = name or code
 
         # macOS notification (stealth title, audible)
         msg = f"{label} 回撤{abs(drawdown_pct):.1f}% @{price:.2f}"
-        titles = ["CI Pipeline Alert", "Deploy Monitor", "SRE Notification", "Build Status"]
+        titles = [
+            "CI Pipeline Alert",
+            "Deploy Monitor",
+            "SRE Notification",
+            "Build Status",
+        ]
         title = titles[now_ts % len(titles)]
         try:
             subprocess.run(
-                ["terminal-notifier", "-title", title, "-message", msg,
-                 "-sound", "default", "-open", "http://localhost:3120/alerts"],
-                capture_output=True, timeout=5,
+                [
+                    "terminal-notifier",
+                    "-title",
+                    title,
+                    "-message",
+                    msg,
+                    "-sound",
+                    "default",
+                    "-open",
+                    "http://localhost:3120/alerts",
+                ],
+                capture_output=True,
+                timeout=5,
             )
         except Exception as e:
             logger.debug(f"Dip-buy notification failed: {e}")
@@ -807,17 +890,28 @@ class RealtimeSimEngine:
             conn = get_connection()
             conn.execute(
                 """INSERT OR IGNORE INTO alert_events
-                   (ts, date, symbol, kind, level, message, display, change_pct)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (now_ts, date, code, "dip_buy", "L1", msg, display, drawdown_pct),
+                   (ts, date, time, symbol, kind, level, message, display, change_pct)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    now_ts,
+                    date,
+                    now_time,
+                    code,
+                    "dip_buy",
+                    "L1",
+                    msg,
+                    display,
+                    drawdown_pct,
+                ),
             )
             conn.commit()
             conn.close()
         except Exception as e:
             logger.debug(f"Dip-buy alert_event write failed: {e}")
 
-    def _evaluate_dip_buy(self, date: str, prices: dict[str, float],
-                          market: dict[str, dict]):
+    def _evaluate_dip_buy(
+        self, date: str, prices: dict[str, float], market: dict[str, dict]
+    ):
         """Conviction + Drawdown 抄底: dip_buy 标记的股票回撤达标 → 通知 + 模拟开仓。
 
         独立于 v2 评分入场，作为并行第二入场通道。
@@ -845,8 +939,7 @@ class RealtimeSimEngine:
             return
 
         db_entries_today = sum(
-            1 for c in self._dip_buy_notified_today
-            if c in self._broker.positions
+            1 for c in self._dip_buy_notified_today if c in self._broker.positions
         )
 
         candidates = []
@@ -901,7 +994,9 @@ class RealtimeSimEngine:
 
             # 1. Always notify (not subject to position limits)
             stock_name = market.get(code, {}).get("name", "")
-            self._notify_dip_buy(code, dd, price, score_result["total"], high_nd, date, name=stock_name)
+            self._notify_dip_buy(
+                code, dd, price, score_result["total"], high_nd, date, name=stock_name
+            )
             self._dip_buy_notified_today.add(code)
 
             # 2. Sim trade (subject to limits)
@@ -925,7 +1020,7 @@ class RealtimeSimEngine:
             t3_exit_price = self._t3_exit_price.get(code, 0)
             if t3_exit_price > 0 and price >= t3_exit_price * 0.98:
                 logger.info(
-                    f"Dip-buy {code}: price {price:.2f} >= T3 exit {t3_exit_price:.2f}*0.98={t3_exit_price*0.98:.2f}, "
+                    f"Dip-buy {code}: price {price:.2f} >= T3 exit {t3_exit_price:.2f}*0.98={t3_exit_price * 0.98:.2f}, "
                     f"notify only"
                 )
                 continue
@@ -955,15 +1050,20 @@ class RealtimeSimEngine:
 
             notional = exec_price * est_qty
             if notional < min_notional:
-                logger.debug(f"Dip-buy skip {code}: notional {notional:.0f} < {min_notional}")
+                logger.debug(
+                    f"Dip-buy skip {code}: notional {notional:.0f} < {min_notional}"
+                )
                 continue
 
             cost_info = self._engine.calc_cost(exec_price, est_qty, "BUY")
 
             pos = self._broker.open_position(
-                decision, exec_price, atr,
+                decision,
+                exec_price,
+                atr,
                 trade_cost=cost_info["total"],
-                date=date, ts=now_ts,
+                date=date,
+                ts=now_ts,
                 day_index=self._day_index,
             )
             if pos:
@@ -998,8 +1098,9 @@ class RealtimeSimEngine:
                     f"(dip_buy)"
                 )
 
-    def _evaluate_exits(self, date: str, prices: dict[str, float],
-                        market: dict[str, dict]):
+    def _evaluate_exits(
+        self, date: str, prices: dict[str, float], market: dict[str, dict]
+    ):
         """收盘评估: 评分跌破 exit_threshold → 平仓。"""
         if not self._daily_tracker:
             return
@@ -1011,8 +1112,11 @@ class RealtimeSimEngine:
         now_ts = int(time.time() * 1000)
 
         # 清理已平仓股票的计数（止损/止盈等途径已平仓）
-        self._low_score_count = {k: v for k, v in self._low_score_count.items()
-                                  if k in self._broker.positions}
+        self._low_score_count = {
+            k: v
+            for k, v in self._low_score_count.items()
+            if k in self._broker.positions
+        }
 
         for code in list(self._broker.positions.keys()):
             score_result = self._get_score(code)
@@ -1020,13 +1124,17 @@ class RealtimeSimEngine:
 
             # Skip if no reliable data (insufficient kline history)
             if total == 0 or score_result.get("action") == "WAIT":
-                logger.debug(f"Exit eval skipped for {code}: insufficient data (score={total})")
+                logger.debug(
+                    f"Exit eval skipped for {code}: insufficient data (score={total})"
+                )
                 continue
 
             if total >= exit_threshold:
                 # 评分恢复，重置连续低分计数
                 if code in self._low_score_count:
-                    logger.info(f"Exit inertia reset {code}: score={total} recovered above {exit_threshold}")
+                    logger.info(
+                        f"Exit inertia reset {code}: score={total} recovered above {exit_threshold}"
+                    )
                     del self._low_score_count[code]
                 continue
 
@@ -1043,8 +1151,11 @@ class RealtimeSimEngine:
                     )
                     continue
 
-            reason = (f"exit_score={total}<{exit_extreme}(extreme)" if immediate_exit
-                      else f"exit_score={total}<{exit_threshold}(day{self._low_score_count[code]})")
+            reason = (
+                f"exit_score={total}<{exit_extreme}(extreme)"
+                if immediate_exit
+                else f"exit_score={total}<{exit_threshold}(day{self._low_score_count[code]})"
+            )
 
             pos = self._broker.positions[code]
             price = prices.get(code, pos.entry_price)
@@ -1066,10 +1177,13 @@ class RealtimeSimEngine:
 
             # broker.close_position handles Futu-first (FutuBroker) or pure virtual
             trade = self._broker.close_position(
-                code, exec_price, decision.reason,
+                code,
+                exec_price,
+                decision.reason,
                 pct=1.0,
                 trade_cost=cost_info["total"],
-                ts=now_ts, date=date,
+                ts=now_ts,
+                date=date,
                 day_index=self._day_index,
             )
 
@@ -1084,8 +1198,13 @@ class RealtimeSimEngine:
                     f"(exit_review)"
                 )
 
-    def _process_signal_v2(self, signal: dict, time_str: str,
-                           prices: dict[str, float], market: dict[str, dict]):
+    def _process_signal_v2(
+        self,
+        signal: dict,
+        time_str: str,
+        prices: dict[str, float],
+        market: dict[str, dict],
+    ):
         """v2 信号处理: 日内仅处理 T3 纠偏 + 极强日内例外。
 
         T3 纠偏加手续费过滤 + min_hold 检查。
@@ -1105,8 +1224,12 @@ class RealtimeSimEngine:
         now_ts = int(time.time() * 1000)
 
         # Identify tier
-        tier3_strategies = set(self._rules.get("tiers", {}).get("3_correction", {}).keys())
-        tier1_strategies = set(self._rules.get("tiers", {}).get("1_independent", {}).keys())
+        tier3_strategies = set(
+            self._rules.get("tiers", {}).get("3_correction", {}).keys()
+        )
+        tier1_strategies = set(
+            self._rules.get("tiers", {}).get("1_independent", {}).keys()
+        )
 
         # T3 cooldown: 5分钟内同一(股票, 策略)不重复触发
         if strategy in tier3_strategies and (code, strategy) in self._t3_cooldown:
@@ -1124,8 +1247,9 @@ class RealtimeSimEngine:
         if strategy in tier1_strategies:
             self._handle_intraday_exception(signal, prices, market, date)
 
-    def _handle_t3_with_filters(self, signal: dict, prices: dict[str, float],
-                                market: dict[str, dict], date: str):
+    def _handle_t3_with_filters(
+        self, signal: dict, prices: dict[str, float], market: dict[str, dict], date: str
+    ):
         """T3 纠偏: 加手续费过滤 + min_hold 检查。
 
         - 亏损不值手续费 → 不割
@@ -1163,7 +1287,11 @@ class RealtimeSimEngine:
 
         # Cost filter: don't close if loss < round-trip cost
         current_price = prices.get(code, pos.entry_price)
-        pnl_pct = (current_price - pos.entry_price) / pos.entry_price if pos.entry_price > 0 else 0
+        pnl_pct = (
+            (current_price - pos.entry_price) / pos.entry_price
+            if pos.entry_price > 0
+            else 0
+        )
 
         # If unrealized P&L is between -cost and +cost, not worth closing
         if abs(pnl_pct) < min_profit_pct:
@@ -1178,13 +1306,18 @@ class RealtimeSimEngine:
             # Profitable: T3 can tighten stop instead of selling
             atr = self._estimate_atr(code, date)
             self._broker.tighten_stop(code, 1.0, current_price, atr)
-            logger.info(f"T3 {strategy} → tighten SL for {code} (profitable, pnl={pnl_pct:.2%})")
+            logger.info(
+                f"T3 {strategy} → tighten SL for {code} (profitable, pnl={pnl_pct:.2%})"
+            )
             return
 
         # Proceed with T3 sell
         equity = self._broker.get_equity(prices) if prices else self._broker.cash
         decision = self._mapper.process_signal(
-            signal, self._broker.positions, equity, date,
+            signal,
+            self._broker.positions,
+            equity,
+            date,
         )
         if not decision:
             return
@@ -1192,23 +1325,30 @@ class RealtimeSimEngine:
         if decision.action == "SELL":
             daily_amount = market.get(code, {}).get("amount", 0)
             atr = self._estimate_atr(code, date)
-            exec_info = self._engine.execute_trade(decision, current_price, daily_amount, atr)
+            exec_info = self._engine.execute_trade(
+                decision, current_price, daily_amount, atr
+            )
             exec_price = exec_info["exec_price"]
             cost_info = self._engine.calc_cost(exec_price, pos.quantity, "SELL")
 
             # broker.close_position handles Futu-first (FutuBroker) or pure virtual
             trade = self._broker.close_position(
-                code, exec_price, f"T3:{strategy}(v2)",
+                code,
+                exec_price,
+                f"T3:{strategy}(v2)",
                 pct=decision.position_pct,
                 trade_cost=cost_info["total"],
-                ts=signal.get("ts", 0), date=date,
+                ts=signal.get("ts", 0),
+                date=date,
                 day_index=self._day_index,
             )
             if trade:
                 trade["notes"] = f"T3:{strategy}(v2)"
                 self._save_trade(trade)
                 self._last_exit_ts[code] = int(time.time() * 1000)
-                self._t3_exit_price[code] = exec_price  # 记录T3卖出价，用于dip-buy接回检查
+                self._t3_exit_price[code] = (
+                    exec_price  # 记录T3卖出价，用于dip-buy接回检查
+                )
                 logger.info(
                     f"RT T3-SELL {code}: @ {exec_price:.2f} "
                     f"PnL={trade['pnl']:+.0f} ({strategy})"
@@ -1219,8 +1359,9 @@ class RealtimeSimEngine:
             self._broker.tighten_stop(code, decision.stop_atr, current_price, atr)
             logger.info(f"RT T3-TIGHTEN {code} ({strategy})")
 
-    def _handle_intraday_exception(self, signal: dict, prices: dict[str, float],
-                                   market: dict[str, dict], date: str):
+    def _handle_intraday_exception(
+        self, signal: dict, prices: dict[str, float], market: dict[str, dict], date: str
+    ):
         """日内例外: 极强 L2 信号可触发入场。
 
         条件: confidence >= intraday_exception_confidence
@@ -1241,10 +1382,16 @@ class RealtimeSimEngine:
         direction = signal.get("direction", "neutral")
 
         # Only BUY signals
-        tier1_rule = self._rules.get("tiers", {}).get("1_independent", {}).get(strategy, {})
+        tier1_rule = (
+            self._rules.get("tiers", {}).get("1_independent", {}).get(strategy, {})
+        )
         action = tier1_rule.get("action", "")
         if action == "DIRECTION":
-            action = "BUY" if direction == "bullish" else ("SELL" if direction == "bearish" else "")
+            action = (
+                "BUY"
+                if direction == "bullish"
+                else ("SELL" if direction == "bearish" else "")
+            )
         if action != "BUY":
             return
 
@@ -1304,15 +1451,20 @@ class RealtimeSimEngine:
         notional = exec_price * est_qty
         min_notional = cfg.get("min_notional", 30000)
         if notional < min_notional:
-            logger.debug(f"Skip intraday {code}: notional {notional:.0f} < min {min_notional}")
+            logger.debug(
+                f"Skip intraday {code}: notional {notional:.0f} < min {min_notional}"
+            )
             return
 
         cost_info = self._engine.calc_cost(exec_price, est_qty, "BUY")
 
         pos = self._broker.open_position(
-            decision, exec_price, atr,
+            decision,
+            exec_price,
+            atr,
             trade_cost=cost_info["total"],
-            date=date, ts=signal.get("ts", 0),
+            date=date,
+            ts=signal.get("ts", 0),
             day_index=self._day_index,
         )
         if pos:

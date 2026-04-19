@@ -95,8 +95,15 @@ function WatchingContent() {
     return (s[key] as number | null | undefined) ?? -Infinity;
   }
   function applySortList(list: Service[]): Service[] {
-    if (!watchSort.key) return list.slice().sort((a, b) => b.change - a.change);
+    const pinned = (s: Service) => s.pin_order ?? 0;
+    if (!watchSort.key) return list.slice().sort((a, b) => {
+      const pp = pinned(b) - pinned(a);
+      if (pp !== 0) return pp;
+      return b.change - a.change;
+    });
     return list.slice().sort((a, b) => {
+      const pp = pinned(b) - pinned(a);
+      if (pp !== 0) return pp;
       const av = derivedVal(a, watchSort.key!);
       const bv = derivedVal(b, watchSort.key!);
       const cmp = av < bv ? -1 : av > bv ? 1 : 0;
@@ -107,7 +114,7 @@ function WatchingContent() {
   const tagFiltered = useMemo(() => filterTag
     ? tabServices.filter((s) => s.tags?.includes(filterTag))
     : tabServices, [tabServices, filterTag]);
-  const pinnedList = useMemo(() => applySortList(tagFiltered.filter((s) => !s.hidden && s.star)), [tagFiltered, watchSort]);
+  const pinnedList = useMemo(() => applySortList(tagFiltered.filter((s) => !s.hidden && (s.star || (s.pin_order ?? 0) > 0))), [tagFiltered, watchSort]);
   const pinnedIds = useMemo(() => new Set(pinnedList.map((s) => s.id)), [pinnedList]);
   const watchStock = useMemo(() => applySortList(tagFiltered.filter((s) => !s.hidden && !isETF(s) && !pinnedIds.has(s.id))), [tagFiltered, watchSort, pinnedIds]);
   const watchETF = useMemo(() => applySortList(tagFiltered.filter((s) => !s.hidden && isETF(s) && !pinnedIds.has(s.id))), [tagFiltered, watchSort, pinnedIds]);

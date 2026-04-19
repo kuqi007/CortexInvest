@@ -1,3 +1,8 @@
+---
+name: stock-analysis-unified
+description: Use when a user requests stock valuation, fundamental analysis, buy point calculation, or investment research on A-share or HK listed companies. Triggered by stock name or code input, valuation questions, target price inquiries, or requests to classify a stock as value/growth/cyclical/transformation/loss-making.
+---
+
 # 股票统一分析系统 (Unified Stock Analysis)
 
 > **设计理念**: 一个入口，智能分类，自动匹配最优估值方法

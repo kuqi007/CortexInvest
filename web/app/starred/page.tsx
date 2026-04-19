@@ -64,6 +64,7 @@ function StarredPage() {
 
   // Section open/close state
   const [pinnedOpen, setPinnedOpen] = useState(true);
+  const [holdOpen, setHoldOpen] = useState(true);
   const [stockOpen, setStockOpen] = useState(true);
   const [etfOpen, setEtfOpen] = useState(true);
   const [hiddenOpen, setHiddenOpen] = useState(false);
@@ -121,8 +122,15 @@ function StarredPage() {
   }
 
   function applySort(list: Service[], st: SortState): Service[] {
-    if (!st.key) return list.slice().sort((a, b) => b.change - a.change);
+    const pinned = (s: Service) => s.pin_order ?? 0;
+    if (!st.key) return list.slice().sort((a, b) => {
+      const pp = pinned(b) - pinned(a);
+      if (pp !== 0) return pp;
+      return b.change - a.change;
+    });
     return list.slice().sort((a, b) => {
+      const pp = pinned(b) - pinned(a);
+      if (pp !== 0) return pp;
       const av = derivedVal(a, st.key!);
       const bv = derivedVal(b, st.key!);
       const cmp = av < bv ? -1 : av > bv ? 1 : 0;
@@ -147,11 +155,12 @@ function StarredPage() {
     ? tabStarred.filter((s) => s.tags?.includes(filterTag))
     : tabStarred, [tabStarred, filterTag]);
 
-  // Sections: pinned (holdings) -> stocks -> ETFs -> hidden
-  const pinnedList = useMemo(() => applySort(tagFiltered.filter((s) => s.type === "holding" && !s.hidden), sortState), [tagFiltered, sortState]);
+  // Sections: 置顶(pin_order>0) -> holdings -> stocks -> ETFs -> hidden
+  const pinnedList = useMemo(() => applySort(tagFiltered.filter((s) => !s.hidden && (s.pin_order ?? 0) > 0), sortState), [tagFiltered, sortState]);
   const pinnedIds = useMemo(() => new Set(pinnedList.map((s) => s.id)), [pinnedList]);
-  const stockList = useMemo(() => applySort(tagFiltered.filter((s) => s.type === "watching" && !s.hidden && !isETF(s)), sortState), [tagFiltered, sortState]);
-  const etfList = useMemo(() => applySort(tagFiltered.filter((s) => s.type === "watching" && !s.hidden && isETF(s)), sortState), [tagFiltered, sortState]);
+  const holdList = useMemo(() => applySort(tagFiltered.filter((s) => s.type === "holding" && !s.hidden && !pinnedIds.has(s.id)), sortState), [tagFiltered, sortState, pinnedIds]);
+  const stockList = useMemo(() => applySort(tagFiltered.filter((s) => s.type === "watching" && !s.hidden && !isETF(s) && !pinnedIds.has(s.id)), sortState), [tagFiltered, sortState, pinnedIds]);
+  const etfList = useMemo(() => applySort(tagFiltered.filter((s) => s.type === "watching" && !s.hidden && isETF(s) && !pinnedIds.has(s.id)), sortState), [tagFiltered, sortState, pinnedIds]);
   const hiddenList = useMemo(() => applySort(tagFiltered.filter((s) => s.hidden), sortState), [tagFiltered, sortState]);
 
   const allTags = useMemo(
@@ -426,11 +435,19 @@ function StarredPage() {
               </div>
             ) : (
               <>
-                {/* Pinned Holdings */}
+                {/* 置顶 */}
                 {pinnedList.length > 0 && (
                   <>
-                    {secTitle("pinned:holdings", pinnedList.length, pinnedOpen, setPinnedOpen)}
+                    {secTitle("置顶", pinnedList.length, pinnedOpen, setPinnedOpen)}
                     {pinnedOpen && <>{header}{pinnedList.map((s) => <StarredRow key={s.id} s={s} />)}</>}
+                  </>
+                )}
+
+                {/* Holdings */}
+                {holdList.length > 0 && (
+                  <>
+                    {secTitle("holdings", holdList.length, holdOpen, setHoldOpen)}
+                    {holdOpen && <>{header}{holdList.map((s) => <StarredRow key={s.id} s={s} />)}</>}
                   </>
                 )}
 
