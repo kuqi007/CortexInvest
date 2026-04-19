@@ -27,7 +27,16 @@ description: Use when a user requests stock valuation, fundamental analysis, buy
     ↓
 Step 1: 数据收集 (mx-data + mx-search)
     ↓
+Step 1.5: 数据收集验证门 (HARD GATE — 核心数据校验)
+    ↓
 Step 2: 智能分类 (多维度评分)
+    ↓
+Step 2.5: 估值前防守检查 (A-E五项必做)
+    ├─ A. 毛利率趋势
+    ├─ B. 竞争量化分析
+    ├─ C. 公司治理
+    ├─ D. 股本稀释检查
+    └─ E. ESG/政策风险
     ↓
 Step 3: 匹配估值方法 (主方法 + 条件触发双轨)
     ├─ 价值股 → PE/PB/股息率
@@ -37,10 +46,10 @@ Step 3: 匹配估值方法 (主方法 + 条件触发双轨)
     │   └─ 若重大并表 / pro forma → 追加 Forward PE/PEG/EV
     └─ 亏损股 → PS/终局估值
     ↓
-Step 4: 执行估值计算
-    ├─ 输出公允价值
-    ├─ 输出安全买点
-    └─ 如适用，输出前瞻平台估值
+Step 4: 交叉验证
+    ├─ 方法内验证
+    ├─ 与机构对比
+    └─ 与历史估值对比
     ↓
 Step 5: 输出统一格式报告 → 保存为 MD 文件
 ```
