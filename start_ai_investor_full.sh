@@ -6,6 +6,7 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 POLLER_PID="$DIR/.poller.pid"
 NOTIFIER_PID="$DIR/.notifier.pid"
 L2_DAEMON_PID="$DIR/.l2_daemon.pid"
+L2_DAEMON_WATCHDOG_PID="$DIR/.l2_daemon_watchdog.pid"
 WEB_PID="$DIR/.web.pid"
 POLLER_LOG="$DIR/logs/poller.log"
 NOTIFIER_LOG="$DIR/logs/notifier.log"
@@ -156,8 +157,58 @@ do_start() {
   else
     cd "$DIR"
     nohup uv run python src/tools/l2_strategy_daemon.py >> "$L2_DAEMON_LOG" 2>&1 &
-    echo $! > "$L2_DAEMON_PID"
-    echo "L2 Daemon 启动  pid=$!  日志=logs/l2_daemon-$TODAY.log"
+    local l2_wrapper_pid=$!
+    echo $l2_wrapper_pid > "$L2_DAEMON_PID"
+    echo "L2 Daemon 启动  pid=$l2_wrapper_pid  日志=logs/l2_daemon-$TODAY.log"
+
+    # 启动 watchdog：每 60s 检查 daemon 是否存活，异常退出则自动重启
+    (
+      local watched_pid=$l2_wrapper_pid
+      local restart_count=0
+      local first_fail_ts=0
+      while true; do
+        sleep 60
+        # PID 文件被删 = 正常停止，watchdog 退出
+        if [ ! -f "$L2_DAEMON_PID" ]; then
+          exit 0
+        fi
+        # 检查 wrapper + python 子进程是否存活
+        local python_alive=false
+        if kill -0 "$watched_pid" 2>/dev/null; then
+          local child=$(_get_python_pid "$watched_pid")
+          if [ -n "$child" ] && kill -0 "$child" 2>/dev/null; then
+            python_alive=true
+          fi
+        fi
+        if [ "$python_alive" = false ]; then
+          # 清理可能的孤儿进程
+          local orphan=$(pgrep -f "l2_strategy_daemon.py" | head -1)
+          if [ -n "$orphan" ]; then
+            kill "$orphan" 2>/dev/null || true
+            sleep 1
+          fi
+          # 重启限制：5 分钟内最多 3 次
+          local now_ts=$(date +%s)
+          if [ $restart_count -eq 0 ] || [ $((now_ts - first_fail_ts)) -gt 300 ]; then
+            restart_count=1
+            first_fail_ts=$now_ts
+          else
+            restart_count=$((restart_count + 1))
+          fi
+          if [ $restart_count -gt 3 ]; then
+            echo "[$(date '+%H:%M:%S')] watchdog: L2 Daemon 5分钟内崩溃${restart_count}次，放弃重启" >> "$L2_DAEMON_LOG"
+            rm -f "$L2_DAEMON_PID"
+            exit 1
+          fi
+          echo "[$(date '+%H:%M:%S')] watchdog: L2 Daemon 异常退出，第${restart_count}次重启..." >> "$L2_DAEMON_LOG"
+          cd "$DIR"
+          nohup uv run python src/tools/l2_strategy_daemon.py >> "$L2_DAEMON_LOG" 2>&1 &
+          watched_pid=$!
+          echo $watched_pid > "$L2_DAEMON_PID"
+        fi
+      done
+    ) &
+    echo $! > "$L2_DAEMON_WATCHDOG_PID"
   fi
 
   # Web
@@ -179,6 +230,8 @@ do_start() {
 }
 
 do_stop() {
+  # 先杀 watchdog，防止它在 daemon 被杀后自动重启
+  _stop_one "$L2_DAEMON_WATCHDOG_PID" "L2 Daemon Watchdog" ""
   _stop_one "$NOTIFIER_PID" "Notifier" "stock_notifier.py"
   _stop_one "$L2_DAEMON_PID" "L2 Daemon" "l2_strategy_daemon.py"
   _stop_one "$POLLER_PID" "Poller" "market_data_poller.py"

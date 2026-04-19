@@ -340,7 +340,7 @@ if __name__ == "__main__":
     except BlockingIOError:
         print(f"另一 l2_strategy_daemon 已在运行，退出。锁文件: {lock_path}")
         os.close(lock_fd)
-        sys.exit(1)
+        sys.exit(0)
     try:
         run()
     finally:

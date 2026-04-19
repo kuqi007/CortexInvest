@@ -29,6 +29,7 @@ Bearish mirrors: momentum_sell_alert, volume_accel_sell_alert
   - 信号输出为 dual-format dict（message + display），与 notifier 对接
 """
 
+import json
 import socket
 import time
 from collections import deque
@@ -46,11 +47,14 @@ logger = setup_logger("l2_strategy")
 OPEND_HOST = "127.0.0.1"
 OPEND_PORT = 11111
 RECONNECT_COOLDOWN = 60
+STALE_SEC = 300
+STALE_CONSECUTIVE = 3
 
 
 # ══════════════════════════════════════════
 # Tracker Classes
 # ══════════════════════════════════════════
+
 
 class CapitalFlowTracker:
     """策略1: 主力资金异动 — 滑动窗口检测净流入占比跳升
@@ -61,9 +65,12 @@ class CapitalFlowTracker:
       → 触发信号
     """
 
-    def __init__(self, window_minutes: int = 5,
-                 low_threshold_pct: float = 2.0,
-                 high_threshold_pct: float = 8.0):
+    def __init__(
+        self,
+        window_minutes: int = 5,
+        low_threshold_pct: float = 2.0,
+        high_threshold_pct: float = 8.0,
+    ):
         self.window_sec = window_minutes * 60
         self.low_pct = low_threshold_pct
         self.high_pct = high_threshold_pct
@@ -159,22 +166,32 @@ class LargeOrderTracker:
                     direction = "SELL"
                 else:
                     direction = "NEUTRAL"
-                signals.append({
-                    "strategy": "large_order",
-                    "code": code,
-                    "detail": {
-                        "amount": round(turnover, 0),
-                        "price": tick.get("price", 0),
-                        "volume": tick.get("volume", 0),
-                        "direction": direction,
-                    },
-                })
+                signals.append(
+                    {
+                        "strategy": "large_order",
+                        "code": code,
+                        "detail": {
+                            "amount": round(turnover, 0),
+                            "price": tick.get("price", 0),
+                            "volume": tick.get("volume", 0),
+                            "direction": direction,
+                        },
+                    }
+                )
 
         return signals
 
     def reset(self):
         self._last_seq.clear()
         self._warmed_up.clear()
+
+    def restore_state(self, code: str, last_seq: int, warmed_up: bool):
+        """Hydrate dedup state from a restored SessionAccumulator snapshot."""
+        self._last_seq[code] = last_seq
+        if warmed_up:
+            self._warmed_up.add(code)
+        else:
+            self._warmed_up.discard(code)
 
 
 class OrderBookTracker:
@@ -276,9 +293,12 @@ class TickImbalanceTracker:
     |imbalance| > threshold AND window_turnover > min_turnover → 触发
     """
 
-    def __init__(self, window_minutes: int = 5,
-                 imbalance_threshold: float = 0.4,
-                 min_turnover: float = 10_000_000):
+    def __init__(
+        self,
+        window_minutes: int = 5,
+        imbalance_threshold: float = 0.4,
+        min_turnover: float = 10_000_000,
+    ):
         self.window_sec = window_minutes * 60
         self.imbalance_threshold = imbalance_threshold
         self.min_turnover = min_turnover
@@ -323,12 +343,14 @@ class TickImbalanceTracker:
             if seq <= last_seq:
                 continue
             self._last_seq[code] = seq
-            q.append((
-                now,
-                int(tick.get("volume", 0)),
-                float(tick.get("turnover", 0)),
-                str(tick.get("direction", "")).upper(),
-            ))
+            q.append(
+                (
+                    now,
+                    int(tick.get("volume", 0)),
+                    float(tick.get("turnover", 0)),
+                    str(tick.get("direction", "")).upper(),
+                )
+            )
 
         # Trim window
         cutoff = now - self.window_sec
@@ -418,6 +440,7 @@ class TickImbalanceTracker:
 # Volume Acceleration Tracker — 放量加速检测
 # ══════════════════════════════════════════
 
+
 class VolumeAccelTracker:
     """策略7: 放量加速 — 成交额阶梯式翻倍 + tick 持续偏买
 
@@ -433,11 +456,14 @@ class VolumeAccelTracker:
 
     SAMPLE_INTERVAL_SEC = 300  # 5 分钟采样间隔 = TickImbalanceTracker 窗口长度
 
-    def __init__(self, accel_ratio: float = 1.8,
-                 imbalance_min: float = 0.35,
-                 consecutive_min: int = 3,
-                 min_turnover: float = 10_000_000,
-                 lookback: int = 10):
+    def __init__(
+        self,
+        accel_ratio: float = 1.8,
+        imbalance_min: float = 0.35,
+        consecutive_min: int = 3,
+        min_turnover: float = 10_000_000,
+        lookback: int = 10,
+    ):
         self.accel_ratio = accel_ratio
         self.imbalance_min = imbalance_min
         self.consecutive_min = consecutive_min
@@ -479,12 +505,12 @@ class VolumeAccelTracker:
             return None
 
         # Condition 2: sustained imbalance (last N samples all > threshold)
-        recent = list(samples)[-self.consecutive_min:]
+        recent = list(samples)[-self.consecutive_min :]
         if not all(imb > self.imbalance_min for _, _, imb in recent):
             return None
 
         # Condition 1: acceleration vs earlier samples mean (exclude recent window)
-        prior = list(samples)[:-self.consecutive_min]
+        prior = list(samples)[: -self.consecutive_min]
         if not prior:
             return None
         avg_turnover = sum(t for _, t, _ in prior) / len(prior)
@@ -518,11 +544,11 @@ class VolumeAccelTracker:
             return None
 
         # Sustained SELLING: all recent imbalance < -threshold
-        recent = list(samples)[-self.consecutive_min:]
+        recent = list(samples)[-self.consecutive_min :]
         if not all(imb < -self.imbalance_min for _, _, imb in recent):
             return None
 
-        prior = list(samples)[:-self.consecutive_min]
+        prior = list(samples)[: -self.consecutive_min]
         if not prior:
             return None
         avg_turnover = sum(t for _, t, _ in prior) / len(prior)
@@ -550,6 +576,7 @@ class VolumeAccelTracker:
 # Tick Persistence Tracker — 主买/主卖持续
 # ══════════════════════════════════════════
 
+
 class TickPersistenceTracker:
     """策略8: Tick方向一致性异常 — 检测 session 内 tick 方向持续偏向一侧
 
@@ -560,9 +587,12 @@ class TickPersistenceTracker:
     捕捉场景: 低涨幅静默吸筹（腾讯: session score=5, 净买入2.18亿, 但日跌-0.7%）
     """
 
-    def __init__(self, min_tick_signals: int = 8,
-                 persistence_ratio: float = 0.80,
-                 recent_consistent: int = 3):
+    def __init__(
+        self,
+        min_tick_signals: int = 8,
+        persistence_ratio: float = 0.80,
+        recent_consistent: int = 3,
+    ):
         self.min_tick_signals = min_tick_signals
         self.persistence_ratio = persistence_ratio
         self.recent_consistent = recent_consistent
@@ -593,7 +623,7 @@ class TickPersistenceTracker:
             return None
 
         # 最近 N 个信号须与主方向一致（排除尾部反转）
-        recent = history[-self.recent_consistent:]
+        recent = history[-self.recent_consistent :]
         if not all(d == dominant for d, _, _ in recent):
             return None
 
@@ -620,6 +650,7 @@ class TickPersistenceTracker:
 # Institutional Retail Divergence Tracker
 # ══════════════════════════════════════════
 
+
 class InstitutionalRetailTracker:
     """策略: 散户机构分歧 — 主力进散户出 / 主力出散户进
 
@@ -628,8 +659,9 @@ class InstitutionalRetailTracker:
       Bearish: institutional < -institutional_min AND retail > retail_min
     """
 
-    def __init__(self, institutional_min: float = 10_000_000,
-                 retail_min: float = 5_000_000):
+    def __init__(
+        self, institutional_min: float = 10_000_000, retail_min: float = 5_000_000
+    ):
         self.institutional_min = institutional_min
         self.retail_min = retail_min
 
@@ -673,6 +705,7 @@ class InstitutionalRetailTracker:
 # Session Accumulator — 开盘至今多空研判
 # ══════════════════════════════════════════
 
+
 class SessionAccumulator:
     """全天累积统计 — 从开盘到当前的多空方向
 
@@ -688,10 +721,10 @@ class SessionAccumulator:
     # Direction thresholds
     TICK_IMBALANCE_THRESHOLD = 0.1
     # Minimum data guards — 数据不足时 score=0，避免开盘初期噪音
-    MIN_TICK_VOL = 50_000          # 全天累积最低成交量（股）才给 tick 方向分
-    MIN_LARGE_ORDER_COUNT = 3      # 全天至少 3 笔大单才给大单方向分
+    MIN_TICK_VOL = 50_000  # 全天累积最低成交量（股）才给 tick 方向分
+    MIN_LARGE_ORDER_COUNT = 3  # 全天至少 3 笔大单才给大单方向分
     MIN_LARGE_ORDER_NET = 10_000_000  # 大单净额绝对值 > 1000万 才给方向分
-    MIN_CAPITAL_FLOW_PCT = 1.0     # 资金流净流入占比 > 1% 才给方向分
+    MIN_CAPITAL_FLOW_PCT = 1.0  # 资金流净流入占比 > 1% 才给方向分
     # Weights for composite score
     TICK_WEIGHT = 2
     LARGE_ORDER_WEIGHT = 2
@@ -743,8 +776,10 @@ class SessionAccumulator:
         """累积大单买卖统计（由 poll_once 在 LargeOrderTracker 触发后调用）"""
         if code not in self._large_order_totals:
             self._large_order_totals[code] = {
-                "buy_count": 0, "sell_count": 0,
-                "buy_amount": 0.0, "sell_amount": 0.0,
+                "buy_count": 0,
+                "sell_count": 0,
+                "buy_amount": 0.0,
+                "sell_amount": 0.0,
                 "orders": [],
             }
 
@@ -769,9 +804,76 @@ class SessionAccumulator:
             "main_net_inflow_pct": capital_data.get("mainNetInflowPct", 0),
         }
 
+    def restore_from_db(self, date_str: str) -> set[str]:
+        """Restore state from the latest session_snapshots for date_str.
+        Returns the set of codes that were successfully restored.
+        """
+        from src.sim_trading.db import get_connection
+
+        self.reset()
+        restored: set[str] = set()
+
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                """
+                SELECT code, session_json FROM session_snapshots
+                WHERE date = ?
+                  AND ts = (
+                      SELECT MAX(ts) FROM session_snapshots ss
+                      WHERE ss.date = session_snapshots.date
+                        AND ss.code = session_snapshots.code
+                  )
+                """,
+                (date_str,),
+            ).fetchall()
+        finally:
+            conn.close()
+
+        for code, session_json in rows:
+            try:
+                ctx = json.loads(session_json)
+                if not isinstance(ctx, dict):
+                    continue
+
+                tick = ctx.get("tick", {})
+                self._tick_totals[code] = {
+                    "buy_vol": int(tick.get("buy_vol", 0)),
+                    "sell_vol": int(tick.get("sell_vol", 0)),
+                }
+
+                lo = ctx.get("large_order", {})
+                self._large_order_totals[code] = {
+                    "buy_count": int(lo.get("buy_count", 0)),
+                    "sell_count": int(lo.get("sell_count", 0)),
+                    "buy_amount": float(lo.get("buy_amount", 0.0)),
+                    "sell_amount": float(lo.get("sell_amount", 0.0)),
+                    "orders": lo.get("orders", []),
+                }
+
+                cf = ctx.get("capital_flow", {})
+                self._capital_flow[code] = {
+                    "main_net_inflow": float(cf.get("main_net_inflow", 0)),
+                    "main_net_inflow_pct": float(cf.get("main_net_inflow_pct", 0)),
+                }
+
+                self._last_seq[code] = int(ctx.get("last_seq", 0))
+                if ctx.get("warmed_up", False):
+                    self._warmed_up.add(code)
+
+                restored.add(code)
+            except Exception:
+                continue
+
+        return restored
+
     def snapshot(self) -> dict:
         """返回所有股票的 session summary"""
-        all_codes = set(self._tick_totals) | set(self._large_order_totals) | set(self._capital_flow)
+        all_codes = (
+            set(self._tick_totals)
+            | set(self._large_order_totals)
+            | set(self._capital_flow)
+        )
         result = {}
 
         for code in all_codes:
@@ -793,14 +895,23 @@ class SessionAccumulator:
                 tick_score = 0
 
             # ── Large order direction ──
-            lo = self._large_order_totals.get(code, {
-                "buy_count": 0, "sell_count": 0, "buy_amount": 0.0, "sell_amount": 0.0,
-            })
+            lo = self._large_order_totals.get(
+                code,
+                {
+                    "buy_count": 0,
+                    "sell_count": 0,
+                    "buy_amount": 0.0,
+                    "sell_amount": 0.0,
+                },
+            )
             lo_net = lo["buy_amount"] - lo["sell_amount"]
             lo_count = lo["buy_count"] + lo["sell_count"]
 
             # Guard: 大单笔数不足 OR 净额不显著时不给方向分
-            if lo_count < self.MIN_LARGE_ORDER_COUNT or abs(lo_net) < self.MIN_LARGE_ORDER_NET:
+            if (
+                lo_count < self.MIN_LARGE_ORDER_COUNT
+                or abs(lo_net) < self.MIN_LARGE_ORDER_NET
+            ):
                 lo_score = 0
             elif lo_net > 0:
                 lo_score = 1
@@ -809,7 +920,9 @@ class SessionAccumulator:
 
             # ── Capital flow direction ──
             # Use absolute inflow value for direction (pct can contradict abs value)
-            cf = self._capital_flow.get(code, {"main_net_inflow": 0, "main_net_inflow_pct": 0})
+            cf = self._capital_flow.get(
+                code, {"main_net_inflow": 0, "main_net_inflow_pct": 0}
+            )
             cf_inflow = cf["main_net_inflow"]
 
             # Guard: 绝对值 < 500万 时不给方向分（过滤噪音）
@@ -858,6 +971,8 @@ class SessionAccumulator:
                     "main_net_inflow_pct": cf["main_net_inflow_pct"],
                     "direction_score": cf_score,
                 },
+                "last_seq": self._last_seq.get(code, 0),
+                "warmed_up": code in self._warmed_up,
             }
 
         return result
@@ -874,6 +989,7 @@ class SessionAccumulator:
 # ══════════════════════════════════════════
 # Cooldown Manager
 # ══════════════════════════════════════════
+
 
 class CooldownManager:
     """策略冷却管理器 — 同一策略+股票在冷却期内不重复触发"""
@@ -915,6 +1031,7 @@ class CooldownManager:
 #   large_order:                BUY→bullish, SELL→bearish, NEUTRAL→neutral
 #   tick_imbalance:             imbalance>0→bullish, <0→bearish
 
+
 def _infer_direction(raw: dict) -> str:
     """从原始信号推断多空方向"""
     strategy = raw["strategy"]
@@ -923,7 +1040,11 @@ def _infer_direction(raw: dict) -> str:
     if strategy == "volume_price_divergence":
         return "bearish"
     elif strategy == "capital_flow_spike":
-        return "bullish" if detail.get("to_pct", 0) > detail.get("from_pct", 0) else "bearish"
+        return (
+            "bullish"
+            if detail.get("to_pct", 0) > detail.get("from_pct", 0)
+            else "bearish"
+        )
     elif strategy == "order_book_imbalance":
         return "bullish" if detail.get("delta", 0) > 0 else "bearish"
     elif strategy == "large_order":
@@ -935,7 +1056,11 @@ def _infer_direction(raw: dict) -> str:
         return "neutral"
     elif strategy == "tick_imbalance":
         return "bullish" if detail.get("imbalance", 0) > 0 else "bearish"
-    elif strategy in ("institutional_retail_divergence", "large_order_reversal", "closing_surge"):
+    elif strategy in (
+        "institutional_retail_divergence",
+        "large_order_reversal",
+        "closing_surge",
+    ):
         return detail.get("direction", "neutral")
     return "neutral"
 
@@ -961,12 +1086,15 @@ class SignalScorer:
       capital_flow_spike=1, order_book_imbalance=1
     """
 
-    WINDOW_SEC = 600   # 10 分钟滑动窗口
+    WINDOW_SEC = 600  # 10 分钟滑动窗口
     COOLDOWN_SEC = 3600  # 复合信号冷却 1 小时/股
 
-    def __init__(self, weights: Optional[dict[str, int]] = None,
-                 composite_threshold: int = 5,
-                 min_strategy_types: int = 2):
+    def __init__(
+        self,
+        weights: Optional[dict[str, int]] = None,
+        composite_threshold: int = 5,
+        min_strategy_types: int = 2,
+    ):
         self._weights = weights or SIGNAL_WEIGHTS
         self._composite_threshold = composite_threshold
         self._min_strategy_types = min_strategy_types
@@ -1014,38 +1142,50 @@ class SignalScorer:
             bullish_types: set[str] = set()
             for _, strategy, direction, weight in events:
                 if direction == "bearish":
-                    bearish_by_type[strategy] = max(bearish_by_type.get(strategy, 0), weight)
+                    bearish_by_type[strategy] = max(
+                        bearish_by_type.get(strategy, 0), weight
+                    )
                     bearish_types.add(strategy)
                 elif direction == "bullish":
-                    bullish_by_type[strategy] = max(bullish_by_type.get(strategy, 0), weight)
+                    bullish_by_type[strategy] = max(
+                        bullish_by_type.get(strategy, 0), weight
+                    )
                     bullish_types.add(strategy)
             bearish_score = sum(bearish_by_type.values())
             bullish_score = sum(bullish_by_type.values())
 
-            if (bearish_score >= self._composite_threshold
-                    and len(bearish_types) >= self._min_strategy_types):
-                composites.append({
-                    "strategy": "composite_bearish",
-                    "code": code,
-                    "detail": {
-                        "signals": sorted(bearish_types),
-                        "count": len(bearish_types),
-                        "score": bearish_score,
-                    },
-                })
+            if (
+                bearish_score >= self._composite_threshold
+                and len(bearish_types) >= self._min_strategy_types
+            ):
+                composites.append(
+                    {
+                        "strategy": "composite_bearish",
+                        "code": code,
+                        "detail": {
+                            "signals": sorted(bearish_types),
+                            "count": len(bearish_types),
+                            "score": bearish_score,
+                        },
+                    }
+                )
                 self._last_notify[code] = now
 
-            elif (bullish_score >= self._composite_threshold
-                    and len(bullish_types) >= self._min_strategy_types):
-                composites.append({
-                    "strategy": "composite_bullish",
-                    "code": code,
-                    "detail": {
-                        "signals": sorted(bullish_types),
-                        "count": len(bullish_types),
-                        "score": bullish_score,
-                    },
-                })
+            elif (
+                bullish_score >= self._composite_threshold
+                and len(bullish_types) >= self._min_strategy_types
+            ):
+                composites.append(
+                    {
+                        "strategy": "composite_bullish",
+                        "code": code,
+                        "detail": {
+                            "signals": sorted(bullish_types),
+                            "count": len(bullish_types),
+                            "score": bullish_score,
+                        },
+                    }
+                )
                 self._last_notify[code] = now
 
         return composites
@@ -1102,23 +1242,31 @@ _STRATEGY_NAMES = {
 # 6 original high-priority + 7 mid-long-term trend signals
 DAILY_NOTIFY_STRATEGIES = {
     # High priority
-    "macd_top_divergence", "macd_bottom_divergence",
+    "macd_top_divergence",
+    "macd_bottom_divergence",
     "bollinger_squeeze_breakout",
     "breakout_pullback",
-    "rsi_extreme_overbought", "rsi_extreme_oversold",
+    "rsi_extreme_overbought",
+    "rsi_extreme_oversold",
     # Mid-long-term trend signals (upgraded from L3)
-    "ma_bullish_align", "ma_bearish_align",
+    "ma_bullish_align",
+    "ma_bearish_align",
     "adx_trend_start",
     "volume_breakout",
     "support_breakdown",
-    "macd_golden_cross", "macd_death_cross",
+    "macd_golden_cross",
+    "macd_death_cross",
 }
 
 
-
-def format_signal(raw: dict, name_map: dict[str, str], *, notify: bool = False,
-                   snapshot_data: dict | None = None,
-                   capital_data: dict | None = None) -> dict:
+def format_signal(
+    raw: dict,
+    name_map: dict[str, str],
+    *,
+    notify: bool = False,
+    snapshot_data: dict | None = None,
+    capital_data: dict | None = None,
+) -> dict:
     """将原始信号转换为 dual-format event（message + display）
 
     Args:
@@ -1229,7 +1377,9 @@ def format_signal(raw: dict, name_map: dict[str, str], *, notify: bool = False,
             f"平均imb={avg_imb:.3f}"
         )
     elif strategy == "institutional_retail_divergence":
-        dir_label = "主力进散户出" if detail.get("direction") == "bullish" else "主力出散户进"
+        dir_label = (
+            "主力进散户出" if detail.get("direction") == "bullish" else "主力出散户进"
+        )
         inst_wan = detail.get("institutional_net", 0) / 10000
         retail_wan = detail.get("retail_net", 0) / 10000
         display = (
@@ -1366,7 +1516,11 @@ def format_signal(raw: dict, name_map: dict[str, str], *, notify: bool = False,
         if abs(inflow) >= 1_000_000:  # only show if >= 100万
             inflow_wan = inflow / 10000
             label = "净流入" if inflow > 0 else "净流出"
-            display += f" | {' '.join(ctx_parts)} {label}{abs(inflow_wan):.0f}万" if ctx_parts else ""
+            display += (
+                f" | {' '.join(ctx_parts)} {label}{abs(inflow_wan):.0f}万"
+                if ctx_parts
+                else ""
+            )
         elif ctx_parts:
             display += f" | {' '.join(ctx_parts)}"
 
@@ -1390,6 +1544,7 @@ def format_signal(raw: dict, name_map: dict[str, str], *, notify: bool = False,
 # Daily Indicator Tracker — 日K线技术指标
 # ══════════════════════════════════════════
 
+
 def _calc_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     """RSI 计算 — 处理 avg_loss=0 (全涨→100) 和 avg_gain=0 (全跌→0)"""
     delta = series.diff()
@@ -1405,8 +1560,9 @@ def _calc_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     return rsi
 
 
-def _calc_macd(series: pd.Series, fast: int = 12, slow: int = 26,
-               signal: int = 9) -> dict:
+def _calc_macd(
+    series: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9
+) -> dict:
     """MACD 计算 (复用 stock_data_fetcher 逻辑)"""
     ema_fast = series.ewm(span=fast, adjust=False).mean()
     ema_slow = series.ewm(span=slow, adjust=False).mean()
@@ -1416,18 +1572,28 @@ def _calc_macd(series: pd.Series, fast: int = 12, slow: int = 26,
     return {"dif": dif, "dea": dea, "hist": hist}
 
 
-def _calc_adx(high: pd.Series, low: pd.Series, close: pd.Series,
-              period: int = 14) -> pd.Series:
+def _calc_adx(
+    high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14
+) -> pd.Series:
     """Average Directional Index"""
-    tr = pd.concat([
-        high - low,
-        (high - close.shift()).abs(),
-        (low - close.shift()).abs(),
-    ], axis=1).max(axis=1)
-    plus_dm = (high - high.shift()).clip(lower=0).where(
-        high - high.shift() > low.shift() - low, 0)
-    minus_dm = (low.shift() - low).clip(lower=0).where(
-        low.shift() - low > high - high.shift(), 0)
+    tr = pd.concat(
+        [
+            high - low,
+            (high - close.shift()).abs(),
+            (low - close.shift()).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    plus_dm = (
+        (high - high.shift())
+        .clip(lower=0)
+        .where(high - high.shift() > low.shift() - low, 0)
+    )
+    minus_dm = (
+        (low.shift() - low)
+        .clip(lower=0)
+        .where(low.shift() - low > high - high.shift(), 0)
+    )
     atr = tr.ewm(span=period, adjust=False).mean()
     plus_di = 100 * (plus_dm.ewm(span=period, adjust=False).mean() / atr)
     minus_di = 100 * (minus_dm.ewm(span=period, adjust=False).mean() / atr)
@@ -1491,12 +1657,18 @@ class DailyIndicatorTracker:
         try:
             from futu import RET_OK, KLType, AuType
             import datetime as _dt
+
             today = _dt.date.today()
             start = (today - _dt.timedelta(days=200)).strftime("%Y-%m-%d")
             end = today.strftime("%Y-%m-%d")
             ret, data, _ = ctx.request_history_kline(
-                to_futu_code(code), ktype=KLType.K_DAY,
-                autype=AuType.QFQ, start=start, end=end, max_count=200)
+                to_futu_code(code),
+                ktype=KLType.K_DAY,
+                autype=AuType.QFQ,
+                start=start,
+                end=end,
+                max_count=200,
+            )
             if ret == RET_OK and data is not None and not data.empty:
                 return data
         except Exception as e:
@@ -1506,17 +1678,26 @@ class DailyIndicatorTracker:
     def _fetch_index_kline(self, ctx) -> Optional[pd.DataFrame]:
         """Fetch HSI index kline for relative strength"""
         now = time.time()
-        if self._index_kline is not None and now - self._index_last_refresh < self._refresh_sec:
+        if (
+            self._index_kline is not None
+            and now - self._index_last_refresh < self._refresh_sec
+        ):
             return self._index_kline
         try:
             from futu import RET_OK, KLType, AuType
             import datetime as _dt
+
             today = _dt.date.today()
             start = (today - _dt.timedelta(days=200)).strftime("%Y-%m-%d")
             end = today.strftime("%Y-%m-%d")
             ret, data, _ = ctx.request_history_kline(
-                "HK.800000", ktype=KLType.K_DAY,
-                autype=AuType.QFQ, start=start, end=end, max_count=200)
+                "HK.800000",
+                ktype=KLType.K_DAY,
+                autype=AuType.QFQ,
+                start=start,
+                end=end,
+                max_count=200,
+            )
             if ret == RET_OK and data is not None and not data.empty:
                 self._index_kline = data
                 self._index_last_refresh = now
@@ -1538,8 +1719,12 @@ class DailyIndicatorTracker:
         rsi = _calc_rsi(close, cfg.get("rsi_period", 14))
 
         # MACD
-        macd = _calc_macd(close, cfg.get("macd_fast", 12),
-                          cfg.get("macd_slow", 26), cfg.get("macd_signal", 9))
+        macd = _calc_macd(
+            close,
+            cfg.get("macd_fast", 12),
+            cfg.get("macd_slow", 26),
+            cfg.get("macd_signal", 9),
+        )
 
         # Moving averages
         ma_periods = cfg.get("ma_periods", [5, 10, 20, 60])
@@ -1561,11 +1746,14 @@ class DailyIndicatorTracker:
 
         # ATR (True Range → EWM, independent of ADX period)
         atr_period = cfg.get("atr_period", 14)
-        tr = pd.concat([
-            high - low,
-            (high - close.shift()).abs(),
-            (low - close.shift()).abs(),
-        ], axis=1).max(axis=1)
+        tr = pd.concat(
+            [
+                high - low,
+                (high - close.shift()).abs(),
+                (low - close.shift()).abs(),
+            ],
+            axis=1,
+        ).max(axis=1)
         atr = tr.ewm(span=atr_period, adjust=False).mean()
 
         # Volume MA
@@ -1654,21 +1842,29 @@ class DailyIndicatorTracker:
                 if pd.isna(v) or float(v) <= extreme_ob:
                     break
                 consec += 1
-            sig = self._make_signal(code, "rsi_extreme_overbought", {
-                "rsi": round(float(curr), 1),
-                "prev_rsi": round(float(prev), 1),
-                "threshold": extreme_ob,
-                "consecutive_days": consec,
-            })
+            sig = self._make_signal(
+                code,
+                "rsi_extreme_overbought",
+                {
+                    "rsi": round(float(curr), 1),
+                    "prev_rsi": round(float(prev), 1),
+                    "threshold": extreme_ob,
+                    "consecutive_days": consec,
+                },
+            )
             if sig:
                 signals.append(sig)
         # ── Normal overbought crossing (RSI crosses above 70) ──
         elif curr > ob and prev <= ob:
-            sig = self._make_signal(code, "rsi_overbought", {
-                "rsi": round(float(curr), 1),
-                "prev_rsi": round(float(prev), 1),
-                "threshold": ob,
-            })
+            sig = self._make_signal(
+                code,
+                "rsi_overbought",
+                {
+                    "rsi": round(float(curr), 1),
+                    "prev_rsi": round(float(prev), 1),
+                    "threshold": ob,
+                },
+            )
             if sig:
                 signals.append(sig)
 
@@ -1680,21 +1876,29 @@ class DailyIndicatorTracker:
                 if pd.isna(v) or float(v) >= extreme_os:
                     break
                 consec += 1
-            sig = self._make_signal(code, "rsi_extreme_oversold", {
-                "rsi": round(float(curr), 1),
-                "prev_rsi": round(float(prev), 1),
-                "threshold": extreme_os,
-                "consecutive_days": consec,
-            })
+            sig = self._make_signal(
+                code,
+                "rsi_extreme_oversold",
+                {
+                    "rsi": round(float(curr), 1),
+                    "prev_rsi": round(float(prev), 1),
+                    "threshold": extreme_os,
+                    "consecutive_days": consec,
+                },
+            )
             if sig:
                 signals.append(sig)
         # ── Normal oversold crossing (RSI crosses below 30) ──
         elif curr < os_val and prev >= os_val:
-            sig = self._make_signal(code, "rsi_oversold", {
-                "rsi": round(float(curr), 1),
-                "prev_rsi": round(float(prev), 1),
-                "threshold": os_val,
-            })
+            sig = self._make_signal(
+                code,
+                "rsi_oversold",
+                {
+                    "rsi": round(float(curr), 1),
+                    "prev_rsi": round(float(prev), 1),
+                    "threshold": os_val,
+                },
+            )
             if sig:
                 signals.append(sig)
 
@@ -1720,23 +1924,31 @@ class DailyIndicatorTracker:
 
         # Golden cross: hist turns positive
         if curr_hist > 0 and prev_hist <= 0:
-            sig = self._make_signal(code, "macd_golden_cross", {
-                "hist": round(float(curr_hist), 4),
-                "prev_hist": round(float(prev_hist), 4),
-                "dif": round(curr_dif, 4),
-                "dea": round(curr_dea, 4),
-            })
+            sig = self._make_signal(
+                code,
+                "macd_golden_cross",
+                {
+                    "hist": round(float(curr_hist), 4),
+                    "prev_hist": round(float(prev_hist), 4),
+                    "dif": round(curr_dif, 4),
+                    "dea": round(curr_dea, 4),
+                },
+            )
             if sig:
                 signals.append(sig)
 
         # Death cross: hist turns negative
         if curr_hist < 0 and prev_hist >= 0:
-            sig = self._make_signal(code, "macd_death_cross", {
-                "hist": round(float(curr_hist), 4),
-                "prev_hist": round(float(prev_hist), 4),
-                "dif": round(curr_dif, 4),
-                "dea": round(curr_dea, 4),
-            })
+            sig = self._make_signal(
+                code,
+                "macd_death_cross",
+                {
+                    "hist": round(float(curr_hist), 4),
+                    "prev_hist": round(float(prev_hist), 4),
+                    "dif": round(curr_dif, 4),
+                    "dea": round(curr_dea, 4),
+                },
+            )
             if sig:
                 signals.append(sig)
 
@@ -1759,8 +1971,16 @@ class DailyIndicatorTracker:
         signals = []
         recent_close = close.iloc[-lookback:]
         recent_dif = dif.iloc[-lookback:]
-        prior_close = close.iloc[-lookback * 2:-lookback] if len(close) >= lookback * 2 else close.iloc[:-lookback]
-        prior_dif = dif.iloc[-lookback * 2:-lookback] if len(dif) >= lookback * 2 else dif.iloc[:-lookback]
+        prior_close = (
+            close.iloc[-lookback * 2 : -lookback]
+            if len(close) >= lookback * 2
+            else close.iloc[:-lookback]
+        )
+        prior_dif = (
+            dif.iloc[-lookback * 2 : -lookback]
+            if len(dif) >= lookback * 2
+            else dif.iloc[:-lookback]
+        )
 
         if len(prior_close) < 5:
             return []
@@ -1772,13 +1992,17 @@ class DailyIndicatorTracker:
 
         # Top divergence: price new high + DIF not new high
         if curr_price > prior_high and curr_dif < prior_dif_at_high:
-            sig = self._make_signal(code, "macd_top_divergence", {
-                "price": round(curr_price, 2),
-                "prior_high": round(prior_high, 2),
-                "dif": round(curr_dif, 4),
-                "prior_dif": round(prior_dif_at_high, 4),
-                "lookback": lookback,
-            })
+            sig = self._make_signal(
+                code,
+                "macd_top_divergence",
+                {
+                    "price": round(curr_price, 2),
+                    "prior_high": round(prior_high, 2),
+                    "dif": round(curr_dif, 4),
+                    "prior_dif": round(prior_dif_at_high, 4),
+                    "lookback": lookback,
+                },
+            )
             if sig:
                 signals.append(sig)
 
@@ -1787,13 +2011,17 @@ class DailyIndicatorTracker:
         prior_dif_at_low = float(prior_dif.loc[prior_close.idxmin()])
 
         if curr_price < prior_low and curr_dif > prior_dif_at_low:
-            sig = self._make_signal(code, "macd_bottom_divergence", {
-                "price": round(curr_price, 2),
-                "prior_low": round(prior_low, 2),
-                "dif": round(curr_dif, 4),
-                "prior_dif": round(prior_dif_at_low, 4),
-                "lookback": lookback,
-            })
+            sig = self._make_signal(
+                code,
+                "macd_bottom_divergence",
+                {
+                    "price": round(curr_price, 2),
+                    "prior_low": round(prior_low, 2),
+                    "dif": round(curr_dif, 4),
+                    "prior_dif": round(prior_dif_at_low, 4),
+                    "lookback": lookback,
+                },
+            )
             if sig:
                 signals.append(sig)
 
@@ -1825,21 +2053,33 @@ class DailyIndicatorTracker:
 
         # Bullish alignment
         if ma5 > ma10 > ma20 > ma60 and ma20_slope > 0:
-            sig = self._make_signal(code, "ma_bullish_align", {
-                "ma5": round(ma5, 2), "ma10": round(ma10, 2),
-                "ma20": round(ma20, 2), "ma60": round(ma60, 2),
-                "ma20_slope_pct": round(ma20_slope, 2),
-            })
+            sig = self._make_signal(
+                code,
+                "ma_bullish_align",
+                {
+                    "ma5": round(ma5, 2),
+                    "ma10": round(ma10, 2),
+                    "ma20": round(ma20, 2),
+                    "ma60": round(ma60, 2),
+                    "ma20_slope_pct": round(ma20_slope, 2),
+                },
+            )
             if sig:
                 signals.append(sig)
 
         # Bearish alignment
         if ma5 < ma10 < ma20 < ma60 and ma20_slope < 0:
-            sig = self._make_signal(code, "ma_bearish_align", {
-                "ma5": round(ma5, 2), "ma10": round(ma10, 2),
-                "ma20": round(ma20, 2), "ma60": round(ma60, 2),
-                "ma20_slope_pct": round(ma20_slope, 2),
-            })
+            sig = self._make_signal(
+                code,
+                "ma_bearish_align",
+                {
+                    "ma5": round(ma5, 2),
+                    "ma10": round(ma10, 2),
+                    "ma20": round(ma20, 2),
+                    "ma60": round(ma60, 2),
+                    "ma20_slope_pct": round(ma20_slope, 2),
+                },
+            )
             if sig:
                 signals.append(sig)
 
@@ -1878,26 +2118,34 @@ class DailyIndicatorTracker:
             vol_ratio = curr_vol / curr_vol_ma
             # Breakout upper with volume
             if curr_close > curr_upper and vol_ratio > 1.2:
-                sig = self._make_signal(code, "bollinger_squeeze_breakout", {
-                    "direction": "bullish",
-                    "close": round(curr_close, 2),
-                    "upper": round(curr_upper, 2),
-                    "bandwidth": round(curr_width, 2),
-                    "min_bandwidth_60": round(min_width_60, 2),
-                    "volume_ratio": round(vol_ratio, 2),
-                })
+                sig = self._make_signal(
+                    code,
+                    "bollinger_squeeze_breakout",
+                    {
+                        "direction": "bullish",
+                        "close": round(curr_close, 2),
+                        "upper": round(curr_upper, 2),
+                        "bandwidth": round(curr_width, 2),
+                        "min_bandwidth_60": round(min_width_60, 2),
+                        "volume_ratio": round(vol_ratio, 2),
+                    },
+                )
                 if sig:
                     signals.append(sig)
             # Breakdown lower with volume
             elif curr_close < curr_lower and vol_ratio > 1.2:
-                sig = self._make_signal(code, "bollinger_squeeze_breakout", {
-                    "direction": "bearish",
-                    "close": round(curr_close, 2),
-                    "lower": round(curr_lower, 2),
-                    "bandwidth": round(curr_width, 2),
-                    "min_bandwidth_60": round(min_width_60, 2),
-                    "volume_ratio": round(vol_ratio, 2),
-                })
+                sig = self._make_signal(
+                    code,
+                    "bollinger_squeeze_breakout",
+                    {
+                        "direction": "bearish",
+                        "close": round(curr_close, 2),
+                        "lower": round(curr_lower, 2),
+                        "bandwidth": round(curr_width, 2),
+                        "min_bandwidth_60": round(min_width_60, 2),
+                        "volume_ratio": round(vol_ratio, 2),
+                    },
+                )
                 if sig:
                     signals.append(sig)
 
@@ -1931,12 +2179,16 @@ class DailyIndicatorTracker:
             ma20 = float(mas.get("ma20", pd.Series([0])).iloc[-1])
             direction = "bullish" if ma5 > ma20 else "bearish"
 
-            sig = self._make_signal(code, "adx_trend_start", {
-                "adx": round(curr_adx, 1),
-                "prev_adx": round(prev_adx, 1),
-                "direction": direction,
-                "threshold": threshold,
-            })
+            sig = self._make_signal(
+                code,
+                "adx_trend_start",
+                {
+                    "adx": round(curr_adx, 1),
+                    "prev_adx": round(prev_adx, 1),
+                    "direction": direction,
+                    "threshold": threshold,
+                },
+            )
             if sig:
                 signals.append(sig)
 
@@ -1969,26 +2221,42 @@ class DailyIndicatorTracker:
         prev_high_vol = float(volume.iloc[prev_high_idx])
 
         # volume_breakout: close > prev high + volume > MA20 * ratio
-        if curr_close > prev_high and curr_vol_ma > 0 and curr_vol > curr_vol_ma * vol_ratio:
-            sig = self._make_signal(code, "volume_breakout", {
-                "close": round(curr_close, 2),
-                "prev_high": round(prev_high, 2),
-                "volume": round(curr_vol, 0),
-                "vol_ma20": round(curr_vol_ma, 0),
-                "vol_ratio": round(curr_vol / curr_vol_ma, 2),
-            })
+        if (
+            curr_close > prev_high
+            and curr_vol_ma > 0
+            and curr_vol > curr_vol_ma * vol_ratio
+        ):
+            sig = self._make_signal(
+                code,
+                "volume_breakout",
+                {
+                    "close": round(curr_close, 2),
+                    "prev_high": round(prev_high, 2),
+                    "volume": round(curr_vol, 0),
+                    "vol_ma20": round(curr_vol_ma, 0),
+                    "vol_ratio": round(curr_vol / curr_vol_ma, 2),
+                },
+            )
             if sig:
                 signals.append(sig)
 
         # volume_divergence_top: new high + volume < prev_high_volume * 0.7
-        if curr_close > prev_high and prev_high_vol > 0 and curr_vol < prev_high_vol * 0.7:
-            sig = self._make_signal(code, "volume_divergence_top", {
-                "close": round(curr_close, 2),
-                "prev_high": round(prev_high, 2),
-                "volume": round(curr_vol, 0),
-                "prev_high_volume": round(prev_high_vol, 0),
-                "vol_shrink_ratio": round(curr_vol / prev_high_vol, 2),
-            })
+        if (
+            curr_close > prev_high
+            and prev_high_vol > 0
+            and curr_vol < prev_high_vol * 0.7
+        ):
+            sig = self._make_signal(
+                code,
+                "volume_divergence_top",
+                {
+                    "close": round(curr_close, 2),
+                    "prev_high": round(prev_high, 2),
+                    "volume": round(curr_vol, 0),
+                    "prev_high_volume": round(prev_high_vol, 0),
+                    "vol_shrink_ratio": round(curr_vol / prev_high_vol, 2),
+                },
+            )
             if sig:
                 signals.append(sig)
 
@@ -2010,11 +2278,11 @@ class DailyIndicatorTracker:
         open_prices = kline["open"].astype(float)
 
         # Need at least 3 bars for morning/evening star
-        c0 = float(close.iloc[-3])   # 3 days ago
+        c0 = float(close.iloc[-3])  # 3 days ago
         o0 = float(open_prices.iloc[-3])
-        c1 = float(close.iloc[-2])   # 2 days ago (middle)
+        c1 = float(close.iloc[-2])  # 2 days ago (middle)
         o1 = float(open_prices.iloc[-2])
-        c2 = float(close.iloc[-1])   # today
+        c2 = float(close.iloc[-1])  # today
         o2 = float(open_prices.iloc[-1])
 
         body0 = c0 - o0
@@ -2031,21 +2299,33 @@ class DailyIndicatorTracker:
 
         # Bullish engulfing: prev bearish + curr bullish engulfs prev body
         if prev_body < 0 and curr_body > 0 and curr_o <= prev_c and curr_c >= prev_o:
-            sig = self._make_signal(code, "engulfing_pattern", {
-                "direction": "bullish",
-                "prev_open": round(prev_o, 2), "prev_close": round(prev_c, 2),
-                "curr_open": round(curr_o, 2), "curr_close": round(curr_c, 2),
-            })
+            sig = self._make_signal(
+                code,
+                "engulfing_pattern",
+                {
+                    "direction": "bullish",
+                    "prev_open": round(prev_o, 2),
+                    "prev_close": round(prev_c, 2),
+                    "curr_open": round(curr_o, 2),
+                    "curr_close": round(curr_c, 2),
+                },
+            )
             if sig:
                 signals.append(sig)
 
         # Bearish engulfing: prev bullish + curr bearish engulfs prev body
         if prev_body > 0 and curr_body < 0 and curr_o >= prev_c and curr_c <= prev_o:
-            sig = self._make_signal(code, "engulfing_pattern", {
-                "direction": "bearish",
-                "prev_open": round(prev_o, 2), "prev_close": round(prev_c, 2),
-                "curr_open": round(curr_o, 2), "curr_close": round(curr_c, 2),
-            })
+            sig = self._make_signal(
+                code,
+                "engulfing_pattern",
+                {
+                    "direction": "bearish",
+                    "prev_open": round(prev_o, 2),
+                    "prev_close": round(prev_c, 2),
+                    "curr_open": round(curr_o, 2),
+                    "curr_close": round(curr_c, 2),
+                },
+            )
             if sig:
                 signals.append(sig)
 
@@ -2058,25 +2338,33 @@ class DailyIndicatorTracker:
 
         # Morning star: big bearish + doji + big bullish
         if body0 < -avg_body * 0.8 and is_doji and body2 > avg_body * 0.8:
-            sig = self._make_signal(code, "morning_evening_star", {
-                "direction": "bullish",
-                "pattern": "morning_star",
-                "day1_body": round(body0, 2),
-                "day2_body": round(body1, 2),
-                "day3_body": round(body2, 2),
-            })
+            sig = self._make_signal(
+                code,
+                "morning_evening_star",
+                {
+                    "direction": "bullish",
+                    "pattern": "morning_star",
+                    "day1_body": round(body0, 2),
+                    "day2_body": round(body1, 2),
+                    "day3_body": round(body2, 2),
+                },
+            )
             if sig:
                 signals.append(sig)
 
         # Evening star: big bullish + doji + big bearish
         if body0 > avg_body * 0.8 and is_doji and body2 < -avg_body * 0.8:
-            sig = self._make_signal(code, "morning_evening_star", {
-                "direction": "bearish",
-                "pattern": "evening_star",
-                "day1_body": round(body0, 2),
-                "day2_body": round(body1, 2),
-                "day3_body": round(body2, 2),
-            })
+            sig = self._make_signal(
+                code,
+                "morning_evening_star",
+                {
+                    "direction": "bearish",
+                    "pattern": "evening_star",
+                    "day1_body": round(body0, 2),
+                    "day2_body": round(body1, 2),
+                    "day3_body": round(body2, 2),
+                },
+            )
             if sig:
                 signals.append(sig)
 
@@ -2107,46 +2395,78 @@ class DailyIndicatorTracker:
 
         # ── breakout_pullback: 突破回踩 ──
         # Find recent breakout: was there a bar in last 10 days that broke prev high with volume?
-        prev_high_20 = float(high.iloc[-30:-10].max()) if len(high) >= 30 else float(high.iloc[:-10].max())
+        prev_high_20 = (
+            float(high.iloc[-30:-10].max())
+            if len(high) >= 30
+            else float(high.iloc[:-10].max())
+        )
 
         # Check last 10 days for breakout
         breakout_idx = None
         for i in range(-10, -1):
-            bar_vol_ma = float(vol_ma20.iloc[i]) if not pd.isna(vol_ma20.iloc[i]) else curr_vol_ma
-            if float(close.iloc[i]) > prev_high_20 and float(volume.iloc[i]) > bar_vol_ma * 1.3:
+            bar_vol_ma = (
+                float(vol_ma20.iloc[i])
+                if not pd.isna(vol_ma20.iloc[i])
+                else curr_vol_ma
+            )
+            if (
+                float(close.iloc[i]) > prev_high_20
+                and float(volume.iloc[i]) > bar_vol_ma * 1.3
+            ):
                 breakout_idx = i
                 break
 
         if breakout_idx is not None:
             # Current bar is pullback: volume < MA20 (shrinking) and close > old resistance (support)
             breakout_level = prev_high_20
-            if (curr_vol < curr_vol_ma and curr_close > breakout_level * 0.98
-                    and curr_close < float(close.iloc[breakout_idx]) * 1.02):
-                sig = self._make_signal(code, "breakout_pullback", {
-                    "close": round(curr_close, 2),
-                    "support_level": round(breakout_level, 2),
-                    "breakout_close": round(float(close.iloc[breakout_idx]), 2),
-                    "vol_shrink": round(curr_vol / curr_vol_ma, 2) if curr_vol_ma > 0 else 0,
-                })
+            if (
+                curr_vol < curr_vol_ma
+                and curr_close > breakout_level * 0.98
+                and curr_close < float(close.iloc[breakout_idx]) * 1.02
+            ):
+                sig = self._make_signal(
+                    code,
+                    "breakout_pullback",
+                    {
+                        "close": round(curr_close, 2),
+                        "support_level": round(breakout_level, 2),
+                        "breakout_close": round(float(close.iloc[breakout_idx]), 2),
+                        "vol_shrink": round(curr_vol / curr_vol_ma, 2)
+                        if curr_vol_ma > 0
+                        else 0,
+                    },
+                )
                 if sig:
                     signals.append(sig)
 
         # ── support_breakdown: 破位下跌 ──
         # Key support: 前低 or MA60
-        prev_low_20 = float(low.iloc[-30:-3].min()) if len(low) >= 30 else float(low.iloc[:-3].min())
+        prev_low_20 = (
+            float(low.iloc[-30:-3].min())
+            if len(low) >= 30
+            else float(low.iloc[:-3].min())
+        )
         ma60_val = float(mas.get("ma60", pd.Series([0])).iloc[-1])
         support_level = max(prev_low_20, ma60_val) if ma60_val > 0 else prev_low_20
 
         # Breakdown: close < support + volume > MA20
-        if (curr_close < support_level and prev_close >= support_level
-                and curr_vol_ma > 0 and curr_vol > curr_vol_ma):
-            sig = self._make_signal(code, "support_breakdown", {
-                "close": round(curr_close, 2),
-                "support_level": round(support_level, 2),
-                "prev_low_20": round(prev_low_20, 2),
-                "ma60": round(ma60_val, 2),
-                "vol_ratio": round(curr_vol / curr_vol_ma, 2),
-            })
+        if (
+            curr_close < support_level
+            and prev_close >= support_level
+            and curr_vol_ma > 0
+            and curr_vol > curr_vol_ma
+        ):
+            sig = self._make_signal(
+                code,
+                "support_breakdown",
+                {
+                    "close": round(curr_close, 2),
+                    "support_level": round(support_level, 2),
+                    "prev_low_20": round(prev_low_20, 2),
+                    "ma60": round(ma60_val, 2),
+                    "vol_ratio": round(curr_vol / curr_vol_ma, 2),
+                },
+            )
             if sig:
                 signals.append(sig)
 
@@ -2188,23 +2508,31 @@ class DailyIndicatorTracker:
         rs_threshold = self._cfg.get("relative_strength_threshold", 15)
         # Strong: excess return top 20% proxy
         if excess_return > rs_threshold:
-            sig = self._make_signal(code, "relative_strength", {
-                "direction": "bullish",
-                "stock_return_60d": round(stock_return, 1),
-                "index_return_60d": round(idx_return, 1),
-                "excess_return": round(excess_return, 1),
-            })
+            sig = self._make_signal(
+                code,
+                "relative_strength",
+                {
+                    "direction": "bullish",
+                    "stock_return_60d": round(stock_return, 1),
+                    "index_return_60d": round(idx_return, 1),
+                    "excess_return": round(excess_return, 1),
+                },
+            )
             if sig:
                 signals.append(sig)
 
         # Weak: bottom 20% proxy
         if excess_return < -rs_threshold:
-            sig = self._make_signal(code, "relative_strength", {
-                "direction": "bearish",
-                "stock_return_60d": round(stock_return, 1),
-                "index_return_60d": round(idx_return, 1),
-                "excess_return": round(excess_return, 1),
-            })
+            sig = self._make_signal(
+                code,
+                "relative_strength",
+                {
+                    "direction": "bearish",
+                    "stock_return_60d": round(stock_return, 1),
+                    "index_return_60d": round(idx_return, 1),
+                    "excess_return": round(excess_return, 1),
+                },
+            )
             if sig:
                 signals.append(sig)
 
@@ -2263,12 +2591,18 @@ class DailyIndicatorTracker:
                 macd_hist_val = round(float(hist_series.iloc[-1]), 6)
 
             vol_ratio = None
-            if (vol_series is not None and vol_ma_series is not None
-                    and len(vol_series) > 0 and len(vol_ma_series) > 0
-                    and not pd.isna(vol_series.iloc[-1])
-                    and not pd.isna(vol_ma_series.iloc[-1])
-                    and float(vol_ma_series.iloc[-1]) > 0):
-                vol_ratio = round(float(vol_series.iloc[-1]) / float(vol_ma_series.iloc[-1]), 2)
+            if (
+                vol_series is not None
+                and vol_ma_series is not None
+                and len(vol_series) > 0
+                and len(vol_ma_series) > 0
+                and not pd.isna(vol_series.iloc[-1])
+                and not pd.isna(vol_ma_series.iloc[-1])
+                and float(vol_ma_series.iloc[-1]) > 0
+            ):
+                vol_ratio = round(
+                    float(vol_series.iloc[-1]) / float(vol_ma_series.iloc[-1]), 2
+                )
 
             result[code] = {
                 "rsi": rsi_val,
@@ -2279,9 +2613,9 @@ class DailyIndicatorTracker:
             }
         return result
 
-    def score(self, code: str,
-              main_net_inflow: float = 0,
-              main_net_inflow_pct: float = 0) -> dict:
+    def score(
+        self, code: str, main_net_inflow: float = 0, main_net_inflow_pct: float = 0
+    ) -> dict:
         """综合评分 0-100，驱动 v2 日线级开仓/平仓决策。
 
         Args:
@@ -2297,18 +2631,29 @@ class DailyIndicatorTracker:
         """
         ind = self._ind.get(code)
         if not ind:
-            return {"total": 0, "action": "WAIT",
-                    "stop_loss": 0, "take_profit": 0, "atr": 0}
+            return {
+                "total": 0,
+                "action": "WAIT",
+                "stop_loss": 0,
+                "take_profit": 0,
+                "atr": 0,
+            }
 
         close = ind["close"]
         if len(close) < 60:
-            return {"total": 0, "action": "WAIT",
-                    "stop_loss": 0, "take_profit": 0, "atr": 0}
+            return {
+                "total": 0,
+                "action": "WAIT",
+                "stop_loss": 0,
+                "take_profit": 0,
+                "atr": 0,
+            }
 
         # Stale data check: if kline is >5 days old, score is unreliable
         kline = self._kline_cache.get(code)
         if kline is not None and "time_key" in kline.columns:
             import datetime as _dt
+
             try:
                 last_date = pd.to_datetime(kline["time_key"].iloc[-1]).date()
                 today = _dt.date.today()
@@ -2318,25 +2663,52 @@ class DailyIndicatorTracker:
                         f"score({code}): kline stale by {stale_days} days "
                         f"(last={last_date}), returning WAIT"
                     )
-                    return {"total": 0, "action": "WAIT",
-                            "stop_loss": 0, "take_profit": 0, "atr": 0}
+                    return {
+                        "total": 0,
+                        "action": "WAIT",
+                        "stop_loss": 0,
+                        "take_profit": 0,
+                        "atr": 0,
+                    }
             except Exception:
                 pass
 
         # 读最新值
         c = float(close.iloc[-1])
         rsi_val = float(ind["rsi"].iloc[-1]) if not pd.isna(ind["rsi"].iloc[-1]) else 50
-        macd_hist = float(ind["macd_hist"].iloc[-1]) if not pd.isna(ind["macd_hist"].iloc[-1]) else 0
-        prev_hist = float(ind["macd_hist"].iloc[-2]) if len(ind["macd_hist"]) >= 2 and not pd.isna(ind["macd_hist"].iloc[-2]) else 0
-        dif = float(ind["macd_dif"].iloc[-1]) if not pd.isna(ind["macd_dif"].iloc[-1]) else 0
-        dea = float(ind["macd_dea"].iloc[-1]) if not pd.isna(ind["macd_dea"].iloc[-1]) else 0
+        macd_hist = (
+            float(ind["macd_hist"].iloc[-1])
+            if not pd.isna(ind["macd_hist"].iloc[-1])
+            else 0
+        )
+        prev_hist = (
+            float(ind["macd_hist"].iloc[-2])
+            if len(ind["macd_hist"]) >= 2 and not pd.isna(ind["macd_hist"].iloc[-2])
+            else 0
+        )
+        dif = (
+            float(ind["macd_dif"].iloc[-1])
+            if not pd.isna(ind["macd_dif"].iloc[-1])
+            else 0
+        )
+        dea = (
+            float(ind["macd_dea"].iloc[-1])
+            if not pd.isna(ind["macd_dea"].iloc[-1])
+            else 0
+        )
         mas = ind["mas"]
         ma5 = float(mas["ma5"].iloc[-1]) if not pd.isna(mas["ma5"].iloc[-1]) else c
         ma10 = float(mas["ma10"].iloc[-1]) if not pd.isna(mas["ma10"].iloc[-1]) else c
         ma20 = float(mas["ma20"].iloc[-1]) if not pd.isna(mas["ma20"].iloc[-1]) else c
         ma60 = float(mas["ma60"].iloc[-1]) if not pd.isna(mas["ma60"].iloc[-1]) else c
-        vol = float(ind["volume"].iloc[-1]) if not pd.isna(ind["volume"].iloc[-1]) else 0
-        vol_ma20 = float(ind["vol_ma20"].iloc[-1]) if not pd.isna(ind["vol_ma20"].iloc[-1]) else 1
+        vol = (
+            float(ind["volume"].iloc[-1]) if not pd.isna(ind["volume"].iloc[-1]) else 0
+        )
+        vol_ma20 = (
+            float(ind["vol_ma20"].iloc[-1])
+            if not pd.isna(ind["vol_ma20"].iloc[-1])
+            else 1
+        )
         # ADX: 衡量趋势强度，ADX<20 为震荡市，动量信号可信度下降
         adx_val = 25.0  # default: assume trending
         if "adx" in ind and len(ind["adx"]) > 0:
@@ -2357,11 +2729,11 @@ class DailyIndicatorTracker:
         elif macd_hist > 0:
             macd_score = 14  # hist 正但收缩
         elif macd_hist < 0 and prev_hist >= 0:
-            macd_score = 0   # 刚死叉
+            macd_score = 0  # 刚死叉
         elif macd_hist < 0 and macd_hist < prev_hist:
-            macd_score = 2   # hist 扩大负值
+            macd_score = 2  # hist 扩大负值
         elif macd_hist < 0:
-            macd_score = 6   # hist 负但收窄
+            macd_score = 6  # hist 负但收窄
         # DIF/DEA 零轴上方加分
         if dif > 0 and dea > 0:
             macd_score = min(20, macd_score + 2)
@@ -2381,11 +2753,11 @@ class DailyIndicatorTracker:
         elif 65 < rsi_val <= 75:
             rsi_score = 10  # 偏高，趋势延续但需谨慎
         elif 75 < rsi_val <= 80:
-            rsi_score = 6   # 超买区，追涨风险上升
+            rsi_score = 6  # 超买区，追涨风险上升
         elif rsi_val > 80:
-            rsi_score = 3   # 极度超买
+            rsi_score = 3  # 极度超买
         else:
-            rsi_score = 5   # RSI < 30 极度超卖（高风险高潜力）
+            rsi_score = 5  # RSI < 30 极度超卖（高风险高潜力）
         # ADX 震荡市过滤：RSI 动量信号同样降权
         if choppy_market:
             rsi_score = max(0, rsi_score - 5)
@@ -2393,8 +2765,8 @@ class DailyIndicatorTracker:
 
         # ── MA 排列 (20分) ──
         # 多头排列: ma5 > ma10 > ma20 > ma60
-        bullish_align = (ma5 > ma10 > ma20 > ma60)
-        bearish_align = (ma5 < ma10 < ma20 < ma60)
+        bullish_align = ma5 > ma10 > ma20 > ma60
+        bearish_align = ma5 < ma10 < ma20 < ma60
         above_ma20 = c > ma20
         above_ma60 = c > ma60
 
@@ -2444,18 +2816,20 @@ class DailyIndicatorTracker:
         elif price_up and vol_ratio > 1.0:
             vp_score = 12  # 温和放量
         elif price_up and vol_ratio < 0.8:
-            vp_score = 6   # 缩量上涨 (谨慎)
+            vp_score = 6  # 缩量上涨 (谨慎)
         elif not price_up and vol_ratio > 1.5:
-            vp_score = 2   # 放量下跌
+            vp_score = 2  # 放量下跌
         elif not price_up and vol_ratio < 0.8:
-            vp_score = 7   # 缩量回调 (不严重)
+            vp_score = 7  # 缩量回调 (不严重)
         else:
-            vp_score = 8   # 中性
+            vp_score = 8  # 中性
         scores["volume_price"] = vp_score
 
         # ── 支撑位 (10分) ──
         # 接近支撑 = 高分 (买入安全垫); 远离支撑 = 中性
-        low_30 = float(ind["low"].iloc[-30:].min()) if len(ind["low"]) >= 30 else c * 0.95
+        low_30 = (
+            float(ind["low"].iloc[-30:].min()) if len(ind["low"]) >= 30 else c * 0.95
+        )
         support = max(low_30, ma60)
         dist_to_support = (c - support) / c if c > 0 else 0
 
@@ -2466,7 +2840,7 @@ class DailyIndicatorTracker:
         elif dist_to_support < 0.10:
             sup_score = 5
         else:
-            sup_score = 3   # 远离支撑
+            sup_score = 3  # 远离支撑
         scores["support"] = sup_score
 
         total = sum(scores.values())
@@ -2479,7 +2853,9 @@ class DailyIndicatorTracker:
         if atr <= 0:
             atr = c * 0.02  # fallback
 
-        resistance = float(ind["high"].iloc[-30:].max()) if len(ind["high"]) >= 30 else c * 1.05
+        resistance = (
+            float(ind["high"].iloc[-30:].max()) if len(ind["high"]) >= 30 else c * 1.05
+        )
         stop_loss = max(support - atr * 0.5, c - atr * 2)
         take_profit = min(resistance, c + atr * 3)
 
@@ -2495,7 +2871,8 @@ class DailyIndicatorTracker:
                 minus_di_val = float(_mdi)
 
         return {
-            "total": total, **scores,
+            "total": total,
+            **scores,
             "action": action,
             "stop_loss": round(stop_loss, 4),
             "take_profit": round(take_profit, 4),
@@ -2524,6 +2901,7 @@ class DailyIndicatorTracker:
 # L2 Strategy Engine
 # ══════════════════════════════════════════
 
+
 class L2StrategyEngine:
     """L2 策略引擎 — 管理 Futu 连接、订阅、5 个 Tracker
 
@@ -2533,13 +2911,21 @@ class L2StrategyEngine:
             signals = engine.poll_once()
     """
 
-    def __init__(self, strategy_config: dict, watchlist: dict,
-                 host: str = OPEND_HOST, port: int = OPEND_PORT):
+    def __init__(
+        self,
+        strategy_config: dict,
+        watchlist: dict,
+        host: str = OPEND_HOST,
+        port: int = OPEND_PORT,
+    ):
         self._host = host
         self._port = port
         self._ctx = None
         self._last_fail_time: float = 0
         self._subscribed: bool = False
+        self._last_tick_ts: dict[str, float] = {}
+        self._stale_count: dict[str, int] = {}
+        self._last_recovery_ts: float = 0
 
         self._config = strategy_config
         self._watchlist = watchlist
@@ -2547,13 +2933,13 @@ class L2StrategyEngine:
 
         # Name map for signal formatting
         self._name_map: dict[str, str] = {
-            code: info.get("name", code)
-            for code, info in watchlist.items()
+            code: info.get("name", code) for code, info in watchlist.items()
         }
 
         # HK codes to monitor: all holdings + star watching (star = highest priority)
         self._hk_holdings = [
-            code for code, info in watchlist.items()
+            code
+            for code, info in watchlist.items()
             if code.startswith("HK")
             and not info.get("hidden", False)
             and (info.get("type") == "holding" or info.get("star", False))
@@ -2567,9 +2953,15 @@ class L2StrategyEngine:
         for name, cfg in self._strategies.items():
             cooldowns[name] = cfg.get("cooldown_minutes", 15)
         # Daily indicator strategies use longer cooldown (default 480 min = 8h, effectively once/day)
-        daily_cooldown = strategy_config.get("daily_indicators", {}).get("cooldown_minutes", 480)
-        for s in DAILY_NOTIFY_STRATEGIES | {"rsi_overbought", "rsi_oversold", "adx_trend_start",
-                "volume_divergence_top"}:
+        daily_cooldown = strategy_config.get("daily_indicators", {}).get(
+            "cooldown_minutes", 480
+        )
+        for s in DAILY_NOTIFY_STRATEGIES | {
+            "rsi_overbought",
+            "rsi_oversold",
+            "adx_trend_start",
+            "volume_divergence_top",
+        }:
             cooldowns[s] = daily_cooldown
         self._cooldown = CooldownManager(cooldowns)
 
@@ -2668,6 +3060,7 @@ class L2StrategyEngine:
 
         try:
             from futu import OpenQuoteContext
+
             self._ctx = OpenQuoteContext(host=self._host, port=self._port)
             logger.info("L2 Strategy Engine connected to OpenD")
             return True
@@ -2740,13 +3133,15 @@ class L2StrategyEngine:
                 big_in = float(latest.get("big_in_flow", 0) or 0)
                 mid_in = float(latest.get("mid_in_flow", 0) or 0)
                 sml_in = float(latest.get("sml_in_flow", 0) or 0)
-                amount = float(latest.get("in_flow", 0) or 0) + float(latest.get("out_flow", 0) or 0)
+                amount = float(latest.get("in_flow", 0) or 0) + float(
+                    latest.get("out_flow", 0) or 0
+                )
 
                 main_inflow = super_in + big_in
                 # 成交额太小时占比无意义（开盘初期噪音）
                 MIN_AMOUNT_FOR_PCT = 5_000_000  # 500万
                 if abs(amount) >= MIN_AMOUNT_FOR_PCT:
-                    inflow_pct = (main_inflow / amount * 100)
+                    inflow_pct = main_inflow / amount * 100
                 else:
                     inflow_pct = 0
 
@@ -2835,23 +3230,34 @@ class L2StrategyEngine:
 
         from futu import RET_OK
 
+        now = time.time()
         result = {}
         for code in self._hk_holdings:
             futu_code = to_futu_code(code)
             try:
                 ret, data = self._ctx.get_rt_ticker(futu_code, num=1000)
                 if ret != RET_OK or data.empty:
+                    if self._is_continuous_trading() and code in self._last_tick_ts:
+                        if now - self._last_tick_ts[code] > STALE_SEC:
+                            self._stale_count[code] = self._stale_count.get(code, 0) + 1
+                            if self._stale_count[code] >= STALE_CONSECUTIVE:
+                                self._trigger_ticker_recovery(now)
                     continue
+
+                self._last_tick_ts[code] = now
+                self._stale_count[code] = 0
 
                 ticks = []
                 for _, row in data.iterrows():
-                    ticks.append({
-                        "sequence": int(row.get("sequence", 0)),
-                        "turnover": float(row.get("turnover", 0)),
-                        "price": float(row.get("price", 0)),
-                        "volume": int(row.get("volume", 0)),
-                        "direction": str(row.get("ticker_direction", "")),
-                    })
+                    ticks.append(
+                        {
+                            "sequence": int(row.get("sequence", 0)),
+                            "turnover": float(row.get("turnover", 0)),
+                            "price": float(row.get("price", 0)),
+                            "volume": int(row.get("volume", 0)),
+                            "direction": str(row.get("ticker_direction", "")),
+                        }
+                    )
                 if ticks:
                     result[code] = ticks
             except Exception as e:
@@ -2859,10 +3265,40 @@ class L2StrategyEngine:
 
         return result
 
+    def _trigger_ticker_recovery(self, now: float):
+        """触发 ticker 恢复：全Stale则重连，否则仅强制重订阅"""
+        if now - self._last_recovery_ts < 300:
+            logger.warning("Ticker recovery cooldown active, skipping")
+            return
+
+        monitored_with_ts = [c for c in self._hk_holdings if c in self._last_tick_ts]
+        all_stale = len(monitored_with_ts) > 0 and all(
+            self._stale_count.get(c, 0) >= STALE_CONSECUTIVE for c in monitored_with_ts
+        )
+
+        self._last_recovery_ts = now
+
+        if all_stale:
+            logger.error(
+                f"All {len(monitored_with_ts)} monitored tickers stale; closing and reconnecting"
+            )
+            self.close()
+            self.connect()
+        else:
+            logger.warning(
+                "Partial ticker staleness detected; forcing re-subscribe on next poll"
+            )
+            self._subscribed = False
+
+        # Reset to prevent endless recovery loops for suspended / zero-volume stocks
+        self._stale_count.clear()
+        self._last_tick_ts.clear()
+
     # ── Momentum alert ──
 
-    def _evaluate_momentum(self, code: str, session_data: dict,
-                           capital_data: dict, snapshot_data: dict) -> Optional[dict]:
+    def _evaluate_momentum(
+        self, code: str, session_data: dict, capital_data: dict, snapshot_data: dict
+    ) -> Optional[dict]:
         """评估单只股票的动量确认信号
 
         5 个条件全部满足才触发:
@@ -2931,8 +3367,9 @@ class L2StrategyEngine:
 
     # ── Momentum sell alert (bearish mirror) ──
 
-    def _evaluate_momentum_sell(self, code: str, session_data: dict,
-                                capital_data: dict, snapshot_data: dict) -> Optional[dict]:
+    def _evaluate_momentum_sell(
+        self, code: str, session_data: dict, capital_data: dict, snapshot_data: dict
+    ) -> Optional[dict]:
         """大单持续净卖出 + 日跌幅 + session bearish + 资金流出"""
         cfg = self._strategies.get("momentum_sell_alert", {})
         if not cfg.get("enabled", True):
@@ -2988,8 +3425,9 @@ class L2StrategyEngine:
 
     # ── Volume acceleration alert ──
 
-    def _evaluate_volume_accel(self, code: str, session_data: dict,
-                               capital_data: dict, snapshot_data: dict) -> Optional[dict]:
+    def _evaluate_volume_accel(
+        self, code: str, session_data: dict, capital_data: dict, snapshot_data: dict
+    ) -> Optional[dict]:
         """评估单只股票的放量加速信号
 
         6 个条件全部满足才触发:
@@ -3051,8 +3489,9 @@ class L2StrategyEngine:
 
     # ── Volume acceleration sell alert (bearish mirror) ──
 
-    def _evaluate_volume_accel_sell(self, code: str, session_data: dict,
-                                    capital_data: dict, snapshot_data: dict) -> Optional[dict]:
+    def _evaluate_volume_accel_sell(
+        self, code: str, session_data: dict, capital_data: dict, snapshot_data: dict
+    ) -> Optional[dict]:
         """放量加速卖出: 成交额加速 + tick 持续偏卖 + 日跌 + 资金流出"""
         cfg = self._strategies.get("volume_accel_sell_alert", {})
         if not cfg.get("enabled", True):
@@ -3101,7 +3540,9 @@ class L2StrategyEngine:
 
     # ── Large order reversal ──
 
-    def _evaluate_large_order_reversal(self, code: str, session_data: dict) -> Optional[dict]:
+    def _evaluate_large_order_reversal(
+        self, code: str, session_data: dict
+    ) -> Optional[dict]:
         """检测大单方向翻转: prior 净方向 != recent 净方向 AND |recent 净额| >= min_net_amount"""
         cfg = self._strategies.get("large_order_reversal", {})
         if not cfg.get("enabled", True):
@@ -3119,7 +3560,7 @@ class L2StrategyEngine:
         if len(orders) < min_prior + min_recent:
             return None
 
-        prior_orders = orders[:len(orders) - min_recent]
+        prior_orders = orders[: len(orders) - min_recent]
         recent_orders = orders[-min_recent:]
 
         # Calculate net amounts
@@ -3247,7 +3688,9 @@ class L2StrategyEngine:
         try:
             # Always fetch all data sources — SessionAccumulator + session_snapshots
             # need them regardless of individual strategy enabled state
-            vol_accel_enabled = self._strategies.get("volume_accel_alert", {}).get("enabled", True)
+            vol_accel_enabled = self._strategies.get("volume_accel_alert", {}).get(
+                "enabled", True
+            )
             capital_data = self._fetch_capital_flow()
             snapshot_data = self._fetch_snapshots()
             ticker_data = self._fetch_rt_tickers()
@@ -3329,34 +3772,74 @@ class L2StrategyEngine:
 
         # ── 6. Momentum alert (session-level, not short-window) ──
         for code in self._hk_holdings:
-            sig = self._evaluate_momentum(code, session_snapshot, capital_data, snapshot_data)
+            sig = self._evaluate_momentum(
+                code, session_snapshot, capital_data, snapshot_data
+            )
             if sig and self._cooldown.can_trigger("momentum_alert", code):
                 self._cooldown.record("momentum_alert", code)
-                signals.append(format_signal(sig, self._name_map, notify=True, snapshot_data=snapshot_data, capital_data=capital_data))
+                signals.append(
+                    format_signal(
+                        sig,
+                        self._name_map,
+                        notify=True,
+                        snapshot_data=snapshot_data,
+                        capital_data=capital_data,
+                    )
+                )
 
         # ── 6b. Momentum sell alert (bearish mirror) ──
         if self._strategies.get("momentum_sell_alert", {}).get("enabled", True):
             for code in self._hk_holdings:
-                sig = self._evaluate_momentum_sell(code, session_snapshot, capital_data, snapshot_data)
+                sig = self._evaluate_momentum_sell(
+                    code, session_snapshot, capital_data, snapshot_data
+                )
                 if sig and self._cooldown.can_trigger("momentum_sell_alert", code):
                     self._cooldown.record("momentum_sell_alert", code)
-                    signals.append(format_signal(sig, self._name_map, notify=False, snapshot_data=snapshot_data, capital_data=capital_data))
+                    signals.append(
+                        format_signal(
+                            sig,
+                            self._name_map,
+                            notify=False,
+                            snapshot_data=snapshot_data,
+                            capital_data=capital_data,
+                        )
+                    )
 
         # ── 7. Volume acceleration alert (session-level) ──
         if vol_accel_enabled:
             for code in self._hk_holdings:
-                sig = self._evaluate_volume_accel(code, session_snapshot, capital_data, snapshot_data)
+                sig = self._evaluate_volume_accel(
+                    code, session_snapshot, capital_data, snapshot_data
+                )
                 if sig and self._cooldown.can_trigger("volume_accel_alert", code):
                     self._cooldown.record("volume_accel_alert", code)
-                    signals.append(format_signal(sig, self._name_map, notify=False, snapshot_data=snapshot_data, capital_data=capital_data))
+                    signals.append(
+                        format_signal(
+                            sig,
+                            self._name_map,
+                            notify=False,
+                            snapshot_data=snapshot_data,
+                            capital_data=capital_data,
+                        )
+                    )
 
         # ── 7b. Volume acceleration sell alert (bearish mirror) ──
         if self._strategies.get("volume_accel_sell_alert", {}).get("enabled", True):
             for code in self._hk_holdings:
-                sig = self._evaluate_volume_accel_sell(code, session_snapshot, capital_data, snapshot_data)
+                sig = self._evaluate_volume_accel_sell(
+                    code, session_snapshot, capital_data, snapshot_data
+                )
                 if sig and self._cooldown.can_trigger("volume_accel_sell_alert", code):
                     self._cooldown.record("volume_accel_sell_alert", code)
-                    signals.append(format_signal(sig, self._name_map, notify=False, snapshot_data=snapshot_data, capital_data=capital_data))
+                    signals.append(
+                        format_signal(
+                            sig,
+                            self._name_map,
+                            notify=False,
+                            snapshot_data=snapshot_data,
+                            capital_data=capital_data,
+                        )
+                    )
 
         # Apply cooldowns and format raw signals (notify=false, web only)
         accepted_raw = []
@@ -3365,7 +3848,15 @@ class L2StrategyEngine:
             code = raw["code"]
             if self._cooldown.can_trigger(strategy, code):
                 self._cooldown.record(strategy, code)
-                signals.append(format_signal(raw, self._name_map, notify=False, snapshot_data=snapshot_data, capital_data=capital_data))
+                signals.append(
+                    format_signal(
+                        raw,
+                        self._name_map,
+                        notify=False,
+                        snapshot_data=snapshot_data,
+                        capital_data=capital_data,
+                    )
+                )
                 accepted_raw.append(raw)
 
         # ── 8. Tick persistence (feed from accepted tick_imbalance signals) ──
@@ -3377,15 +3868,35 @@ class L2StrategyEngine:
                 sig = self._tick_persistence.evaluate(code)
                 if sig and self._cooldown.can_trigger("tick_persistence", code):
                     self._cooldown.record("tick_persistence", code)
-                    signals.append(format_signal(sig, self._name_map, notify=False, snapshot_data=snapshot_data, capital_data=capital_data))
+                    signals.append(
+                        format_signal(
+                            sig,
+                            self._name_map,
+                            notify=False,
+                            snapshot_data=snapshot_data,
+                            capital_data=capital_data,
+                        )
+                    )
 
         # ── 9. Institutional retail divergence ──
-        if self._strategies.get("institutional_retail_divergence", {}).get("enabled", True):
+        if self._strategies.get("institutional_retail_divergence", {}).get(
+            "enabled", True
+        ):
             for code in self._hk_holdings:
                 sig = self._inst_retail.evaluate(code, capital_data)
-                if sig and self._cooldown.can_trigger("institutional_retail_divergence", code):
+                if sig and self._cooldown.can_trigger(
+                    "institutional_retail_divergence", code
+                ):
                     self._cooldown.record("institutional_retail_divergence", code)
-                    signals.append(format_signal(sig, self._name_map, notify=False, snapshot_data=snapshot_data, capital_data=capital_data))
+                    signals.append(
+                        format_signal(
+                            sig,
+                            self._name_map,
+                            notify=False,
+                            snapshot_data=snapshot_data,
+                            capital_data=capital_data,
+                        )
+                    )
 
         # ── 10. Large order reversal ──
         if self._strategies.get("large_order_reversal", {}).get("enabled", True):
@@ -3393,7 +3904,15 @@ class L2StrategyEngine:
                 sig = self._evaluate_large_order_reversal(code, session_snapshot)
                 if sig and self._cooldown.can_trigger("large_order_reversal", code):
                     self._cooldown.record("large_order_reversal", code)
-                    signals.append(format_signal(sig, self._name_map, notify=False, snapshot_data=snapshot_data, capital_data=capital_data))
+                    signals.append(
+                        format_signal(
+                            sig,
+                            self._name_map,
+                            notify=False,
+                            snapshot_data=snapshot_data,
+                            capital_data=capital_data,
+                        )
+                    )
 
         # ── Track signal timestamps for closing_surge ──
         now_ts = time.time()
@@ -3410,11 +3929,21 @@ class L2StrategyEngine:
                 sig = self._evaluate_closing_surge(code)
                 if sig and self._cooldown.can_trigger("closing_surge", code):
                     # Set direction from session
-                    sess_dir = session_snapshot.get(code, {}).get("direction", "neutral")
+                    sess_dir = session_snapshot.get(code, {}).get(
+                        "direction", "neutral"
+                    )
                     if sess_dir != "neutral":
                         sig["detail"]["direction"] = sess_dir
                     self._cooldown.record("closing_surge", code)
-                    signals.append(format_signal(sig, self._name_map, notify=False, snapshot_data=snapshot_data, capital_data=capital_data))
+                    signals.append(
+                        format_signal(
+                            sig,
+                            self._name_map,
+                            notify=False,
+                            snapshot_data=snapshot_data,
+                            capital_data=capital_data,
+                        )
+                    )
 
         # ── 12. Daily indicator signals (refresh every 30min) ──
         daily_cfg = self._config.get("daily_indicators", {})
@@ -3428,10 +3957,15 @@ class L2StrategyEngine:
                         if self._cooldown.can_trigger(strategy, code):
                             self._cooldown.record(strategy, code)
                             notify = strategy in DAILY_NOTIFY_STRATEGIES
-                            signals.append(format_signal(
-                                sig, self._name_map, notify=notify,
-                                snapshot_data=snapshot_data,
-                                capital_data=capital_data))
+                            signals.append(
+                                format_signal(
+                                    sig,
+                                    self._name_map,
+                                    notify=notify,
+                                    snapshot_data=snapshot_data,
+                                    capital_data=capital_data,
+                                )
+                            )
             except Exception as e:
                 logger.warning(f"Daily indicator error: {e}")
 
@@ -3446,14 +3980,22 @@ class L2StrategyEngine:
             comp_code = comp.get("code", "")
             sess_dir = session_snapshot.get(comp_code, {}).get("direction", "neutral")
             comp_dir = "bullish" if "bullish" in comp_strategy else "bearish"
-            session_aligned = (comp_dir == sess_dir)
+            session_aligned = comp_dir == sess_dir
             comp_notify = comp_score >= 7
-            signals.append(format_signal(comp, self._name_map, notify=comp_notify, snapshot_data=snapshot_data, capital_data=capital_data))
+            signals.append(
+                format_signal(
+                    comp,
+                    self._name_map,
+                    notify=comp_notify,
+                    snapshot_data=snapshot_data,
+                    capital_data=capital_data,
+                )
+            )
 
         return signals, session_snapshot
 
     def reset_daily(self):
-        """每日重置 — 清除所有追踪状态"""
+        """每日重置 — 清除所有追踪状态，并从 DB 恢复 session 上下文"""
         self._capital_flow.reset()
         self._large_order.reset()
         self._order_book.reset()
@@ -3466,4 +4008,17 @@ class L2StrategyEngine:
         self._session.reset()
         self._daily_indicators.reset()
         self._signal_timestamps.clear()
+
+        # --- restore session state after reset ---
+        today = datetime.now().strftime("%Y-%m-%d")
+        restored_codes = self._session.restore_from_db(today)
+        for code in restored_codes:
+            seq = self._session._last_seq.get(code, 0)
+            warmed = code in self._session._warmed_up
+            self._large_order.restore_state(code, seq, warmed)
+        if restored_codes:
+            logger.info(
+                f"SessionAccumulator restored {len(restored_codes)} codes from DB"
+            )
+
         logger.info("L2 strategy engine daily reset complete")

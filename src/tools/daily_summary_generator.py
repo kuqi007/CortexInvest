@@ -26,6 +26,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 # Load .env at module level
 load_dotenv(PROJECT_ROOT / ".env")
 import sys
+
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.utils.llm_clients import LLMClientFactory
@@ -38,6 +39,7 @@ DATA_DIR = PROJECT_ROOT / "src" / "data"
 MARKET_DATA_PATH = DATA_DIR / "market_data.json"
 # Config read from DB (primary) or JSON (backup)
 from src.utils.config_reader import read_monitor_config
+
 ALERT_CONFIG_PATH = DATA_DIR / "alert_config.json"
 L2_SIGNALS_PATH = DATA_DIR / "l2_strategy_signals.json"
 DAILY_SUMMARY_PATH = DATA_DIR / "daily_summary.json"
@@ -57,6 +59,7 @@ def _read_json(path: Path) -> dict | None:
 
 
 # ── Morning Briefing Functions ──
+
 
 def _call_eastmoney_api(query: str) -> dict:
     """调用东方财富 API 获取市场数据或新闻.
@@ -153,7 +156,11 @@ def _fetch_us_markets() -> dict:
     try:
         # Parse news to extract market movements
         # Look for headlines mentioning specific indices and their changes
-        inner_data = (data.get("data") or {}).get("data", {}) if isinstance(data.get("data"), dict) else {}
+        inner_data = (
+            (data.get("data") or {}).get("data", {})
+            if isinstance(data.get("data"), dict)
+            else {}
+        )
         llm_response = inner_data.get("llmSearchResponse", {})
         news_list = llm_response.get("data", [])
 
@@ -165,16 +172,26 @@ def _fetch_us_markets() -> dict:
             # Try to find Dow Jones, Nasdaq, S&P500 mentions
             # Look for patterns like "道琼斯涨X%" or "纳斯达克跌X%"
             import re
-            dow_match = re.search(r'道琼斯.*?([+-]?\d+\.?\d*)%', content)
-            nasdaq_match = re.search(r'纳斯达克.*?([+-]?\d+\.?\d*)%', content)
-            sp_match = re.search(r'标普.*?([+-]?\d+\.?\d*)%', content)
+
+            dow_match = re.search(r"道琼斯.*?([+-]?\d+\.?\d*)%", content)
+            nasdaq_match = re.search(r"纳斯达克.*?([+-]?\d+\.?\d*)%", content)
+            sp_match = re.search(r"标普.*?([+-]?\d+\.?\d*)%", content)
 
             if dow_match and "dow" not in markets:
-                markets["dow"] = {"name": "道琼斯", "change_pct": round(float(dow_match.group(1)), 2)}
+                markets["dow"] = {
+                    "name": "道琼斯",
+                    "change_pct": round(float(dow_match.group(1)), 2),
+                }
             if nasdaq_match and "nasdaq" not in markets:
-                markets["nasdaq"] = {"name": "纳斯达克", "change_pct": round(float(nasdaq_match.group(1)), 2)}
+                markets["nasdaq"] = {
+                    "name": "纳斯达克",
+                    "change_pct": round(float(nasdaq_match.group(1)), 2),
+                }
             if sp_match and "sp500" not in markets:
-                markets["sp500"] = {"name": "标普500", "change_pct": round(float(sp_match.group(1)), 2)}
+                markets["sp500"] = {
+                    "name": "标普500",
+                    "change_pct": round(float(sp_match.group(1)), 2),
+                }
 
     except Exception as e:
         logger.warning(f"Failed to parse US markets from news: {e}")
@@ -194,7 +211,12 @@ def _fetch_asia_markets() -> dict:
     data = _call_news_search_api(f"{date_str} 日本股市 日经225 韩国KOSPI 今日收盘")
     try:
         import re
-        inner_data = (data.get("data") or {}).get("data", {}) if isinstance(data.get("data"), dict) else {}
+
+        inner_data = (
+            (data.get("data") or {}).get("data", {})
+            if isinstance(data.get("data"), dict)
+            else {}
+        )
         llm_response = inner_data.get("llmSearchResponse", {})
         news_list = llm_response.get("data", [])
 
@@ -202,13 +224,19 @@ def _fetch_asia_markets() -> dict:
             content = item.get("content", "")
 
             # Look for Nikkei (日经) and KOSPI (韩国/综合) mentions
-            nikkei_match = re.search(r'日经.*?([+-]?\d+\.?\d*)%', content)
-            kospi_match = re.search(r'韩国.*?([+-]?\d+\.?\d*)%', content)
+            nikkei_match = re.search(r"日经.*?([+-]?\d+\.?\d*)%", content)
+            kospi_match = re.search(r"韩国.*?([+-]?\d+\.?\d*)%", content)
 
             if nikkei_match and "nikkei" not in markets:
-                markets["nikkei"] = {"name": "日经225", "change_pct": round(float(nikkei_match.group(1)), 2)}
+                markets["nikkei"] = {
+                    "name": "日经225",
+                    "change_pct": round(float(nikkei_match.group(1)), 2),
+                }
             if kospi_match and "kospi" not in markets:
-                markets["kospi"] = {"name": "韩国KOSPI", "change_pct": round(float(kospi_match.group(1)), 2)}
+                markets["kospi"] = {
+                    "name": "韩国KOSPI",
+                    "change_pct": round(float(kospi_match.group(1)), 2),
+                }
 
     except Exception as e:
         logger.warning(f"Failed to parse Asia markets from news: {e}")
@@ -235,7 +263,11 @@ def _search_global_news() -> list[dict]:
         try:
             # Parse news-search response format
             # data.data.data.llmSearchResponse.data[]
-            inner_data = (data.get("data") or {}).get("data", {}) if isinstance(data.get("data"), dict) else {}
+            inner_data = (
+                (data.get("data") or {}).get("data", {})
+                if isinstance(data.get("data"), dict)
+                else {}
+            )
             llm_response = inner_data.get("llmSearchResponse", {})
             news_list = llm_response.get("data", [])
 
@@ -245,13 +277,15 @@ def _search_global_news() -> list[dict]:
                 if title and len(title) > 10:
                     # Extract first 200 chars of content as summary
                     summary = content[:200] + "..." if len(content) > 200 else content
-                    news_items.append({
-                        "title": title[:100],
-                        "summary": summary,
-                        "source": item.get("source", "东方财富"),
-                        "time": item.get("date", ""),
-                        "url": item.get("jumpUrl", ""),
-                    })
+                    news_items.append(
+                        {
+                            "title": title[:100],
+                            "summary": summary,
+                            "source": item.get("source", "东方财富"),
+                            "time": item.get("date", ""),
+                            "url": item.get("jumpUrl", ""),
+                        }
+                    )
         except (KeyError, TypeError) as e:
             logger.warning(f"Failed to parse news for '{keyword}': {e}")
 
@@ -282,7 +316,9 @@ def generate_morning_briefing() -> dict | None:
         try:
             data = _read_json(MORNING_BRIEFING_PATH)
             if data and data.get("generated_at", "").startswith(today_str):
-                logger.info(f"Morning briefing already generated today ({today_str}), skipping")
+                logger.info(
+                    f"Morning briefing already generated today ({today_str}), skipping"
+                )
                 return data
         except Exception:
             pass
@@ -339,13 +375,15 @@ def _aggregate_signals(signals: list[dict]) -> dict:
 
     Returns: {code: {strategies: Counter, directions: [], displays: [], count: int}}
     """
-    by_stock: dict = defaultdict(lambda: {
-        "strategies": Counter(),
-        "directions": [],
-        "displays": [],
-        "count": 0,
-        "notify_count": 0,
-    })
+    by_stock: dict = defaultdict(
+        lambda: {
+            "strategies": Counter(),
+            "directions": [],
+            "displays": [],
+            "count": 0,
+            "notify_count": 0,
+        }
+    )
 
     for s in signals:
         code = s.get("code", "")
@@ -504,7 +542,9 @@ def _build_per_stock(
 
         # Include alert kinds
         for kind, cnt in alrt.get("kinds", Counter()).most_common(3):
-            kind_label = {"big_move": "大幅异动", "threshold": "触价告警"}.get(kind, kind)
+            kind_label = {"big_move": "大幅异动", "threshold": "触价告警"}.get(
+                kind, kind
+            )
             if cnt > 1:
                 key_signals.append(f"{kind_label}x{cnt}")
             elif kind_label not in key_signals:
@@ -518,31 +558,35 @@ def _build_per_stock(
         mkt_val = price * shares * fx if price > 0 and shares > 0 else 0
         pnl_pct = ((price - cost) / cost * 100) if cost > 0 and price > 0 else None
 
-        per_stock.append({
-            "code": code,
-            "name": name,
-            "type": entry.get("type", "watching"),
-            "star": entry.get("star", False),
-            "price": price,
-            "change": round(change, 2),
-            "cost": cost,
-            "shares": shares,
-            "mkt_val": round(mkt_val, 0),
-            "pnl_pct": round(pnl_pct, 1) if pnl_pct is not None else None,
-            "fx": fx,
-            "signalCount": signal_count,
-            "alertCount": alert_count,
-            "direction": direction,
-            "keySignals": key_signals[:6],
-        })
+        per_stock.append(
+            {
+                "code": code,
+                "name": name,
+                "type": entry.get("type", "watching"),
+                "star": entry.get("star", False),
+                "price": price,
+                "change": round(change, 2),
+                "cost": cost,
+                "shares": shares,
+                "mkt_val": round(mkt_val, 0),
+                "pnl_pct": round(pnl_pct, 1) if pnl_pct is not None else None,
+                "fx": fx,
+                "signalCount": signal_count,
+                "alertCount": alert_count,
+                "direction": direction,
+                "keySignals": key_signals[:6],
+            }
+        )
 
     # Sort: star first, then holdings by market value desc, then watching by signal count
-    per_stock.sort(key=lambda x: (
-        0 if x.get("star") else 1,
-        0 if x["type"] == "holding" else 1,
-        -x["mkt_val"],
-        -x["signalCount"],
-    ))
+    per_stock.sort(
+        key=lambda x: (
+            0 if x.get("star") else 1,
+            0 if x["type"] == "holding" else 1,
+            -x["mkt_val"],
+            -x["signalCount"],
+        )
+    )
     return per_stock
 
 
@@ -575,10 +619,14 @@ def _build_stats(
     }
 
 
-def _build_llm_prompt(stats: dict, per_stock: list[dict], l1_displays: list[str],
-                      l2_digest_map: dict | None = None,
-                      trade_plans: dict | None = None,
-                      include_morning_briefing: bool = True) -> list[dict]:
+def _build_llm_prompt(
+    stats: dict,
+    per_stock: list[dict],
+    l1_displays: list[str],
+    l2_digest_map: dict | None = None,
+    trade_plans: dict | None = None,
+    include_morning_briefing: bool = True,
+) -> list[dict]:
     """Construct messages for LLM daily report generation."""
     system = """你是一位资深量化工程师，专注 A 股和港股。根据今日 L2 策略信号、微观结构数据和告警数据，生成简洁的持仓信号日报。
 
@@ -602,7 +650,7 @@ def _build_llm_prompt(stats: dict, per_stock: list[dict], l1_displays: list[str]
 
 ## 逐股速览
 - **代码 名称** — 一句话总结，自然穿插1-2个关键数据（如"tick偏卖28%+主力流出0.51亿，空头格局"）
-（重要：只覆盖有微观数据的标的。如果某股票在"持仓标的"或"重点自选"中没有微观数据行，则**绝对不能**出现在逐股速览中，也不可编造数据填充）
+（重要：只覆盖有微观数据的标的。如果某股票在"持仓标的"或"重点自选"中没有微观数据行，则**绝对不能**出现在逐股速览中，也不可编造数据填充。如果用户消息末尾标注"今日无数据"，则整节替换为"今日无微观数据"一句话即可）
 
 ## 操作建议
 1. ...
@@ -639,7 +687,11 @@ def _build_llm_prompt(stats: dict, per_stock: list[dict], l1_displays: list[str]
             news = morning.get("global_news", [])
 
             us_lines = []
-            for key, name in [("dow", "道琼斯"), ("nasdaq", "纳斯达克"), ("sp500", "标普500")]:
+            for key, name in [
+                ("dow", "道琼斯"),
+                ("nasdaq", "纳斯达克"),
+                ("sp500", "标普500"),
+            ]:
                 m = us.get(key, {})
                 if m.get("change_pct"):
                     us_lines.append(f"{name} {m['change_pct']:+.2f}%")
@@ -669,17 +721,27 @@ def _build_llm_prompt(stats: dict, per_stock: list[dict], l1_displays: list[str]
         total_cost = sum(ps["cost"] * ps["shares"] * ps.get("fx", 1) for ps in costed)
         total_pnl = total_mkt - total_cost if total_cost > 0 else 0
         total_pnl_pct = (total_pnl / total_cost * 100) if total_cost > 0 else 0
-        hk_day = sum(ps["change"] / 100 * ps["mkt_val"] for ps in holdings if ps["code"].startswith("HK") and ps["mkt_val"] > 0)
-        a_day = sum(ps["change"] / 100 * ps["mkt_val"] for ps in holdings if not ps["code"].startswith("HK") and ps["mkt_val"] > 0)
+        hk_day = sum(
+            ps["change"] / 100 * ps["mkt_val"]
+            for ps in holdings
+            if ps["code"].startswith("HK") and ps["mkt_val"] > 0
+        )
+        a_day = sum(
+            ps["change"] / 100 * ps["mkt_val"]
+            for ps in holdings
+            if not ps["code"].startswith("HK") and ps["mkt_val"] > 0
+        )
         h_up = sum(1 for ps in holdings if ps["change"] > 0)
         h_down = sum(1 for ps in holdings if ps["change"] < 0)
         lines.append("## 组合概况")
-        lines.append(f"- 持仓 {len(holdings)} 只, 总市值 {total_mkt/10000:.1f}万, 总浮盈 {total_pnl/10000:+.1f}万 ({total_pnl_pct:+.1f}%)")
+        lines.append(
+            f"- 持仓 {len(holdings)} 只, 总市值 {total_mkt / 10000:.1f}万, 总浮盈 {total_pnl / 10000:+.1f}万 ({total_pnl_pct:+.1f}%)"
+        )
         day_parts = []
         if any(ps["code"].startswith("HK") for ps in holdings):
-            day_parts.append(f"港股 {hk_day/10000:+.1f}万")
+            day_parts.append(f"港股 {hk_day / 10000:+.1f}万")
         if any(not ps["code"].startswith("HK") for ps in holdings):
-            day_parts.append(f"A股 {a_day/10000:+.1f}万")
+            day_parts.append(f"A股 {a_day / 10000:+.1f}万")
         if day_parts:
             lines.append(f"- 今日变化: {', '.join(day_parts)}")
         lines.append(f"- 涨: {h_up}只 跌: {h_down}只")
@@ -688,7 +750,9 @@ def _build_llm_prompt(stats: dict, per_stock: list[dict], l1_displays: list[str]
     lines.append(f"## 今日统计")
     lines.append(f"- 总信号数: {stats['totalSignals']} | L1高优: {stats['l1Count']}")
     lines.append(f"- 多头信号: {stats['bullish']} | 空头信号: {stats['bearish']}")
-    lines.append(f"- 监控标的: {stats['stockCount']}只 | 收涨: {stats['upCount']} 收跌: {stats['downCount']}")
+    lines.append(
+        f"- 监控标的: {stats['stockCount']}只 | 收涨: {stats['upCount']} 收跌: {stats['downCount']}"
+    )
     lines.append(f"- 告警事件: {stats['totalAlerts']}")
     lines.append("")
 
@@ -723,7 +787,13 @@ def _build_llm_prompt(stats: dict, per_stock: list[dict], l1_displays: list[str]
                     if d["vpd_count"]:
                         events_parts.append(f"背离x{d['vpd_count']}")
                     if d["lor_count"]:
-                        dir_label = "多" if d["lor_direction"] == "bullish" else "空" if d["lor_direction"] == "bearish" else "?"
+                        dir_label = (
+                            "多"
+                            if d["lor_direction"] == "bullish"
+                            else "空"
+                            if d["lor_direction"] == "bearish"
+                            else "?"
+                        )
                         events_parts.append(f"翻转x{d['lor_count']}({dir_label})")
                     micro += f" | {' '.join(events_parts)}"
                 micro += f" | 综合:{d['direction_score']:+d}({d['direction']})"
@@ -753,7 +823,13 @@ def _build_llm_prompt(stats: dict, per_stock: list[dict], l1_displays: list[str]
                     if d["vpd_count"]:
                         events_parts.append(f"背离x{d['vpd_count']}")
                     if d["lor_count"]:
-                        dir_label = "多" if d["lor_direction"] == "bullish" else "空" if d["lor_direction"] == "bearish" else "?"
+                        dir_label = (
+                            "多"
+                            if d["lor_direction"] == "bullish"
+                            else "空"
+                            if d["lor_direction"] == "bearish"
+                            else "?"
+                        )
                         events_parts.append(f"翻转x{d['lor_count']}({dir_label})")
                     micro += f" | {' '.join(events_parts)}"
                 micro += f" | 综合:{d['direction_score']:+d}({d['direction']})"
@@ -768,7 +844,9 @@ def _build_llm_prompt(stats: dict, per_stock: list[dict], l1_displays: list[str]
         for ps in other_watching:
             if ps["signalCount"] > 0:
                 sigs = ", ".join(ps["keySignals"]) if ps["keySignals"] else ""
-                lines.append(f"- {ps['code']} {ps['name']} | {ps['change']:+.2f}% | 信号:{ps['signalCount']} | {sigs}")
+                lines.append(
+                    f"- {ps['code']} {ps['name']} | {ps['change']:+.2f}% | 信号:{ps['signalCount']} | {sigs}"
+                )
         lines.append("")
 
     # ── Fix 4: Trade plans / conditional orders ──
@@ -809,14 +887,31 @@ def _build_llm_prompt(stats: dict, per_stock: list[dict], l1_displays: list[str]
         for d in l1_displays[-10:]:  # Limit to last 10
             lines.append(f"- {d}")
 
-    # 添加有微观数据的股票白名单
+    # 添加微观数据白名单或空数据警告
     if digest_map:
         codes_with_micro = sorted(digest_map.keys())
         lines.append("")
         lines.append("## 有微观数据的股票代码列表")
-        lines.append("以下股票有 L2 微观数据（tick/大单/资金流），逐股速览只能包含这些股票：")
+        lines.append(
+            "以下股票有 L2 微观数据（tick/大单/资金流），逐股速览只能包含这些股票："
+        )
         lines.append(", ".join(codes_with_micro))
         lines.append("**严禁为不在此列表中的股票编造微观数据。**")
+    else:
+        lines.append("")
+        lines.append("## 微观数据状态：今日无数据")
+        lines.append(
+            "**今日 L2 微观数据未采集（session_snapshots 为空），所有标的均无 tick/大单/资金流数据。**"
+        )
+        lines.append(
+            "**逐股速览一节必须省略，或在标题后写'今日无微观数据，无法进行微观分析'。**"
+        )
+        lines.append(
+            "**严禁编造任何 tick偏买/偏卖X%、大单净买/卖X亿、主力流入/流出X亿 等数字。**"
+        )
+        lines.append(
+            "**操作建议只能基于已知的价格涨跌幅、信号类型、告警事件给出，不得引用任何编造的微观数据。**"
+        )
 
     user_msg = "\n".join(lines)
 
@@ -911,9 +1006,13 @@ def _compute_l2_digest(date_str: str) -> list[dict]:
             score += (1 if tick_imb > 0.1 else -1 if tick_imb < -0.1 else 0) * 2
             score += (1 if cf_pct > 5 else -1 if cf_pct < -5 else 0) * 1
             score += (-1 if vpd_count >= 3 else 0) * 2
-            score += (-1 if lor_dir == "bearish" else 1 if lor_dir == "bullish" else 0) * 2
+            score += (
+                -1 if lor_dir == "bearish" else 1 if lor_dir == "bullish" else 0
+            ) * 2
 
-            direction = "bullish" if score > 2 else "bearish" if score < -2 else "neutral"
+            direction = (
+                "bullish" if score > 2 else "bearish" if score < -2 else "neutral"
+            )
 
             digest = {
                 "code": code,
@@ -934,16 +1033,27 @@ def _compute_l2_digest(date_str: str) -> list[dict]:
             }
             digests.append(digest)
 
-            insert_rows.append((
-                date_str, code,
-                digest["lo_buy_count"], digest["lo_sell_count"],
-                digest["lo_net_amount"], digest["lo_net_ratio"],
-                digest["tick_imbalance"], digest["tick_buy_vol"], digest["tick_sell_vol"],
-                digest["cf_net_inflow"], digest["cf_net_inflow_pct"],
-                vpd_count, lor_count, lor_dir,
-                score, direction,
-                row["session_json"],
-            ))
+            insert_rows.append(
+                (
+                    date_str,
+                    code,
+                    digest["lo_buy_count"],
+                    digest["lo_sell_count"],
+                    digest["lo_net_amount"],
+                    digest["lo_net_ratio"],
+                    digest["tick_imbalance"],
+                    digest["tick_buy_vol"],
+                    digest["tick_sell_vol"],
+                    digest["cf_net_inflow"],
+                    digest["cf_net_inflow_pct"],
+                    vpd_count,
+                    lor_count,
+                    lor_dir,
+                    score,
+                    direction,
+                    row["session_json"],
+                )
+            )
 
         # 4. 批量写入
         if insert_rows:
@@ -992,13 +1102,16 @@ def generate_daily_summary(date_str: str | None = None) -> dict | None:
     all_signals = l2_signals_data.get("signals", [])
     today_start_ts = int(datetime.strptime(today, "%Y-%m-%d").timestamp() * 1000)
     today_end_ts = today_start_ts + 86400_000
-    signals = [s for s in all_signals if today_start_ts <= s.get("ts", 0) < today_end_ts]
+    signals = [
+        s for s in all_signals if today_start_ts <= s.get("ts", 0) < today_end_ts
+    ]
 
     # 从 SQLite 读取当日 alert events
     events: list[dict] = []
     conn = None
     try:
         from src.sim_trading.db import get_connection
+
         conn = get_connection()
         rows = conn.execute(
             "SELECT ts, time, symbol, kind, level, message, display, change_pct "
@@ -1027,7 +1140,9 @@ def generate_daily_summary(date_str: str | None = None) -> dict | None:
     # ── Aggregate ──
     signal_agg = _aggregate_signals(signals)
     alert_agg = _aggregate_alerts(events)
-    per_stock = _build_per_stock(market_data, config, signal_agg, alert_agg, l2_digest_map_early)
+    per_stock = _build_per_stock(
+        market_data, config, signal_agg, alert_agg, l2_digest_map_early
+    )
     stats = _build_stats(signals, events, per_stock)
 
     # Collect L1 display texts for LLM context
@@ -1043,10 +1158,17 @@ def generate_daily_summary(date_str: str | None = None) -> dict | None:
 
     # ── Call LLM ──
     from dotenv import load_dotenv
+
     load_dotenv(PROJECT_ROOT / ".env")
 
-    messages = _build_llm_prompt(stats, per_stock, l1_displays, l2_digest_map, trade_plans,
-                                  include_morning_briefing=True)
+    messages = _build_llm_prompt(
+        stats,
+        per_stock,
+        l1_displays,
+        l2_digest_map,
+        trade_plans,
+        include_morning_briefing=True,
+    )
     report = None
     try:
         client = LLMClientFactory.create_client()
@@ -1084,8 +1206,10 @@ def generate_daily_summary(date_str: str | None = None) -> dict | None:
         json.dump(summary, f, ensure_ascii=False, indent=2)
     tmp.replace(DAILY_SUMMARY_PATH)
 
-    logger.info(f"Daily summary written to {DAILY_SUMMARY_PATH.name} "
-                f"({stats['totalSignals']} signals, {len(per_stock)} stocks)")
+    logger.info(
+        f"Daily summary written to {DAILY_SUMMARY_PATH.name} "
+        f"({stats['totalSignals']} signals, {len(per_stock)} stocks)"
+    )
     return summary
 
 
@@ -1104,7 +1228,9 @@ def _fallback_report(stats: dict, per_stock: list[dict]) -> str:
     for ps in per_stock:
         if ps["signalCount"] > 0:
             sigs = ", ".join(ps["keySignals"]) if ps["keySignals"] else ""
-            lines.append(f"- {ps['code']} {ps['name']} {ps['change']:+.2f}% | {ps['direction']} | {sigs}")
+            lines.append(
+                f"- {ps['code']} {ps['name']} {ps['change']:+.2f}% | {ps['direction']} | {sigs}"
+            )
     lines.append("")
     lines.append("*LLM 不可用，仅展示统计数据*")
     return "\n".join(lines)
@@ -1112,9 +1238,12 @@ def _fallback_report(stats: dict, per_stock: list[dict]) -> str:
 
 if __name__ == "__main__":
     from dotenv import load_dotenv
+
     load_dotenv(PROJECT_ROOT / ".env")
     result = generate_daily_summary()
     if result:
-        print(f"Generated: {result['date']} — {result['stats']['totalSignals']} signals")
+        print(
+            f"Generated: {result['date']} — {result['stats']['totalSignals']} signals"
+        )
     else:
         print("No summary generated (no data)")
