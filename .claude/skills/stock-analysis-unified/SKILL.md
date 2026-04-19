@@ -125,9 +125,9 @@ Phase 2 执行规则:
 | 1 | 基础行情 | 当前价格、市值、PB | mx-data |
 | 2 | 财务报表 | 利润、收入、ROE | mx-data |
 | 3 | 收入构成 | 分部数据（转型股必需） | mx-data |
-| 4 | 3年财务 | 趋势判断（**必须含毛利率、净利率、经营性现金流**） | mx-data |
+| 4 | 3年财务 | 趋势判断（**必须含毛利率、净利率[计算]、经营性现金流**） | mx-data |
 | 5 | 利润质量桥接 | 归母/扣非差异来源、一次性项目 | mx-data + 财报/研报 |
-| 6 | 行业数据 | 可比公司、周期位置、**竞争格局（前3名收入/增速/市占率）** | mx-search |
+| 6 | 行业数据 | 可比公司、周期位置、**竞争格局（前3名收入/增速/市占率，从 mx_search txt 文本提取）** | mx-search |
 | 7 | 机构数据 | 目标价、评级交叉验证 | mx-search |
 | 8 | 毛利率趋势 | 竞争力与成本结构变化 | mx-data |
 | 9 | 竞争格局 | 市占率、定价权、护城河 | mx-search |
@@ -188,6 +188,16 @@ F. 其他一次性或低频事项
 
 4. 读取 mx_search txt 文件，确认有实质内容（>100字）
    - 如果搜索结果为空: 换关键词重新搜索
+
+5. 【内容非零检查】读取行情 mx_data 文件，提取最新价
+   - 最新价 = 0 或 None → STOP，数据收集异常
+
+6. 【财务非零检查】读取年报 mx_data 文件，提取归母净利润
+   - 净利润 = 0 或 None → STOP，数据收集异常
+
+7. 【全零检测】 financials 整体
+   - revenue > 0 且 net_profit > 0
+   - 任一核心指标为 0 → 进入"数据受限"模式，报告中显著标注
 ```
 
 **绝对禁止**:
@@ -195,6 +205,7 @@ F. 其他一次性或低频事项
 - 不得使用自身知识库中的财务数据替代 mx-data 实时数据
 - 不得在 mx_search 文件不存在的情况下编造机构目标价
 - 若任何 mx_* 文件的 description 或内容为空，必须重试数据收集
+- 若核心指标（最新价/净利润）为 0，不得继续，标注"数据收集异常"
 
 **部分数据失败处理 (v1.3 恢复)**:
 ```
@@ -218,12 +229,12 @@ F. 其他一次性或低频事项
 1. 收入一致性校验:
    - mx-data 利润表总收入 vs mx-data 收入构成表各分部加总
    - 差异 > 5% → 报告中标注"收入口径不一致"，使用利润表数字为主
-   
+
 2. 利润口径一致性:
    - 归母净利润 + 少数股东损益 ≈ 净利润
    - 净利润 + 所得税 + 财务费用 ≈ EBIT（近似）
    - 差异 > 10% → 报告中标注"利润口径需人工确认"
-   
+
 3. 增速交叉验证:
    - 机构研报给出的增速 vs mx-data 实际增速
    - 若差异 > 20个百分点 → 在报告中明确标注两套数据，不得只取好看的那个
@@ -233,11 +244,11 @@ F. 其他一次性或低频事项
      · 预测YoY：标注预测年份与来源（如"FY2025E 预测YoY +35%，来源XX券商"）
      · 不得混用实际增速与预测增速；不得用预测增速冒充实际增速来支撑分类判断
      · 若分类依赖预测增速，报告中必须额外说明"分类依赖前瞻预测，存在兑现风险"
-   
+
 4. 估值倍数合理性:
    - 自算 PE vs 行业可比 PE vs 机构引用 PE
    - 三者中任意两个差异 > 30% → 必须解释差异来源（口径不同/年份不同/是否扣非）
-   
+
 5. 股本一致性:
    - 当前总股本 vs 历史股本趋势
    - 若近12个月股本变动 > 5% → 触发稀释检查（见 Step 2.5D）
@@ -247,6 +258,80 @@ F. 其他一次性或低频事项
 - **软性标注（可继续但需标注"数据受限"）**: 辅助数据（机构目标价/行业数据）收集失败，或非核心校验项误差超标
 - 核心数据的定义: mx-data 返回"行情"或"财务报表"为空/错误
 - 判断顺序: 先判断是否为核心数据失败 → 若是则 STOP → 若否则允许软性标注后继续
+```
+
+---
+
+## Step 1.6: 字段提取规范 (Phase 2 执行)
+
+> 进入此步骤的前提: Step 1.5 验证门已通过
+> 此步骤属于 Phase 2，只读取本地文件，不调用外部 API
+> 完整提取函数和 col_id 映射见 `./docs/mx-data-field-mapping.md`
+
+### 提取优先级
+
+| 指标类型 | 提取来源 | 说明 |
+|---------|---------|------|
+| 行情数据（股价/PE/PB/市值） | mx_data 行情文件，取最新一期 | |
+| 财务数据（利润/收入/毛利率/ROE） | mx_data 年报文件，取最新一期 | |
+| 前瞻预测（EPS/增速） | mx_data 年报文件的预测 table | col_id 见文档 |
+| 机构目标价/评级 | mx_search txt 文件 | 见 ./docs/mx-search-institutional-schema.md |
+
+### 提取到 valuation_result 的映射
+
+| valuation_result 字段 | 提取来源 | 方法 |
+|---------------------|---------|------|
+| price_at_analysis | mx_data 行情文件 | col `325898` 收盘价 |
+| pe_at_analysis | mx_data 行情文件 | col `328773` 市盈率PE(TTM) |
+| pb_at_analysis | mx_data 行情文件 | col `328664` 市净率PB |
+| market_cap | mx_data 行情文件 | col `326809` 总市值 |
+| financials.revenue_latest | mx_data 年报文件 | col `100000000000415` 最新一期 |
+| financials.net_profit_latest | mx_data 年报文件 | col `100000000003705` 最新一期 |
+| financials.adjusted_net_profit | mx_data 年报文件 | col `100000000003520` 最新一期 |
+| financials.gross_margin | mx_data 年报文件 | col `100000000002972` 最新一期 |
+| financials.roe | mx_data 年报文件 | col `100000000003466` 最新一期 |
+| assumptions.eps | mx_data 年报文件 | **计算**: 归母净利润 × 1e8 / 总股本 × 1e4 |
+| assumptions.forward_eps | mx_data 年报预测table | col `100000000004890` / 总股本 |
+| institutional.consensus_target_price | mx_search txt | 正则提取（见文档） |
+| institutional.rating | mx_search txt | rating 字段直接取 |
+
+**H股字段**: 部分字段（H股table）使用不同 col_id，具体见 `./docs/mx-data-field-mapping.md`
+
+### CAGR 计算降级规则
+
+```
+原始要求: 近五年 CAGR
+实际可用: 近三年 CAGR（mx-data 系统限制最多返回 3 年年报）
+
+处理规则:
+- 5yr CAGR 不可计算 → 自动降级为 3yr CAGR
+- 在 financials 中标注: "cagr_actual_period": "3yr"
+- 报告中标注: "CAGR 降级为近三年，因系统返回数据限制"
+- 若不足 3 年年报: 标注"数据受限，CAGR 仅供参考"
+```
+
+### 多 entity（A+H）数据规范化
+
+```
+问题: mx_data 可能返回 A+H 两套数据（如 002475.SZ + H5162.HK）
+处理规则:
+  1. 优先 .SZ / .SH（A 股主体）
+  2. 纯港股（.HK only）直接使用
+  3. 若 H 股数据用于交叉验证，在报告中标注
+
+识别方式: 检查 dataTableDTOList 中 entityTagDTO.marketChar 字段
+```
+
+### 提取步骤（操作清单）
+
+```
+1. 加载 mx_data 行情文件 → 提取最新价/PE/PB/市值
+2. 加载 mx_data 年报文件 → 提取最新一期利润/收入/毛利率/ROE
+3. 从年报文件的预测 table → 提取前瞻利润/增速
+4. 从 mx_search txt 文件 → 提取机构目标价/评级（见机构数据提取文档）
+5. 按 entity 选择规则过滤（多 entity 时优先 A 股）
+6. 计算派生指标: EPS = 净利润/总股本, CAGR = (期末/期初)^(1/年数)-1
+7. 将所有提取结果填入 valuation_result.json
 ```
 
 ---
@@ -612,6 +697,8 @@ F. 其他一次性或低频事项
 | ./docs/method-distressed.md | 困境股估值详解（PB主锚/正常化PE辅助） |
 | ./docs/defense-check-reference.md | Step 2.5 防守检查A-E详解 |
 | ./docs/report-template-reference.md | Step 5 报告模板/valuation_result/metadata 格式 |
+| ./docs/mx-data-field-mapping.md | **mx-data 字段映射表（含 col_id/提取函数）** |
+| ./docs/mx-search-institutional-schema.md | **mx-search 机构数据提取规范** |
 
 ---
 
@@ -650,8 +737,9 @@ for col_id, metric_name in name_map.items():
 
 ---
 
-*Version: Unified v1.5*
+*Version: Unified v1.6*
 *Core: One entry, smart classification, right method for right stock*
+*Changelog v1.6: 修复Phase 1→2桥接缺失（Step 1.5增强验证门含内容非零检查+全零检测；新增Step 1.6字段提取规范含col_id映射表+提取函数+操作清单）；新增docs/mx-data-field-mapping.md（含已验证col_id/提取函数/多entity处理/已知限制）；新增docs/mx-search-institutional-schema.md（含rating字段/文本正则/权威度规则）；defense-check-reference.md新增A-E数据来源附录；method-growth.md新增输入溯源表；修正"近五年→近三年"表述；修正"净利率"标注需计算*
 *Changelog v1.5: v1.4骨架 + v1.3精肉合并（成长四维权重、利润率趋势评分细则、现金流质量评分、利润增速特殊处理(扭亏/亏损/由盈转亏)、扭亏为盈估值规则、恢复性增长PEG修正、竞争折价规则、稀释披露+质量评估、部分数据失败处理、方法6困境股、数据收集表细化）；附录拆分（Step2.5/6种方法/报告模板/示例解析出为独立参考文档），SKILL.md减少~600行，ghost ref全部修复；自包含迁移（所有参考文档移入 .claude/skills/stock-analysis-unified/docs/）；目录管理v2.2*
 *Changelog v1.4: 目录管理v2.2集成（代码做主键、版本化目录、valuation_result.json为truth source、catalog.json全局索引、metadata.json自动生成）*
 *Changelog v1.3: 毛利率趋势分析 + 竞争量化框架 + 公司治理评估 + 股本稀释检查 + 数据交叉校验 + 折扣率决策规则 + ESG/政策风险评估 + 周期顶部强制校验 + 周期+高分红混合类型 + 煤炭/矿业/AI行业适配 + 资源型央企竞争适配 + PS倍数扩展*
