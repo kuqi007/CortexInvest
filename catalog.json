@@ -1,0 +1,196 @@
+{
+  "schema_version": "1.0",
+  "last_updated": "2026-04-18",
+  "stocks": {
+    "000001.SZ": {
+      "name": "平安银行",
+      "latest_version": 1,
+      "dir_name": "000001.SZ_平安银行"
+    },
+    "000021.SZ": {
+      "name": "深科技",
+      "latest_version": 1,
+      "dir_name": "000021.SZ_深科技"
+    },
+    "000034.SZ": {
+      "name": "神州数码",
+      "latest_version": 1,
+      "dir_name": "000034.SZ_神州数码"
+    },
+    "000063.SZ": {
+      "name": "中兴通讯",
+      "latest_version": 1,
+      "dir_name": "000063.SZ_中兴通讯"
+    },
+    "000422.SZ": {
+      "name": "湖北宜化",
+      "latest_version": 1,
+      "dir_name": "000422.SZ_湖北宜化"
+    },
+    "000988.SZ": {
+      "name": "华工科技",
+      "latest_version": 1,
+      "dir_name": "000988.SZ_华工科技"
+    },
+    "002050.SZ": {
+      "name": "三花智控",
+      "latest_version": 1,
+      "dir_name": "002050.SZ_三花智控"
+    },
+    "002080.SZ": {
+      "name": "中材科技",
+      "latest_version": 1,
+      "dir_name": "002080.SZ_中材科技"
+    },
+    "002167.SZ": {
+      "name": "东方锆业",
+      "latest_version": 1,
+      "dir_name": "002167.SZ_东方锆业"
+    },
+    "002268.SZ": {
+      "name": "电科网安",
+      "latest_version": 1,
+      "dir_name": "002268.SZ_电科网安"
+    },
+    "002371.SZ": {
+      "name": "北方华创",
+      "latest_version": 1,
+      "dir_name": "002371.SZ_北方华创"
+    },
+    "002436.SZ": {
+      "name": "兴森科技",
+      "latest_version": 1,
+      "dir_name": "002436.SZ_兴森科技"
+    },
+    "002475.SZ": {
+      "name": "立讯精密",
+      "latest_version": 1,
+      "dir_name": "002475.SZ_立讯精密"
+    },
+    "002920.SZ": {
+      "name": "德赛西威",
+      "latest_version": 1,
+      "dir_name": "002920.SZ_德赛西威"
+    },
+    "00700.HK": {
+      "name": "腾讯控股",
+      "latest_version": 1,
+      "dir_name": "00700.HK_腾讯控股"
+    },
+    "01211.HK": {
+      "name": "比亚迪股份",
+      "latest_version": 1,
+      "dir_name": "01211.HK_比亚迪股份"
+    },
+    "02525.HK": {
+      "name": "禾赛-W",
+      "latest_version": 1,
+      "dir_name": "02525.HK_禾赛-W"
+    },
+    "03690.HK": {
+      "name": "美团-W",
+      "latest_version": 1,
+      "dir_name": "03690.HK_美团-W"
+    },
+    "03896.HK": {
+      "name": "金山云",
+      "latest_version": 1,
+      "dir_name": "03896.HK_金山云"
+    },
+    "06088.HK": {
+      "name": "鸿腾精密",
+      "latest_version": 1,
+      "dir_name": "06088.HK_鸿腾精密"
+    },
+    "06656.HK": {
+      "name": "思格新能",
+      "latest_version": 1,
+      "dir_name": "06656.HK_思格新能"
+    },
+    "09988.HK": {
+      "name": "阿里巴巴-W",
+      "latest_version": 1,
+      "dir_name": "09988.HK_阿里巴巴-W"
+    },
+    "300274.SZ": {
+      "name": "阳光电源",
+      "latest_version": 1,
+      "dir_name": "300274.SZ_阳光电源"
+    },
+    "300308.SZ": {
+      "name": "中际旭创",
+      "latest_version": 1,
+      "dir_name": "300308.SZ_中际旭创"
+    },
+    "300442.SZ": {
+      "name": "润泽科技",
+      "latest_version": 1,
+      "dir_name": "300442.SZ_润泽科技"
+    },
+    "300480.SZ": {
+      "name": "光力科技",
+      "latest_version": 1,
+      "dir_name": "300480.SZ_光力科技"
+    },
+    "301568.SZ": {
+      "name": "思泰克",
+      "latest_version": 1,
+      "dir_name": "301568.SZ_思泰克"
+    },
+    "600036.SH": {
+      "name": "招商银行",
+      "latest_version": 1,
+      "dir_name": "600036.SH_招商银行"
+    },
+    "600089.SH": {
+      "name": "特变电工",
+      "latest_version": 1,
+      "dir_name": "600089.SH_特变电工"
+    },
+    "600309.SH": {
+      "name": "万华化学",
+      "latest_version": 1,
+      "dir_name": "600309.SH_万华化学"
+    },
+    "600673.SH": {
+      "name": "东阳光",
+      "latest_version": 1,
+      "dir_name": "600673.SH_东阳光"
+    },
+    "601233.SH": {
+      "name": "桐昆股份",
+      "latest_version": 1,
+      "dir_name": "601233.SH_桐昆股份"
+    },
+    "601689.SH": {
+      "name": "拓普集团",
+      "latest_version": 1,
+      "dir_name": "601689.SH_拓普集团"
+    },
+    "601899.SH": {
+      "name": "紫金矿业",
+      "latest_version": 1,
+      "dir_name": "601899.SH_紫金矿业"
+    },
+    "603533.SH": {
+      "name": "掌阅科技",
+      "latest_version": 1,
+      "dir_name": "603533.SH_掌阅科技"
+    },
+    "605117.SH": {
+      "name": "德业股份",
+      "latest_version": 1,
+      "dir_name": "605117.SH_德业股份"
+    },
+    "688008.SH": {
+      "name": "澜起科技",
+      "latest_version": 1,
+      "dir_name": "688008.SH_澜起科技"
+    },
+    "688469.SH": {
+      "name": "芯联集成-U",
+      "latest_version": 1,
+      "dir_name": "688469.SH_芯联集成-U"
+    }
+  }
+}
