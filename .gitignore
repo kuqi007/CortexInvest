@@ -85,6 +85,7 @@ src/crawler/*.ts
 .notifier.pid
 .web.pid
 .l2_daemon.pid
+.l2_daemon_watchdog.pid
 
 # browser state (runtime)
 browser-state*.json

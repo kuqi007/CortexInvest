@@ -3128,13 +3128,14 @@ class L2StrategyEngine:
                 if ret != RET_OK or data.empty:
                     continue
 
-                latest = data.iloc[-1]
-                super_in = float(latest.get("super_in_flow", 0) or 0)
-                big_in = float(latest.get("big_in_flow", 0) or 0)
-                mid_in = float(latest.get("mid_in_flow", 0) or 0)
-                sml_in = float(latest.get("sml_in_flow", 0) or 0)
-                amount = float(latest.get("in_flow", 0) or 0) + float(
-                    latest.get("out_flow", 0) or 0
+                # Sum all per-minute bars to get cumulative daily values
+                # (Futu INTRADAY returns per-minute rows, not running totals)
+                super_in = float(data["super_in_flow"].sum() or 0)
+                big_in = float(data["big_in_flow"].sum() or 0)
+                mid_in = float(data["mid_in_flow"].sum() or 0)
+                sml_in = float(data["sml_in_flow"].sum() or 0)
+                amount = float(data["in_flow"].sum() or 0) + float(
+                    data["out_flow"].sum() or 0
                 )
 
                 main_inflow = super_in + big_in
