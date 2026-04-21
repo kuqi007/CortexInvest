@@ -576,20 +576,21 @@ class DeltaAlertEngine:
             self._notified[symbol] = {"price": price, "change_pct": change_pct}
             kind = "threshold" if "threshold" in reasons else "big_move"
 
-            # 如果是再次触发（价格回落），显示回落幅度而不是当日涨幅
             is_retrigger = prev is not None
             if is_retrigger and prev.get("price"):
                 delta_from_prev = (price - prev["price"]) / prev["price"] * 100
-                if delta_from_prev < -1:  # 回落超过1%显示"回落"
-                    # 回落显示为下跌
-                    alert_pct = delta_from_prev  # 保持负数
+                if delta_from_prev < -1:
+                    alert_pct = change_pct
                     icon = "↓"
+                    stealth_fallback = f"回落至{change_pct:+.1f}%"
                 else:
                     alert_pct = change_pct
                     icon = "↑" if change_pct >= 0 else "↓"
+                    stealth_fallback = None
             else:
                 alert_pct = change_pct
                 icon = "↑" if change_pct >= 0 else "↓"
+                stealth_fallback = None
 
             # title 格式: 股票名 图标+/-X% → 价格
             sign = "+" if alert_pct >= 0 else ""
@@ -598,8 +599,10 @@ class DeltaAlertEngine:
             if "threshold" in reasons:
                 message += " !"
 
-            # stealth_extra 格式统一
-            stealth_extra = f"{icon}{sign}{abs(alert_pct):.1f}%"
+            if stealth_fallback:
+                stealth_extra = stealth_fallback
+            else:
+                stealth_extra = f"{icon}{sign}{abs(alert_pct):.1f}%"
             if "threshold" in reasons:
                 stealth_extra += " threshold"
 
@@ -2297,11 +2300,19 @@ class WatchDriftTracker:
                         "_kind": "DRIFT",
                         "_level": level,
                         "_change_pct": round(drift_pct, 1),
-                        "message": f"{name} 距关注{direction}{abs(tier):.0f}%",
+                        "message": f"{name} 距关注{direction}{abs(drift_pct):.1f}%",
                         "display": f"{name}({symbol}) 距关注价{wp:.2f}{direction}{abs(drift_pct):.1f}%，现价{price:.2f}",
-                        "_stealth": f"{name} {direction}{abs(tier):.0f}%",
+                        "_stealth": f"{name} 距关注{direction}{abs(drift_pct):.1f}%",
                     }
                 )
+            else:
+                retrace_alert = self._check_retrace(
+                    symbol, drift_pct, step,
+                    "涨" if drift_pct > 0 else "跌",
+                    name, wp, price, is_index=False,
+                )
+                if retrace_alert:
+                    alerts.append(retrace_alert)
         return alerts
 
     def check_indices(self, index_values):
@@ -2342,11 +2353,19 @@ class WatchDriftTracker:
                         "_kind": "DRIFT",
                         "_level": level,
                         "_change_pct": round(drift_pct, 1),
-                        "message": f"{tag}指数 距创建{direction}{abs(tier):.0f}%",
+                        "message": f"{tag}指数 距创建{direction}{abs(drift_pct):.1f}%",
                         "display": f"{tag}指数 距创建{direction}{abs(drift_pct):.1f}%，当前{val:.1f}",
-                        "_stealth": f"{tag} {direction}{abs(tier):.0f}%",
+                        "_stealth": f"{tag}指数 距基线{direction}{abs(drift_pct):.1f}%",
                     }
                 )
+            else:
+                retrace_alert = self._check_retrace(
+                    key, drift_pct, step,
+                    "涨" if drift_pct > 0 else "跌",
+                    f"{tag}指数", baseline, val, is_index=True,
+                )
+                if retrace_alert:
+                    alerts.append(retrace_alert)
         return alerts
 
     def _get_step(self, key):
@@ -2371,6 +2390,49 @@ class WatchDriftTracker:
             return None
         tier_value = tier_num * step * (1 if drift_pct > 0 else -1)
         return tier_value
+
+    def _check_retrace(self, key, drift_pct, step, direction, name, wp_or_baseline,
+                       price_or_val, is_index=False):
+        if abs(drift_pct) < 0.01:
+            return None
+        same_dir_tiers = {t for t in self._notified_tiers.get(key, set())
+                          if isinstance(t, int) and (t > 0) == (drift_pct >= 0)}
+        if not same_dir_tiers:
+            return None
+
+        highest = max(same_dir_tiers, key=abs)
+        current_tier = self._calc_tier(drift_pct, step)
+        retrace_tier_key = f"retrace:{abs(highest)}"
+
+        if (current_tier is None or abs(current_tier) < abs(highest)):
+            if retrace_tier_key in self._notified_tiers.get(key, set()):
+                return None
+            self._notified_tiers.setdefault(key, set()).add(retrace_tier_key)
+
+            retrace_dir = "回落" if drift_pct >= 0 else "反弹"
+            if is_index:
+                return {
+                    "symbol": key,
+                    "title": f"{name} drift {retrace_dir}",
+                    "_kind": "DRIFT",
+                    "_level": 2,
+                    "_change_pct": round(drift_pct, 1),
+                    "message": f"{name} 距基线{direction}{abs(drift_pct):.1f}% ({retrace_dir}自{abs(highest):.0f}%)",
+                    "display": f"{name} 距基线{direction}{abs(drift_pct):.1f}%，{retrace_dir}自{abs(highest):.0f}%档，当前{price_or_val:.1f}",
+                    "_stealth": f"{name} 距基线{direction}{abs(drift_pct):.1f}% ({retrace_dir}自{abs(highest):.0f}%)",
+                }
+            else:
+                return {
+                    "symbol": key,
+                    "title": f"{name} drift {retrace_dir}",
+                    "_kind": "DRIFT",
+                    "_level": 2,
+                    "_change_pct": round(drift_pct, 1),
+                    "message": f"{name} 距关注{direction}{abs(drift_pct):.1f}% ({retrace_dir}自{abs(highest):.0f}%)",
+                    "display": f"{name}({key}) 距关注价{wp_or_baseline:.2f}{direction}{abs(drift_pct):.1f}%，{retrace_dir}自{abs(highest):.0f}%档，现价{price_or_val:.2f}",
+                    "_stealth": f"{name} 距关注{direction}{abs(drift_pct):.1f}% ({retrace_dir}自{abs(highest):.0f}%)",
+                }
+        return None
 
 
 class WatchDriftPatternEngine(PatternEngine):
