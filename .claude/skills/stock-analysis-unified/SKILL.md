@@ -72,7 +72,7 @@ Step 5: 输出统一格式报告 → 保存为 MD 文件
 
 ```
 项目根目录 = ~/Documents/aiWorkspace/ai-investor/
-全局目录 = 项目根目录/catalog.json
+全局目录 = 项目根目录/stocks/catalog.json
 
 确定股票代码:
     1. 【市场确认 - HARD STOP】收到股票名后，**先用 mx-search 轻量级确认市场**（不是 mx-data）：
@@ -621,7 +621,7 @@ F. 其他一次性或低频事项
 | `{股票名}_v{N}_{日期}.md` | 人读分析报告 | 从 valuation_result 渲染 |
 | `metadata.json` | 索引摘要 | 从 valuation_result 投影 |
 
-**最后更新 catalog.json**: 在 `~/Documents/aiWorkspace/ai-investor/catalog.json` 中更新对应股票的 `latest_version`。
+**最后更新 catalog.json**: 在 `~/Documents/aiWorkspace/ai-investor/stocks/catalog.json` 中更新对应股票的 `latest_version`。
 
 详细报告模板和文件格式说明见 ./docs/report-template-reference.md。
 
@@ -862,7 +862,7 @@ else:
 import json, os
 
 project_root = os.path.expanduser("~/Documents/aiWorkspace/ai-investor")
-catalog_path = f"{project_root}/catalog.json"
+catalog_path = f"{project_root}/stocks/catalog.json"
 
 # 以下变量替换为实际值
 code = "000338.SZ"
