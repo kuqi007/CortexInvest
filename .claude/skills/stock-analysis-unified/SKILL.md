@@ -744,9 +744,159 @@ for col_id, metric_name in name_map.items():
 
 ---
 
-*Version: Unified v1.6*
+## Step 6: 最终校验（Step 5 输出后必做）
+
+**⚠️ 强制门控：Step 5 输出后必须执行此校验，未通过不得结束任务。**
+
+### 文件完整性校验
+
+每次分析完成后，**在关闭 session 前**，逐项验证以下内容：
+
+```
+1. 三个核心文件存在性检查（ls 命令）：
+   stocks/{代码}_{股票名}/v{N}_{日期}/
+   ├── {股票名}_v{N}_{YYYY-MM-DD}.md         ✅ 必须存在
+   ├── valuation_result.json                   ✅ 必须存在
+   ├── metadata.json                          ✅ 必须存在
+   └── data/                                  ✅ 必须存在
+       └── mx_*                               ✅ 所有 mx_* 文件必须在此目录下
+
+2. JSON 有效性检查（python3 -c "import json; json.load(open('path'))"）：
+   - valuation_result.json 必须是合法 JSON
+   - metadata.json 必须是合法 JSON
+   - 任何解析错误 → 必须修复后才能结束
+
+3. mx 文件散落检查（find 命令）：
+   find stocks/{代码}_{股票名}/v{N}_{日期}/ -name "mx_*" -not -path "*/data/*"
+   - 若有结果 → 文件散落在 data/ 之外，必须移动到 data/ 后才能结束
+```
+
+### Python 一键校验脚本
+
+```python
+import json, os, glob
+
+code = "000338.SZ"          # 替换为实际代码
+name = "潍柴动力"           # 替换为实际名称
+ver = 2
+date = "2026-04-20"         # 替换为实际日期
+
+vpath = f"stocks/{code}_{name}/v{ver}_{date}"
+
+# 前置检查：版本目录必须存在
+if not os.path.isdir(vpath):
+    print(f"🚨 版本目录不存在: {vpath}")
+    raise SystemExit(1)
+
+ok = True
+
+# 1. 三个核心文件 + data/ 目录
+for f in [f"{name}_v{ver}_{date}.md", "valuation_result.json", "metadata.json"]:
+    if not os.path.exists(f"{vpath}/{f}"):
+        print(f"❌ 缺失: {f}")
+        ok = False
+    else:
+        print(f"✅ {f}")
+
+if not os.path.isdir(f"{vpath}/data"):
+    print(f"❌ 缺失: data/ 目录")
+    ok = False
+else:
+    print(f"✅ data/ 目录存在")
+
+# 2. JSON 有效性
+for f in ["valuation_result.json", "metadata.json"]:
+    fp = f"{vpath}/{f}"
+    if not os.path.exists(fp):
+        continue  # 已在上一步报告
+    try:
+        with open(fp) as fh:
+            json.load(fh)
+        print(f"✅ {f} JSON合法")
+    except json.JSONDecodeError as e:
+        print(f"❌ {f} JSON无效: {e}")
+        ok = False
+
+# 3. mx 文件散落检查（检查 mx_* 文件是否全在 data/ 下）
+misplaced = []
+mx_in_data = 0
+for root, dirs, files in os.walk(vpath):
+    for f in files:
+        if f.startswith("mx_"):
+            rel = os.path.relpath(os.path.join(root, f), vpath)
+            parts = rel.split(os.sep)
+            # 正确位置: data/mx_* 或 data/子目录/mx_*
+            if len(parts) >= 2 and parts[0] == "data":
+                mx_in_data += 1
+            else:
+                misplaced.append(rel)
+
+if misplaced:
+    for f in misplaced:
+        print(f"❌ 散落: {f}")
+    ok = False
+else:
+    print(f"✅ mx文件: {mx_in_data} 个，全部在 data/ 下")
+
+if ok:
+    print(f"\n✅ 最终校验通过: {vpath}")
+else:
+    print(f"\n❌ 最终校验失败，请修复后再结束")
+```
+
+### 常见失败模式与修复
+
+| 失败模式 | 原因 | 修复方法 |
+|---------|------|---------|
+| `valuation_result.json` 缺失 | Phase 2 未执行或脚本中断 | 从 md 报告提取数据补写，或重新执行 Phase 2 |
+| JSON 解析错误 | 引号/逗号/括号不配对 | 检查文件尾部，补全缺失字符 |
+| mx 文件散落在版本根目录 | mx-data/mx-search 输出目录参数错误 | `mv {file} {vpath}/data/` |
+| mx 文件散落在 stocks/ 根目录 | 市场确认步骤输出到错误位置 | 同上，移到对应股票版本的 data/ |
+| metadata.json 缺失 | Step 5 未执行 | 从 valuation_result.json 投影生成 |
+
+### 完成后操作
+
+校验通过后，更新 `catalog.json`（**注意使用项目根目录的绝对路径**）：
+
+```python
+import json, os
+
+project_root = os.path.expanduser("~/Documents/aiWorkspace/ai-investor")
+catalog_path = f"{project_root}/catalog.json"
+
+# 以下变量替换为实际值
+code = "000338.SZ"
+name = "潍柴动力"
+ver = 2
+date = "2026-04-20"
+dir_name = f"{code}_{name}"
+
+with open(catalog_path) as f:
+    cat = json.load(f)
+
+# 更新 last_updated
+cat["last_updated"] = date
+
+# 更新或新建股票条目
+if code not in cat["stocks"]:
+    cat["stocks"][code] = {}
+cat["stocks"][code].update({
+    "name": name,
+    "latest_version": ver,
+    "dir_name": dir_name
+})
+
+with open(catalog_path, "w") as f:
+    json.dump(cat, f, ensure_ascii=False, indent=2)
+
+print(f"✅ catalog.json 已更新: {code} v{ver}")
+```
+
+---
+
+*Version: Unified v1.7*
 *Core: One entry, smart classification, right method for right stock*
-*Changelog v1.6: 修复Phase 1→2桥接缺失（Step 1.5增强验证门含内容非零检查+全零检测；新增Step 1.6字段提取规范含col_id映射表+提取函数+操作清单）；新增docs/mx-data-field-mapping.md（含已验证col_id/提取函数/多entity处理/已知限制）；新增docs/mx-search-institutional-schema.md（含rating字段/文本正则/权威度规则）；defense-check-reference.md新增A-E数据来源附录；method-growth.md新增输入溯源表；修正"近五年→近三年"表述；修正"净利率"标注需计算*
+*Changelog v1.7: 新增Step 6最终校验门（含文件存在性/JSON有效性/mx文件散落检查/Python一键校验脚本/修复指南/完成后更新catalog.json）；Changelog v1.6:* 修复Phase 1→2桥接缺失（Step 1.5增强验证门含内容非零检查+全零检测；新增Step 1.6字段提取规范含col_id映射表+提取函数+操作清单）；新增docs/mx-data-field-mapping.md（含已验证col_id/提取函数/多entity处理/已知限制）；新增docs/mx-search-institutional-schema.md（含rating字段/文本正则/权威度规则）；defense-check-reference.md新增A-E数据来源附录；method-growth.md新增输入溯源表；修正"近五年→近三年"表述；修正"净利率"标注需计算*
 *Changelog v1.5: v1.4骨架 + v1.3精肉合并（成长四维权重、利润率趋势评分细则、现金流质量评分、利润增速特殊处理(扭亏/亏损/由盈转亏)、扭亏为盈估值规则、恢复性增长PEG修正、竞争折价规则、稀释披露+质量评估、部分数据失败处理、方法6困境股、数据收集表细化）；附录拆分（Step2.5/6种方法/报告模板/示例解析出为独立参考文档），SKILL.md减少~600行，ghost ref全部修复；自包含迁移（所有参考文档移入 .claude/skills/stock-analysis-unified/docs/）；目录管理v2.2*
 *Changelog v1.4: 目录管理v2.2集成（代码做主键、版本化目录、valuation_result.json为truth source、catalog.json全局索引、metadata.json自动生成）*
 *Changelog v1.3: 毛利率趋势分析 + 竞争量化框架 + 公司治理评估 + 股本稀释检查 + 数据交叉校验 + 折扣率决策规则 + ESG/政策风险评估 + 周期顶部强制校验 + 周期+高分红混合类型 + 煤炭/矿业/AI行业适配 + 资源型央企竞争适配 + PS倍数扩展*

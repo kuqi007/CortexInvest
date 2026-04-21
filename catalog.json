@@ -1,7 +1,12 @@
 {
   "schema_version": "1.0",
-  "last_updated": "2026-04-19",
+  "last_updated": "2026-04-20",
   "stocks": {
+    "000338.SZ": {
+      "name": "潍柴动力",
+      "latest_version": 1,
+      "dir_name": "000338.SZ_潍柴动力"
+    },
     "000001.SZ": {
       "name": "平安银行",
       "latest_version": 1,
@@ -69,7 +74,7 @@
     },
     "002920.SZ": {
       "name": "德赛西威",
-      "latest_version": 1,
+      "latest_version": 2,
       "dir_name": "002920.SZ_德赛西威"
     },
     "00700.HK": {
@@ -82,10 +87,40 @@
       "latest_version": 2,
       "dir_name": "01211.HK_比亚迪股份"
     },
+    "02359.HK": {
+      "name": "药明康德",
+      "latest_version": 1,
+      "dir_name": "02359.HK_药明康德"
+    },
+    "02359.HK": {
+      "name": "药明康德",
+      "latest_version": 1,
+      "dir_name": "02359.HK_药明康德"
+    },
     "02525.HK": {
       "name": "禾赛-W",
       "latest_version": 1,
       "dir_name": "02525.HK_禾赛-W"
+    },
+    "02577.HK": {
+      "name": "英诺赛科",
+      "latest_version": 1,
+      "dir_name": "02577.HK_英诺赛科"
+    },
+    "02590.HK": {
+      "name": "极智嘉-W",
+      "latest_version": 1,
+      "dir_name": "02590.HK_极智嘉-W"
+    },
+    "03858.HK": {
+      "name": "佳鑫国际资源",
+      "latest_version": 1,
+      "dir_name": "03858.HK_佳鑫国际资源"
+    },
+    "603256.SH": {
+      "name": "宏和科技",
+      "latest_version": 1,
+      "dir_name": "603256.SH_宏和科技"
     },
     "03690.HK": {
       "name": "美团-W",
@@ -191,6 +226,86 @@
       "name": "芯联集成-U",
       "latest_version": 1,
       "dir_name": "688469.SH_芯联集成-U"
+    },
+    "06651.HK": {
+      "name": "五一视界",
+      "latest_version": 1,
+      "dir_name": "06651.HK_五一视界"
+    },
+    "01729.HK": {
+      "name": "汇聚科技",
+      "latest_version": 1,
+      "dir_name": "01729.HK_汇聚科技"
+    },
+    "02259.HK": {
+      "name": "紫金黄金国际",
+      "latest_version": 1,
+      "dir_name": "02259.HK_紫金黄金国际"
+    },
+    "02338.HK": {
+      "name": "潍柴动力-H",
+      "latest_version": 1,
+      "dir_name": "02338.HK_潍柴动力-H"
+    },
+    "03986.HK": {
+      "name": "兆易创新-H",
+      "latest_version": 1,
+      "dir_name": "03986.HK_兆易创新-H"
+    },
+    "06809.HK": {
+      "name": "澜起科技-H",
+      "latest_version": 1,
+      "dir_name": "06809.HK_澜起科技-H"
+    },
+    "06869.HK": {
+      "name": "长飞光纤光缆",
+      "latest_version": 1,
+      "dir_name": "06869.HK_长飞光纤光缆"
+    },
+    "603163.SH": {
+      "name": "圣晖集成",
+      "latest_version": 1,
+      "dir_name": "603163.SH_圣晖集成"
+    },
+    "601208.SH": {
+      "name": "东材科技",
+      "latest_version": 1,
+      "dir_name": "601208.SH_东材科技"
+    },
+    "001309.SZ": {
+      "name": "德明利",
+      "latest_version": 1,
+      "dir_name": "001309.SZ_德明利"
+    },
+    "603929.SH": {
+      "name": "亚翔集成",
+      "latest_version": 1,
+      "dir_name": "603929.SH_亚翔集成"
+    },
+    "002432.SZ": {
+      "name": "九安医疗",
+      "latest_version": 1,
+      "dir_name": "002432.SZ_九安医疗"
+    },
+    "002837.SZ": {
+      "name": "英维克",
+      "latest_version": 1,
+      "dir_name": "002837.SZ_英维克"
+    },
+    "002916.SZ": {
+      "name": "深南电路",
+      "latest_version": 1,
+      "dir_name": "002916.SZ_深南电路"
+    },
+    "002648.SZ": {
+      "name": "卫星化学",
+      "latest_version": 1,
+      "dir_name": "002648.SZ_卫星化学"
+    },
+    "601127.SH": {
+      "name": "赛力斯",
+      "latest_version": 1,
+      "dir_name": "601127.SH_赛力斯"
     }
   }
 }
