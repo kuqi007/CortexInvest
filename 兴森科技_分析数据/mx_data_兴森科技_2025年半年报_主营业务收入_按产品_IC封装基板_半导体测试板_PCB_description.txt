@@ -1,8 +1,0 @@
-金融数据查询结果说明
-========================================
-查询内容: 兴森科技 2025年半年报 主营业务收入 按产品 IC封装基板 半导体测试板 PCB
-数据文件路径: /Users/zhul1/Documents/dev/openWorkspace/ai-investor/兴森科技_分析数据/mx_data_兴森科技_2025年半年报_主营业务收入_按产品_IC封装基板_半导体测试板_PCB.xlsx
-描述文件路径: /Users/zhul1/Documents/dev/openWorkspace/ai-investor/兴森科技_分析数据/mx_data_兴森科技_2025年半年报_主营业务收入_按产品_IC封装基板_半导体测试板_PCB_description.txt
-数据行数: 8
-表数量: 1
-Sheet 列表: 兴森科技(002436.SZ)主营构成分析(2025-06-30)

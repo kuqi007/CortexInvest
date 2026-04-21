@@ -1,8 +1,0 @@
-金融数据查询结果说明
-========================================
-查询内容: 兴森科技总股本 流通股本 每股净资产 每股未分配利润 分红情况
-数据文件路径: /Users/zhul1/Documents/dev/openWorkspace/ai-investor/兴森科技_分析数据/mx_data_兴森科技总股本_流通股本_每股净资产_每股未分配利润_分红情况.xlsx
-描述文件路径: /Users/zhul1/Documents/dev/openWorkspace/ai-investor/兴森科技_分析数据/mx_data_兴森科技总股本_流通股本_每股净资产_每股未分配利润_分红情况_description.txt
-数据行数: 61
-表数量: 2
-Sheet 列表: 兴森科技(002436.SZ)的分红送转、每股净资产BPS等, 兴森科技(002436.SZ)的流通股本、总股本

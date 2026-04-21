@@ -1,8 +1,0 @@
-金融数据查询结果说明
-========================================
-查询内容: 兴森科技主营业务收入构成 分部数据 各业务板块收入占比
-数据文件路径: /Users/zhul1/Documents/dev/openWorkspace/ai-investor/兴森科技_分析数据/mx_data_兴森科技主营业务收入构成_分部数据_各业务板块收入占比.xlsx
-描述文件路径: /Users/zhul1/Documents/dev/openWorkspace/ai-investor/兴森科技_分析数据/mx_data_兴森科技主营业务收入构成_分部数据_各业务板块收入占比_description.txt
-数据行数: 8
-表数量: 1
-Sheet 列表: 兴森科技(002436.SZ)主营构成分析(2025-06-30)
