@@ -1398,40 +1398,39 @@ function ChangeHistorySection({ symbol }: { symbol: string }) {
         <div style={{ color: D.comment, fontSize: 11 }}>暂无变更记录</div>
       )}
 
-      {logs.map((log) => {
+      {logs.map((log, i) => {
         const color = sourceColor[log.source] ?? D.comment;
         const label = sourceLabel[log.source] ?? log.source;
         const dateStr = log.ts ? new Date(log.ts).toLocaleString("zh-CN", {
           month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
         }).replace(/\//g, "-") : "-";
+        const typeMap: Record<string, string> = { holding: "持仓", watching: "自选" };
+        const hasTypeChange = log.type_from && log.type_to && log.type_from !== log.type_to;
+        const typeStr = hasTypeChange
+          ? `${typeMap[log.type_from!] ?? log.type_from} → ${typeMap[log.type_to!] ?? log.type_to}`
+          : null;
         const sharesStr = `${fmtVal(log.shares_from)} → ${fmtVal(log.shares_to)}股`;
         const costStr = `${fmtVal(log.cost_from)} → ${fmtVal(log.cost_to)}`;
+        const badge = (bg: string, text: string) => (
+          <span style={{ padding: "1px 6px", borderRadius: 3, fontSize: 10, fontWeight: 700, background: bg, color: D.bg }}>
+            {text}
+          </span>
+        );
 
         return (
-          <div key={log.ts + log.source} style={{
-            display: "flex", gap: 8, fontSize: 12, padding: "4px 0",
+          <div key={log.ts + log.source + i} style={{
+            padding: "6px 0 8px",
             borderBottom: `1px solid ${D.currentLine}`,
           }}>
-            <span style={{ color: D.comment, whiteSpace: "nowrap", minWidth: 110 }}>
-              {dateStr}
-            </span>
-            <span style={{
-              display: "inline-block",
-              padding: "1px 6px",
-              borderRadius: 3,
-              fontSize: 10,
-              fontWeight: 700,
-              background: color,
-              color: D.bg,
-            }}>
-              {label}
-            </span>
-            <span style={{ flex: 1, textAlign: "right", color: D.fg }}>
-              {sharesStr}
-            </span>
-            <span style={{ minWidth: 130, textAlign: "right", color: D.fg }}>
-              {costStr}
-            </span>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 3 }}>
+              <span style={{ color: D.comment, fontSize: 11, whiteSpace: "nowrap" }}>{dateStr}</span>
+              {badge(color, label)}
+              {typeStr && badge(D.orange, typeStr)}
+            </div>
+            <div style={{ display: "flex", gap: 16, paddingLeft: 8, fontSize: 11, color: D.fg }}>
+              <span>股数 {sharesStr}</span>
+              <span>成本 {costStr}</span>
+            </div>
           </div>
         );
       })}
@@ -1446,6 +1445,8 @@ type ChangeLogEntry = {
   shares_to: number | null;
   cost_from: number | null;
   cost_to: number | null;
+  type_from: string | null;
+  type_to: string | null;
 };
 
 // Re-export shared helpers so existing imports from this file keep working

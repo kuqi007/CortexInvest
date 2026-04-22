@@ -220,6 +220,8 @@ function ensureMonitorTables(db: MonitorDb) {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_pcl_unique
       ON position_change_log(symbol, ts, source, shares_from, shares_to, cost_from, cost_to);
   `);
+  try { db.exec(`ALTER TABLE position_change_log ADD COLUMN type_from TEXT`); } catch {}
+  try { db.exec(`ALTER TABLE position_change_log ADD COLUMN type_to TEXT`); } catch {}
 }
 
 function readConfigFromDb(db: MonitorDb, ensureSchema = true): MonitorConfig {
@@ -643,17 +645,23 @@ export async function POST(request: Request) {
           const oldCost = oldRow.cost;
           const newShares = shares;
           const newCost = cost;
-          if (oldShares !== newShares || oldCost !== newCost) {
+          const oldType = oldRow.list_type;
+          const newType = listType;
+          const sharesOrCostChanged = oldShares !== newShares || oldCost !== newCost;
+          const typeChanged = oldType !== newType;
+          if (sharesOrCostChanged || typeChanged) {
             const nowIso = new Date().toISOString();
             db.prepare(`
               INSERT OR IGNORE INTO position_change_log
-                (symbol, ts, source, shares_from, shares_to, cost_from, cost_to)
-              VALUES (?, ?, ?, ?, ?, ?, ?)
+                (symbol, ts, source, shares_from, shares_to, cost_from, cost_to, type_from, type_to)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).run(code, nowIso, "import",
               oldShares != null ? oldShares : null,
               newShares != null ? newShares : null,
               oldCost != null ? oldCost : null,
-              newCost != null ? newCost : null);
+              newCost != null ? newCost : null,
+              typeChanged ? oldType : null,
+              typeChanged ? newType : null);
           }
         }
 
@@ -773,17 +781,22 @@ export async function POST(request: Request) {
         const newCost = cost;
         const sharesChanged = oldShares !== newShares;
         const costChanged = oldCost !== newCost;
-        if (sharesChanged || costChanged) {
+        const oldType = existing.list_type;
+        const newType = listType;
+        const typeChanged = oldType !== newType;
+        if (sharesChanged || costChanged || typeChanged) {
           const nowIso = new Date().toISOString();
           db.prepare(`
             INSERT OR IGNORE INTO position_change_log
-              (symbol, ts, source, shares_from, shares_to, cost_from, cost_to)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+              (symbol, ts, source, shares_from, shares_to, cost_from, cost_to, type_from, type_to)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).run(code, nowIso, "manual",
             oldShares != null ? oldShares : null,
             newShares != null ? newShares : null,
             oldCost != null ? oldCost : null,
-            newCost != null ? newCost : null);
+            newCost != null ? newCost : null,
+            typeChanged ? oldType : null,
+            typeChanged ? newType : null);
         }
 
         db.prepare(

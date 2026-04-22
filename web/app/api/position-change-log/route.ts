@@ -13,7 +13,7 @@ export async function GET(request: Request) {
   const db = openConfigDb(true);
   try {
     const rows = db.prepare(`
-      SELECT ts, source, shares_from, shares_to, cost_from, cost_to
+      SELECT ts, source, shares_from, shares_to, cost_from, cost_to, type_from, type_to
       FROM position_change_log
       WHERE symbol = ?
       ORDER BY ts DESC
@@ -25,6 +25,8 @@ export async function GET(request: Request) {
       shares_to: number | null;
       cost_from: number | null;
       cost_to: number | null;
+      type_from: string | null;
+      type_to: string | null;
     }[];
 
     return NextResponse.json({ results: rows });

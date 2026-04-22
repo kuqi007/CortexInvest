@@ -25,7 +25,7 @@ def _get_watch_row(conn, code: str) -> dict | None:
     """从 monitor_watchlist 读取单条记录，返回 dict 或 None。"""
     try:
         row = conn.execute(
-            "SELECT shares, cost FROM monitor_watchlist WHERE symbol = ?",
+            "SELECT shares, cost, list_type FROM monitor_watchlist WHERE symbol = ?",
             (code,),
         ).fetchone()
         return dict(row) if row else None
@@ -71,7 +71,8 @@ class FutuPositionSync:
                 unrealized = fp.unrealized_pnl
                 pnl_pct = (
                     (fp.market_val / (fp.avg_price * fp.quantity) - 1)
-                    if fp.avg_price > 0 and fp.quantity > 0 else 0
+                    if fp.avg_price > 0 and fp.quantity > 0
+                    else 0
                 )
 
                 # Preserve existing risk params set by dip-buy or RT engine
@@ -112,15 +113,25 @@ class FutuPositionSync:
                         buy_cost_per_share, atr_at_entry, last_updated)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
-                        code, fp.name,
-                        fp.avg_price, fp.quantity,
+                        code,
+                        fp.name,
+                        fp.avg_price,
+                        fp.quantity,
                         round(fp.market_val / fp.quantity, 4) if fp.quantity > 0 else 0,
-                        entry_time, entry_date,
-                        sl, tp, max_hold, strategy, confidence,
+                        entry_time,
+                        entry_date,
+                        sl,
+                        tp,
+                        max_hold,
+                        strategy,
+                        confidence,
                         signals,
-                        round(unrealized, 2), round(pnl_pct, 6),
+                        round(unrealized, 2),
+                        round(pnl_pct, 6),
                         scores.get(code, 0),
-                        bps, atr_entry, now_ts,
+                        bps,
+                        atr_entry,
+                        now_ts,
                     ),
                 )
 
@@ -129,23 +140,40 @@ class FutuPositionSync:
                 if old_row:
                     old_shares = old_row.get("shares")
                     old_cost = old_row.get("cost")
+                    old_type = old_row.get("list_type")
                     new_shares = fp.quantity
                     new_cost = fp.avg_price if fp.avg_price > 0 else None
-                    if old_shares != new_shares or old_cost != new_cost:
+                    new_type = "holding" if fp.quantity > 0 else old_type
+                    shares_or_cost_changed = (
+                        old_shares != new_shares or old_cost != new_cost
+                    )
+                    type_changed = old_type != new_type
+                    if shares_or_cost_changed or type_changed:
                         now_iso = datetime.now().isoformat(timespec="seconds")
                         try:
-                            config_conn.execute("""
+                            config_conn.execute(
+                                """
                                 INSERT OR IGNORE INTO position_change_log
-                                  (symbol, ts, source, shares_from, shares_to, cost_from, cost_to)
-                                VALUES (?, ?, ?, ?, ?, ?, ?)
-                            """, (code, now_iso, "sync",
-                                   old_shares,
-                                   new_shares if new_shares > 0 else None,
-                                   old_cost,
-                                   new_cost))
+                                  (symbol, ts, source, shares_from, shares_to, cost_from, cost_to, type_from, type_to)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                                (
+                                    code,
+                                    now_iso,
+                                    "sync",
+                                    old_shares,
+                                    new_shares if new_shares > 0 else None,
+                                    old_cost,
+                                    new_cost,
+                                    old_type if type_changed else None,
+                                    new_type if type_changed else None,
+                                ),
+                            )
                             config_conn.commit()
                         except Exception as pcl_err:
-                            logger.warning(f"position_change_log write failed: {pcl_err}")
+                            logger.warning(
+                                f"position_change_log write failed: {pcl_err}"
+                            )
 
             conn.commit()
         except Exception as e:
@@ -190,8 +218,9 @@ class FutuPositionSync:
 
         return closed_trades
 
-    def _create_trade_record(self, prev_pos: FutuPosition,
-                             close_qty: int, reason: str) -> dict | None:
+    def _create_trade_record(
+        self, prev_pos: FutuPosition, close_qty: int, reason: str
+    ) -> dict | None:
         """从前后持仓变化构建 trade record。"""
         qty = close_qty if close_qty > 0 else prev_pos.quantity
         if qty <= 0:
@@ -205,7 +234,11 @@ class FutuPositionSync:
         today = datetime.now().strftime("%Y-%m-%d")
 
         pnl = prev_pos.unrealized_pnl if close_qty == 0 else 0
-        pnl_pct = pnl / (prev_pos.avg_price * qty) if prev_pos.avg_price > 0 and qty > 0 else 0
+        pnl_pct = (
+            pnl / (prev_pos.avg_price * qty)
+            if prev_pos.avg_price > 0 and qty > 0
+            else 0
+        )
 
         return {
             "trade_id": str(uuid.uuid4())[:8],
@@ -243,16 +276,27 @@ class FutuPositionSync:
                     exit_reason, notes)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    trade["trade_id"], PARAM_VERSION,
-                    trade["code"], trade["action"], trade["direction"],
-                    trade["entry_price"], trade["exit_price"], trade["quantity"],
-                    trade["entry_time"], trade["exit_time"],
-                    trade["entry_date"], trade["exit_date"],
-                    trade.get("hold_days", 0), trade["pnl"], trade["pnl_pct"],
-                    trade["commission"], trade.get("total_cost", 0),
+                    trade["trade_id"],
+                    PARAM_VERSION,
+                    trade["code"],
+                    trade["action"],
+                    trade["direction"],
+                    trade["entry_price"],
+                    trade["exit_price"],
+                    trade["quantity"],
+                    trade["entry_time"],
+                    trade["exit_time"],
+                    trade["entry_date"],
+                    trade["exit_date"],
+                    trade.get("hold_days", 0),
+                    trade["pnl"],
+                    trade["pnl_pct"],
+                    trade["commission"],
+                    trade.get("total_cost", 0),
                     trade["confidence"],
                     json.dumps(trade.get("trigger_signals", [])),
-                    trade["exit_reason"], trade.get("notes", ""),
+                    trade["exit_reason"],
+                    trade.get("notes", ""),
                 ),
             )
             conn.commit()
@@ -269,14 +313,16 @@ class FutuPositionSync:
 
         today = date or datetime.now().strftime("%Y-%m-%d")
         positions = self._adapter.get_positions()
-        positions_json = json.dumps({
-            code: {
-                "entry_price": fp.avg_price,
-                "quantity": fp.quantity,
-                "market_val": fp.market_val,
+        positions_json = json.dumps(
+            {
+                code: {
+                    "entry_price": fp.avg_price,
+                    "quantity": fp.quantity,
+                    "market_val": fp.market_val,
+                }
+                for code, fp in positions.items()
             }
-            for code, fp in positions.items()
-        })
+        )
 
         conn = get_connection()
         try:
@@ -286,9 +332,14 @@ class FutuPositionSync:
                     daily_return, cumulative_return, drawdown_pct, positions_json)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    today, PARAM_VERSION,
-                    funds.total_assets, funds.cash, funds.market_val,
-                    0, 0, 0,  # 需要与前日对比计算，暂填 0
+                    today,
+                    PARAM_VERSION,
+                    funds.total_assets,
+                    funds.cash,
+                    funds.market_val,
+                    0,
+                    0,
+                    0,  # 需要与前日对比计算，暂填 0
                     positions_json,
                 ),
             )
@@ -300,9 +351,16 @@ class FutuPositionSync:
 
     # ── Order audit ────────────────────────────────────────
 
-    def save_order(self, order_id: str, code: str, side: str,
-                   price: float, qty: int, reason: str = "",
-                   acc_id: int | None = None) -> None:
+    def save_order(
+        self,
+        order_id: str,
+        code: str,
+        side: str,
+        price: float,
+        qty: int,
+        reason: str = "",
+        acc_id: int | None = None,
+    ) -> None:
         """记录订单到 futu_orders 表。"""
         now_ts = int(time.time() * 1000)
         conn = get_connection()

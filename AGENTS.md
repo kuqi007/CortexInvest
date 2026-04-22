@@ -16,6 +16,9 @@ web (port 3120) ─────→ read-only JSON + DB
 - `DeltaAlertEngine` is the **only** alert computation source
 - `SimulationEngine.calc_cost()` is the **only** fee calculator
 - Config updates **must** go through `POST /api/config` — never edit JSON/SQLite directly
+- **DB (config.db) 是唯一权威源**，JSON (monitor_config.json) 只是备份快照
+- 数据流: `POST /api/config` → 写 DB → 导出 JSON；Python 读 DB (fallback JSON)；Web 前端读 JSON
+- 加/改持仓走 API: `curl -X POST localhost:3120/api/config -H 'Content-Type: application/json' -d '{"action":"add",...}'`
 
 ## Database Split
 
