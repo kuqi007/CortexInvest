@@ -757,13 +757,18 @@ export function StockDrawer({
   // Fetch config from API when symbol changes (always fresh)
   useEffect(() => {
     if (!symbol) { setConfigEntry(null); return; }
-    fetch(`/api/config`)
+    const controller = new AbortController();
+    fetch(`/api/config/${encodeURIComponent(symbol)}`, { signal: controller.signal })
       .then((r) => r.json())
       .then((data) => {
-        const entry = data?.watchlist?.[symbol] || data?.holdings?.[symbol] || data?.watching?.[symbol];
-        if (entry) setConfigEntry({ ...entry, type: entry.type || "watching" });
+        if (controller.signal.aborted) return;
+        if (data.found) setConfigEntry({ ...data, type: data.type || "watching" });
+        else setConfigEntry(null);
       })
-      .catch(() => setConfigEntry(null));
+      .catch(() => {
+        if (!controller.signal.aborted) setConfigEntry(null);
+      });
+    return () => controller.abort();
   }, [symbol]);
 
   // Technical indicators from MetricsProvider (via indicator_cache)
