@@ -85,7 +85,7 @@ _feishu_token_expires_at: float = 0
 def load_config() -> dict:
     """加载配置 — DB 优先，JSON 作为备份"""
     from src.utils.config_reader import read_monitor_config
-    
+
     # 优先从 DB 读取
     try:
         cfg = read_monitor_config(prefer_db=True)
@@ -93,7 +93,7 @@ def load_config() -> dict:
             return cfg
     except Exception:
         pass
-    
+
     # 回退到 JSON
     if CONFIG_PATH.exists():
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -939,6 +939,14 @@ def notify(
         is_portfolio: 是否为组合持仓消息（暂未用于飞书）
         stock_info: 结构化股票信息，飞书卡片使用
     """
+    # 飞书通知（先发，不阻塞 macOS 通知）
+    try:
+        feishu_send(
+            title, message, change_pct=change_pct, level=level, stock_info=stock_info
+        )
+    except Exception as e:
+        logger.warning(f"飞书通知发送失败（不影响主流程）: {e}")
+
     # 转义双引号
     safe_title = title.replace('"', '\\"')
     safe_msg = message.replace('"', '\\"')
@@ -1002,14 +1010,6 @@ def notify(
         logger.info(f"通知已发送(dialog): [{title}] {message}")
     except Exception as e:
         logger.error(f"发送通知失败: {e}")
-
-    # 飞书通知（并行，不阻塞 macOS 通知）
-    try:
-        feishu_send(
-            title, message, change_pct=change_pct, level=level, stock_info=stock_info
-        )
-    except Exception as e:
-        logger.warning(f"飞书通知发送失败（不影响主流程）: {e}")
 
 
 # ══════════════════════════════════════════
