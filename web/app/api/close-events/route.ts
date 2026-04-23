@@ -23,10 +23,10 @@ export async function GET() {
       .all(today);
 
     if (rows.length === 0) {
-      return NextResponse.json({ data: [] });
+      return NextResponse.json({ data: null });
     }
 
-    const events = (rows as Array<{
+    const event = rows[0] as {
       ts: number;
       time: string;
       symbol: string;
@@ -35,13 +35,15 @@ export async function GET() {
       message: string;
       display: string;
       change_pct: number;
-    }>).map(event => ({
-      time: event.time,
-      message: event.message,
-      display: event.display || event.message,
-    }));
+    };
 
-    return NextResponse.json({ data: events });
+    return NextResponse.json({
+      data: {
+        time: event.time,
+        message: event.message,
+        display: event.display || event.message,
+      },
+    });
   } catch (error) {
     console.error("Failed to read close events:", error);
     return NextResponse.json({ data: null }, { status: 500 });
