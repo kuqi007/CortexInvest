@@ -303,6 +303,110 @@ cagr_3yr = calc_cagr(revenue_vals) if revenue_vals else None  # 2019-2022 3年CA
 
 ---
 
+## 货币单位检测 (v1.8 新增)
+
+### 问题
+
+港股上市公司（如明略科技 02718.HK）的 mx-data 返回数据存在**双口径问题**：
+- **Table 0**（数据浏览器）：自动汇率转换为港币，单位标注"亿港元"
+- **Table 1**（F10利润表）：原始币种，如"人民币"
+- 同一指标在两个 table 中数值不同（差汇率 ~10%）
+
+### detect_currency() 函数
+
+```python
+def detect_currency(data):
+    """从mx-data JSON中检测报表货币单位和table口径
+    
+    优先级:
+    1. table中"原始币种"字段（F10 table特有，最可靠）
+    2. table值中的单位后缀（"亿港元" → HKD, "亿元" → RMB）
+    3. entityTagDTO.marketChar 推断（.HK → 港元, .SZ/.SH → 人民币）
+    
+    Returns:
+        dict: {
+            "reporting_currency": "RMB" | "HKD" | "USD",
+            "mx_data_table0_unit": "HKD" | "RMB",  # Table 0 的口径
+            "exchange_rate_applied": bool,            # Table 0 是否做了汇率转换
+        }
+    """
+    dt_list = data['data']['data']['searchDataResultDTO']['dataTableDTOList']
+    
+    reporting_currency = None
+    table0_unit = None
+    
+    for dt in dt_list:
+        table = dt.get('table', {})
+        name_map = dt.get('nameMap', {})
+        
+        # 优先级1: 原始币种字段
+        for col_id, name in name_map.items():
+            if name == '原始币种':
+                vals = table.get(col_id, [])
+                if vals and vals[0]:
+                    orig = str(vals[0])
+                    if '人民币' in orig:
+                        reporting_currency = 'RMB'
+                    elif '港元' in orig:
+                        reporting_currency = 'HKD'
+                    elif '美元' in orig:
+                        reporting_currency = 'USD'
+        
+        # 优先级2: 从值后缀推断table口径
+        if table0_unit is None:
+            for col_id, vals in table.items():
+                for v in vals[:3]:  # 只看前3个值
+                    v_str = str(v)
+                    if '港元' in v_str:
+                        table0_unit = 'HKD'
+                        break
+                    elif '亿元' in v_str and '港元' not in v_str:
+                        table0_unit = 'RMB'
+                        break
+                if table0_unit:
+                    break
+    
+    # 优先级3: marketChar fallback
+    if reporting_currency is None:
+        market = dt_list[0].get('entityTagDTO', {}).get('marketChar', '')
+        reporting_currency = 'HKD' if market == '.HK' else 'RMB'
+    
+    if table0_unit is None:
+        table0_unit = reporting_currency
+    
+    return {
+        "reporting_currency": reporting_currency,
+        "mx_data_table0_unit": table0_unit,
+        "exchange_rate_applied": (reporting_currency != table0_unit),
+    }
+```
+
+### currency_source 标注规则
+
+在 valuation_result.json 的 financials 字段中，必须添加:
+
+```json
+{
+  "financials": {
+    "currency_source": {
+      "reporting_currency": "RMB",
+      "mx_data_table0_unit": "HKD",
+      "exchange_rate_applied": true,
+      "hkdrmb_rate": 0.88,
+      "note": "报表原始币种为RMB, mx-data Table 0 自动转为HKD, 数值差异约10%"
+    }
+  }
+}
+```
+
+**硬规则**:
+- 不重命名现有字段（`revenue_rmb` 等保持不变）
+- 在 financials 顶层添加 `currency_source` 对象即可
+- 若 `exchange_rate_applied = true`，所有从 Table 0 提取的数值必须标注单位为 table 口径（通常为HKD）
+- OCF、净利润等绝对值指标的单位以 `currency_source` 为准，不得假设为 RMB
+
+---
+
 ## 多 entity（A+H）处理
 
 ```python

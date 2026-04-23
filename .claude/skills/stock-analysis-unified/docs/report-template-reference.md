@@ -18,7 +18,7 @@
   "stock_name": "{股票名}",
   "analysis_date": "{YYYY-MM-DD}",
   "version": {N},
-  "skill_version": "stock-analysis-unified v1.5",
+  "skill_version": "stock-analysis-unified v1.8",
   "classification": {
     "type": "{分类}",
     "sector": "{行业}",
@@ -33,10 +33,37 @@
     "assumptions": {}
   },
   "price_at_analysis": XX,
-  "financials": {},
+  "financials": {
+    "currency_source": "{RMB原始/mx-data自动转HKD/已手动转换}",
+    "cagr_actual_period": "{3yr/5yr}",
+    "forward_earnings": {
+      "fy1_net_profit": "{XX亿, 经调整/归母}",
+      "fy1_source": "{mx-data预测table/mx-search研报/不足}",
+      "fy2_net_profit": "{XX亿, 同上}",
+      "fy2_source": "{同上}",
+      "coverage": "{充分/不足/缺失}"
+    },
+    "profit_bridge": {
+      "triggered": {true/false},
+      "level": "{简化版/完整桥接/数据受限}",
+      "items": ["A.公允价值变动", "B.资产减值", "..."]
+    }
+  },
   "defense_check": {},
   "core_thesis": "{一句话核心逻辑}",
   "key_risks": [],
+  "classification": {
+    "type": "{分类}",
+    "sector": "{行业}",
+    "market_cap_range": "{市值区间}",
+    "data_gate": {
+      "passed": {true/false},
+      "original_method": "{原始估值方法}",
+      "downgraded_method": "{降级后方法, null if passed}",
+      "reason": "{降级原因, null if passed}",
+      "missing_items": []
+    }
+  },
   "review": {
     "next_review_date": "{YYYY-MM-DD}",
     "interval_days": {按分类: 价值90/成长30/亏损14}
@@ -69,7 +96,7 @@
 ### 头部
 ```markdown
 # {股票名} ({代码}) 分析报告
-> 分析日期：{YYYY-MM-DD} | 分析员：AI unified stock analysis skill v1.5
+> 分析日期：{YYYY-MM-DD} | 分析员：AI unified stock analysis skill v1.8
 
 ### 数据来源声明 (必须)
 | 数据项 | 来源 | 本地文件 | 状态 |
@@ -79,7 +106,8 @@
 | 收入构成 | mx-data | mx_data_*.xlsx | 已验证/缺失 |
 | 行业数据 | mx-search | mx_search_*.txt | 已验证/缺失 |
 | 机构数据 | mx-search | mx_search_*.txt | 已验证/缺失 |
-| 前瞻预测 | mx-search | mx_search_*.txt | 已验证/缺失 |
+| 前瞻预测 | mx-data预测table + mx-search | mx_data_*_raw.json + mx_search_*.txt | 已验证/缺失/不足 |
+| 货币单位 | mx-data + 手动确认 | mx_data_*.xlsx | 已确认/待确认 |
 ```
 
 ### 一、股票分类

@@ -111,6 +111,15 @@ GROWTH_PATTERNS = [
     # CAGR
     r'(?:202[5-9]|2030).*?净利润.*?CAGR.*?(?:达到)?([0-9.]+)\s*%',
     r'净利润C?A?G?R.*?(?:20[0-9]{2}).*?([0-9.]+)\s*%',
+    
+    # v1.8新增: 下调/上调至负数 + 经调整净利润
+    # 注意：必须用"净利润"关键词做前文锚定，避免误匹配"收入增长至XX亿"
+    r'(?:经调整(?:Non-?IFRS\s*)?净利润|Non-?IFRS\s*(?:经调整)?净利润|(?:归母)?净利润)[^。]*?下调至\s*(-?[0-9.]+)\s*亿',
+    r'(?:经调整(?:Non-?IFRS\s*)?净利润|Non-?IFRS\s*(?:经调整)?净利润|(?:归母)?净利润)[^。]*?调整至\s*(-?[0-9.]+)\s*亿',
+    r'(?:经调整(?:Non-?IFRS\s*)?净利润|Non-?IFRS\s*(?:经调整)?净利润)[^。]*?(?:为|达)\s*(-?[0-9.]+)\s*亿',
+    
+    # "亏损XX亿" 口语化写法
+    r'(?:经调整)?(?:净)?亏损\s*([0-9.]+)\s*亿',
 ]
 
 def extract_growth_from_content(content):
@@ -119,6 +128,71 @@ def extract_growth_from_content(content):
         if match:
             return float(match.group(1))
     return None
+```
+
+### v1.8新增: 前瞻盈利预测（含方向变化、负数、经调整口径）
+
+```python
+FORWARD_EARNINGS_PATTERNS = [
+    # "从X亿下调至Y亿" — 提取新值Y（至后面的数字）
+    {
+        "pattern": r'(?:经调整(?:Non-?IFRS\s*)?净利润|(?:归母)?净利润)[^。]*?(?:从[^。]*?)?下调至\s*(-?[0-9.]+)\s*亿',
+        "extract": "new_value",  # 取"至"后面的新值
+        "description": "净利润下调至新值（含负数）",
+    },
+    {
+        "pattern": r'(?:经调整(?:Non-?IFRS\s*)?净利润|(?:归母)?净利润)[^。]*?(?:从[^。]*?)?上调至\s*([0-9.]+)\s*亿',
+        "extract": "new_value",
+        "description": "净利润上调至新值",
+    },
+    # "预计FY1净利润XX亿"
+    {
+        "pattern": r'预计\s*(?:202[5-9]|2030)\s*年[^。]*?(?:经调整)?(?:归母)?净利润[^。]*?(?:为|达|约)\s*(-?[0-9.]+)\s*亿',
+        "extract": "direct",
+        "description": "直接预测值（含负数）",
+    },
+    # "经调整净利润扭亏为盈/转正"
+    {
+        "pattern": r'经调整净利润[^。]*?(?:扭亏为盈|转正|盈利)\s*([0-9.]+)\s*(?:亿|万?元)',
+        "extract": "direct",
+        "description": "扭亏为盈场景",
+    },
+]
+
+def extract_forward_earnings(content):
+    """从研报文本中提取前瞻盈利预测（含方向变化和负数）
+    
+    Returns:
+        list of dict: [{"year": "FY2026E", "value": -1.92, "direction": "下调", "metric": "经调整净利润", "source_text": "..."}]
+    """
+    results = []
+    for fe in FORWARD_EARNINGS_PATTERNS:
+        matches = re.finditer(fe["pattern"], content)
+        for m in matches:
+            text = m.group(0)
+            try:
+                value = float(m.group(1))
+            except:
+                continue
+            
+            # 推断年份
+            year_match = re.search(r'(?:202[5-9]|2030)', text)
+            year = f"FY{year_match.group()[-2:]}E" if year_match else "FY?"
+            
+            # 推断方向
+            direction = "下调" if "下调" in text else "上调" if "上调" in text else "预测"
+            
+            # 推断口径
+            metric = "经调整净利润" if "经调整" in text else "归母净利润" if "归母" in text else "净利润"
+            
+            results.append({
+                "year": year,
+                "value": value,
+                "direction": direction,
+                "metric": metric,
+                "source_text": text[:100],
+            })
+    return results
 ```
 
 ### 评级（非 rating 字段，从文本提取时）
@@ -166,6 +240,7 @@ def extract_institutional(path):
         'target_prices': [],
         'ratings': [],
         'profit_predictions': [],
+        'forward_earnings': [],  # v1.8新增
         'source': 'mx_search_txt',
         'latest_date': None
     }
@@ -203,6 +278,11 @@ def extract_institutional(path):
         gr = extract_growth_from_content(combined)
         if gr:
             results['profit_predictions'].append(gr)
+
+        # v1.8: 前瞻盈利预测
+        fe = extract_forward_earnings(combined)
+        if fe:
+            results['forward_earnings'].extend(fe)
 
         # 最新日期
         date = item.get('date', '')
@@ -250,3 +330,6 @@ consensus_rating = most_common(inst['ratings']) if inst['ratings'] else None
 1. **非结构化**：目标价/增速嵌于 `content` 文本中，正则提取可能遗漏或误提取
 2. **currency 不明确**：部分研报用"元"（A股），部分用"港元"（港股），需结合股票市场判断
 3. **日期格式**：`date` 字段格式为 `"2026-04-15 15:07:30"`，需统一处理
+4. **负数提取**：正则支持 `-1.92亿` 格式，但不覆盖 `"亏损 1.92亿"` 这种纯文字负数（因为"亏损"后跟的数字在正则中需要单独模式匹配）
+5. **多券商口径不一致**：中金可能说-1.92亿，招商可能说+0.5亿，extract_forward_earnings 会返回所有匹配结果，需外部逻辑取中位数或判断方向一致性
+6. **口径对齐**：返回的 `metric` 字段标注了利润口径（经调整/归母/普通），使用时必须确保比较的是相同口径
