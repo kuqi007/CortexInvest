@@ -27,7 +27,7 @@ interface TradePlan {
   name: string;
   symbol: string;
   status: "active" | "paused";
-  scope: "real" | "sim";
+  scope: "real" | "sim" | "tick_monitor";
   created_at: string;
   orders: Order[];
 }
@@ -138,8 +138,8 @@ export async function POST(request: Request) {
           return NextResponse.json({ success: false, message: `Plan ${id} already exists` }, { status: 400 });
         }
 
-        // validate orders
-        if (plan.orders) {
+        // validate orders (shares required only for real/sim trade plans)
+        if (plan.scope !== "tick_monitor" && plan.orders) {
           for (const o of plan.orders) {
             if (o.side === "buy" && (o.shares == null || o.shares <= 0)) {
               return NextResponse.json({ success: false, message: `Buy order ${o.id} needs shares > 0` }, { status: 400 });
@@ -179,13 +179,15 @@ export async function POST(request: Request) {
 
         // orders replacement
         if (updates.orders !== undefined) {
-          // validate
-          for (const o of updates.orders) {
-            if (o.side === "buy" && (o.shares == null || o.shares <= 0)) {
-              return NextResponse.json({ success: false, message: `Buy order ${o.id} needs shares > 0` }, { status: 400 });
-            }
-            if (o.side === "sell" && (o.shares == null || o.shares <= 0)) {
-              return NextResponse.json({ success: false, message: `Sell order ${o.id} needs shares > 0` }, { status: 400 });
+          // validate (shares required only for real/sim trade plans)
+          if (plan.scope !== "tick_monitor") {
+            for (const o of updates.orders) {
+              if (o.side === "buy" && (o.shares == null || o.shares <= 0)) {
+                return NextResponse.json({ success: false, message: `Buy order ${o.id} needs shares > 0` }, { status: 400 });
+              }
+              if (o.side === "sell" && (o.shares == null || o.shares <= 0)) {
+                return NextResponse.json({ success: false, message: `Sell order ${o.id} needs shares > 0` }, { status: 400 });
+              }
             }
           }
           plan.orders = updates.orders;

@@ -7,10 +7,12 @@ POLLER_PID="$DIR/.poller.pid"
 NOTIFIER_PID="$DIR/.notifier.pid"
 L2_DAEMON_PID="$DIR/.l2_daemon.pid"
 L2_DAEMON_WATCHDOG_PID="$DIR/.l2_daemon_watchdog.pid"
+TICK_MONITOR_PID="$DIR/.tick_monitor.pid"
 WEB_PID="$DIR/.web.pid"
 POLLER_LOG="$DIR/logs/poller.log"
 NOTIFIER_LOG="$DIR/logs/notifier.log"
 L2_DAEMON_LOG="$DIR/logs/l2_daemon_out.log"
+TICK_MONITOR_LOG="$DIR/logs/tick_monitor.log"
 WEB_LOG="$DIR/logs/web.log"
 
 mkdir -p "$DIR/logs"
@@ -20,6 +22,7 @@ TODAY=$(date +%Y-%m-%d)
 POLLER_LOG="$DIR/logs/poller-$TODAY.log"
 NOTIFIER_LOG="$DIR/logs/notifier-$TODAY.log"
 L2_DAEMON_LOG="$DIR/logs/l2_daemon-$TODAY.log"
+TICK_MONITOR_LOG="$DIR/logs/tick_monitor-$TODAY.log"
 WEB_LOG="$DIR/logs/web-$TODAY.log"
 
 _check_terminal_notifier() {
@@ -211,6 +214,17 @@ do_start() {
     echo $! > "$L2_DAEMON_WATCHDOG_PID"
   fi
 
+  # Tick Monitor (短线盯盘，可选)
+  _ensure_no_orphan "$TICK_MONITOR_PID" "tick_monitor.py"
+  if _is_running "$TICK_MONITOR_PID"; then
+    echo "Tick Monitor 已在运行 (pid=$(_read_pid "$TICK_MONITOR_PID"))，跳过"
+  else
+    cd "$DIR"
+    nohup uv run python src/tools/tick_monitor.py >> "$TICK_MONITOR_LOG" 2>&1 &
+    echo $! > "$TICK_MONITOR_PID"
+    echo "Tick Monitor 启动  pid=$!  日志=logs/tick_monitor-$TODAY.log"
+  fi
+
   # Web
   _ensure_no_orphan "$WEB_PID" "next dev"
   if _is_running "$WEB_PID"; then
@@ -225,7 +239,7 @@ do_start() {
   echo ""
   echo "全部后台运行中，可关闭终端。"
   echo "  查看状态: ./start_ai_investor_full.sh status"
-  echo "  查看日志: tail -f logs/poller-$TODAY.log logs/notifier-$TODAY.log logs/l2_daemon-$TODAY.log logs/web-$TODAY.log"
+  echo "  查看日志: tail -f logs/poller-$TODAY.log logs/notifier-$TODAY.log logs/l2_daemon-$TODAY.log logs/tick_monitor-$TODAY.log logs/web-$TODAY.log"
   echo "  停止服务: ./start_ai_investor_full.sh stop"
 }
 
@@ -234,6 +248,7 @@ do_stop() {
   _stop_one "$L2_DAEMON_WATCHDOG_PID" "L2 Daemon Watchdog" ""
   _stop_one "$NOTIFIER_PID" "Notifier" "stock_notifier.py"
   _stop_one "$L2_DAEMON_PID" "L2 Daemon" "l2_strategy_daemon.py"
+  _stop_one "$TICK_MONITOR_PID" "Tick Monitor" "tick_monitor.py"
   _stop_one "$POLLER_PID" "Poller" "market_data_poller.py"
   _stop_one "$WEB_PID" "Web" "next-router-worker\|next dev"
 }
@@ -269,6 +284,16 @@ do_status() {
   else
     echo "L2 Daemon 未运行"
     rm -f "$L2_DAEMON_PID"
+  fi
+
+  # Tick Monitor
+  wrapper_pid=$(_read_pid "$TICK_MONITOR_PID")
+  if _is_python_running "$TICK_MONITOR_PID" "tick_monitor.py"; then
+    python_pid=$(_get_python_pid "$wrapper_pid")
+    echo "Tick Monitor 运行中  pid=$python_pid (wrapper=$wrapper_pid)"
+  else
+    echo "Tick Monitor 未运行"
+    rm -f "$TICK_MONITOR_PID"
   fi
 
   # Web

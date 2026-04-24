@@ -27,7 +27,15 @@ const ORDER_TYPE_OPTIONS = [
   { label: "反弹买入", side: "buy" as const, op: "<=" as const, trailing: true },
 ];
 
-function orderTypeLabel(o: PlanOrder): string {
+const TICK_ORDER_TYPE_OPTIONS = [
+  { label: "涨破提醒", side: "sell" as const, op: ">=" as const, trailing: false },
+  { label: "跌破提醒", side: "buy" as const, op: "<=" as const, trailing: false },
+];
+
+function orderTypeLabel(o: PlanOrder, scope?: string): string {
+  if (scope === "tick_monitor") {
+    return o.op === ">=" ? "涨破提醒" : "跌破提醒";
+  }
   if (o.trailing) {
     return o.side === "sell" ? "回落卖出" : "反弹买入";
   }
@@ -56,7 +64,7 @@ function PlanCard({
 
   const [showAddOrder, setShowAddOrder] = useState(false);
 
-  const cardBorder = plan.status === "active" ? D.green : D.comment;
+  const cardBorder = plan.scope === "tick_monitor" ? D.purple : plan.status === "active" ? D.green : D.comment;
 
   async function planPost(body: Record<string, unknown>) {
     try {
@@ -107,14 +115,30 @@ function PlanCard({
           borderRadius: 3,
           fontSize: 10,
           fontWeight: 700,
-          background: plan.status === "active" ? D.green : D.comment,
+          background: plan.status === "active" ? (plan.scope === "tick_monitor" ? D.purple : D.green) : D.comment,
           color: D.bg,
           cursor: "pointer",
           userSelect: "none",
         }} onClick={handleToggle} title="Toggle active/paused">
-          {plan.status === "active" ? "运行中" : "已暂停"}
+          {plan.scope === "tick_monitor"
+            ? (plan.status === "active" ? "监控中" : "已暂停")
+            : (plan.status === "active" ? "运行中" : "已暂停")}
         </span>
         <span style={{ color: D.fg }}>{plan.name}</span>
+        {plan.scope === "tick_monitor" && (
+          <span style={{
+            display: "inline-block",
+            padding: "1px 6px",
+            borderRadius: 3,
+            fontSize: 10,
+            fontWeight: 700,
+            background: D.purple,
+            color: D.bg,
+            cursor: "default",
+          }} title="仅通知，不执行交易">
+            TICK
+          </span>
+        )}
         {pos && posShares > 0 && (
           <span style={{ color: D.comment, fontSize: 11 }}>
             {posShares}股 @{posCost > 0 ? posCost.toFixed(2) : "-"}
@@ -161,6 +185,11 @@ function PlanCard({
           >x</button>
         </span>
       </div>
+      {plan.scope === "tick_monitor" && (
+        <div style={{ fontSize: 10, color: D.purple, marginBottom: 6, fontFamily: "JetBrains Mono, monospace" }}>
+          [NOTIFY] 价格触及条件时发送提醒，不执行交易
+        </div>
+      )}
 
       {/* orders */}
       {plan.orders.length > 0 && (
@@ -242,6 +271,30 @@ function PlanCard({
                       <span style={{ color: D.comment, fontSize: 10, marginLeft: "auto" }}>15:05检测</span>
                     )}
                   </>
+                ) : plan.scope === "tick_monitor" ? (
+                  <>
+                    <span style={{
+                      fontSize: 10, color: D.bg,
+                      background: D.purple,
+                      padding: "0 4px", borderRadius: 2, fontWeight: 700,
+                    }}>
+                      {orderTypeLabel(o, plan.scope)}
+                    </span>
+                    <span style={{ color: D.comment }}>{o.op}</span>
+                    <EditableCell
+                      value={o.price}
+                      onSave={(v) => handleUpdateOrder(o.id, "price", v)}
+                      width="60px"
+                      isNumber
+                      color={D.purple}
+                    />
+                    {posPrice > 0 && o.price > 0 && (
+                      <span style={{ fontSize: 10, color: D.comment, marginLeft: 8, fontFamily: "JetBrains Mono, monospace" }}>
+                        当前 {posPrice.toFixed(2)} · {Math.abs((posPrice - o.price) / o.price * 100).toFixed(1)}%
+                      </span>
+                    )}
+                    <span style={{ color: D.comment, fontSize: 11 }}>{o.label}</span>
+                  </>
                 ) : (
                   <>
                     <span style={{
@@ -309,13 +362,15 @@ function NewOrderForm({
   onCreated: () => void;
   onCancel: () => void;
 }) {
+  const isTick = plan.scope === "tick_monitor";
+  const options = isTick ? TICK_ORDER_TYPE_OPTIONS : ORDER_TYPE_OPTIONS;
   const [typeIdx, setTypeIdx] = useState(0);
   const [price, setPrice] = useState("");
   const [quantity, setQuantity] = useState("");
   const [trailPct, setTrailPct] = useState("");
   const [label, setLabel] = useState("");
 
-  const opt = ORDER_TYPE_OPTIONS[typeIdx];
+  const opt = options[typeIdx];
 
   const inputS: React.CSSProperties = {
     background: D.currentLine,
@@ -340,10 +395,10 @@ function NewOrderForm({
       side: opt.side,
       op: opt.op,
       price: Number(price) || 0,
-      shares: qty || null,
+      shares: isTick ? null : (qty || null),
       volume_min: null,
       consecutive_days: null,
-      trailing: opt.trailing && trailPct ? { pct: Number(trailPct), watermark: null, active: false } : null,
+      trailing: isTick ? null : (opt.trailing && trailPct ? { pct: Number(trailPct), watermark: null, active: false } : null),
       label: label || "",
       triggered: false,
       triggered_at: null,
@@ -378,7 +433,7 @@ function NewOrderForm({
         value={typeIdx}
         onChange={(e) => setTypeIdx(Number(e.target.value))}
       >
-        {ORDER_TYPE_OPTIONS.map((t, ti) => (
+        {options.map((t, ti) => (
           <option key={ti} value={ti}>{t.label}</option>
         ))}
       </select>
@@ -392,18 +447,20 @@ function NewOrderForm({
           onChange={(e) => setPrice(e.target.value)}
         />
       </label>
-      <label style={{ display: "flex", alignItems: "center", gap: 2, color: D.comment }}>
-        股数:
-        <input
-          style={{ ...inputS, width: 55 }}
-          type="number"
-          step="100"
-          value={quantity}
-          onChange={(e) => setQuantity(e.target.value)}
-          placeholder="1000"
-        />
-      </label>
-      {opt.trailing && (
+      {!isTick && (
+        <label style={{ display: "flex", alignItems: "center", gap: 2, color: D.comment }}>
+          股数:
+          <input
+            style={{ ...inputS, width: 55 }}
+            type="number"
+            step="100"
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+            placeholder="1000"
+          />
+        </label>
+      )}
+      {opt.trailing && !isTick && (
         <label style={{ display: "flex", alignItems: "center", gap: 2, color: D.purple }}>
           回落%:
           <input
@@ -463,6 +520,7 @@ function NewPlanForm({
   onCancel: () => void;
 }) {
   const [planName, setPlanName] = useState("");
+  const [scope, setScope] = useState<"real" | "tick_monitor">("real");
 
   interface OrderDraft {
     typeIdx: number;
@@ -472,6 +530,10 @@ function NewPlanForm({
     label: string;
   }
   const [orders, setOrders] = useState<OrderDraft[]>([]);
+
+  useEffect(() => {
+    setOrders((prev) => prev.map((o) => ({ ...o, typeIdx: 0 })));
+  }, [scope]);
 
   function addOrderRow() {
     setOrders((prev) => [...prev, { typeIdx: 0, price: "", quantity: "", trailPct: "", label: "" }]);
@@ -506,17 +568,17 @@ function NewPlanForm({
     const id = `${defaultSymbol}_${Date.now().toString(36)}`;
 
     const builtOrders = orders.map((o, i) => {
-      const opt = ORDER_TYPE_OPTIONS[o.typeIdx];
+      const opt = (scope === "tick_monitor" ? TICK_ORDER_TYPE_OPTIONS : ORDER_TYPE_OPTIONS)[o.typeIdx];
       const qty = Number(o.quantity) || 0;
       return {
         id: `o${i + 1}`,
         side: opt.side,
         op: opt.op,
         price: Number(o.price) || 0,
-        shares: qty || null,
+        shares: scope === "tick_monitor" ? null : (qty || null),
         volume_min: null,
         consecutive_days: null,
-        trailing: opt.trailing && o.trailPct ? { pct: Number(o.trailPct), watermark: null, active: false } : null,
+        trailing: scope === "tick_monitor" ? null : (opt.trailing && o.trailPct ? { pct: Number(o.trailPct), watermark: null, active: false } : null),
         label: o.label || "",
         triggered: false,
         triggered_at: null,
@@ -527,7 +589,7 @@ function NewPlanForm({
       name: planName,
       symbol: defaultSymbol,
       status: "active",
-      scope: "real",
+      scope,
       created_at: new Date().toISOString().slice(0, 10),
       orders: builtOrders,
     };
@@ -570,13 +632,29 @@ function NewPlanForm({
           />
         </label>
       </div>
+      <div style={{ display: "flex", gap: 8, marginBottom: scope === "tick_monitor" ? 4 : 8, alignItems: "center" }}>
+        <span style={{ color: D.comment, fontSize: 11 }}>类型:</span>
+        <select
+          style={{ ...selectS, width: 140 }}
+          value={scope}
+          onChange={(e) => setScope(e.target.value as "real" | "tick_monitor")}
+        >
+          <option value="real">交易计划</option>
+          <option value="tick_monitor">价格提醒（仅通知）</option>
+        </select>
+      </div>
+      {scope === "tick_monitor" && (
+        <div style={{ fontSize: 10, color: D.purple, marginBottom: 8, marginLeft: 36, fontFamily: "JetBrains Mono, monospace" }}>
+          [INFO] 价格触及条件时发送通知，不执行真实交易
+        </div>
+      )}
 
       {/* orders */}
       {orders.length > 0 && (
         <div style={{ marginBottom: 6 }}>
           <div style={{ color: D.comment, fontSize: 11, marginBottom: 4 }}>-- 条件单 --</div>
           {orders.map((o, idx) => {
-            const opt = ORDER_TYPE_OPTIONS[o.typeIdx];
+            const opt = (scope === "tick_monitor" ? TICK_ORDER_TYPE_OPTIONS : ORDER_TYPE_OPTIONS)[o.typeIdx];
             return (
               <div key={idx} style={{ display: "flex", gap: 5, marginBottom: 5, alignItems: "center", flexWrap: "wrap" }}>
                 <select
@@ -584,7 +662,7 @@ function NewPlanForm({
                   value={o.typeIdx}
                   onChange={(e) => updateOrder(idx, "typeIdx", Number(e.target.value))}
                 >
-                  {ORDER_TYPE_OPTIONS.map((t, ti) => (
+                  {(scope === "tick_monitor" ? TICK_ORDER_TYPE_OPTIONS : ORDER_TYPE_OPTIONS).map((t, ti) => (
                     <option key={ti} value={ti}>{t.label}</option>
                   ))}
                 </select>
@@ -598,18 +676,20 @@ function NewPlanForm({
                     onChange={(e) => updateOrder(idx, "price", e.target.value)}
                   />
                 </label>
-                <label style={{ display: "flex", alignItems: "center", gap: 2, color: D.comment }}>
-                  股数:
-                  <input
-                    style={{ ...inputS, width: 55 }}
-                    type="number"
-                    step="100"
-                    value={o.quantity}
-                    onChange={(e) => updateOrder(idx, "quantity", e.target.value)}
-                    placeholder="1000"
-                  />
-                </label>
-                {opt.trailing && (
+                {scope !== "tick_monitor" && (
+                  <label style={{ display: "flex", alignItems: "center", gap: 2, color: D.comment }}>
+                    股数:
+                    <input
+                      style={{ ...inputS, width: 55 }}
+                      type="number"
+                      step="100"
+                      value={o.quantity}
+                      onChange={(e) => updateOrder(idx, "quantity", e.target.value)}
+                      placeholder="1000"
+                    />
+                  </label>
+                )}
+                {opt.trailing && scope !== "tick_monitor" && (
                   <label style={{ display: "flex", alignItems: "center", gap: 2, color: D.purple }}>
                     回落%:
                     <input
@@ -1300,7 +1380,7 @@ export function StockDrawer({
           {/* Section 4: 交易计划 */}
           <div style={{ borderTop: `1px solid ${D.currentLine}`, marginTop: 8, paddingTop: 16 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <div style={{ color: D.comment, fontSize: 11, textTransform: "uppercase", letterSpacing: 1 }}>交易计划</div>
+              <div style={{ color: D.comment, fontSize: 11, textTransform: "uppercase", letterSpacing: 1 }}>交易计划 & 监控</div>
               <button
                 onClick={() => setShowNewPlanForm(true)}
                 style={{

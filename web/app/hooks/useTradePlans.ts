@@ -30,7 +30,7 @@ export interface TradePlan {
   name: string;
   symbol: string;
   status: "active" | "paused";
-  scope?: string;
+  scope?: "real" | "sim" | "tick_monitor";
   created_at: string;
   orders: PlanOrder[];
   position?: PlanPosition;

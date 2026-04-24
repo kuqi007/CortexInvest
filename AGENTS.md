@@ -62,3 +62,19 @@ cd web && npm run dev                                    # frontend :3120
 - `web/` — Next.js dashboard, API routes, UI components
 
 详见 [CLAUDE.md](./CLAUDE.md) for full project documentation.
+
+## AI Stock Notes (防止失忆)
+
+每只股票可有一份 `.claude/notes/{CODE}.md` 备忘录，保存复杂交易计划、AI 分析结论、关键观察指标。
+
+**规则**：
+- 用户提到某只股票时，AI **必须先读取**对应的 notes 文件（如果存在）
+- 分析结束后，AI **主动将新结论追加写入** `## AI 历史分析记录`**（新日期放在最上方，倒序排列）**
+- 如果 notes 不存在，AI **创建它**并写入初始分析
+- 用户可随时说"帮我在 {CODE} notes 里加上..."或"读一下 {CODE} 的 notes"
+
+**与 trade_plans.json 的区别**：
+- `trade_plans.json` = 结构化执行计划（程序读取）
+- `.claude/notes/` = 自由文本决策记录（AI + 人阅读，防止失忆）
+
+详见 [`.claude/notes/README.md`](./.claude/notes/README.md)
