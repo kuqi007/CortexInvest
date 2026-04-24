@@ -940,10 +940,22 @@ def notify(
         stock_info: 结构化股票信息，飞书卡片使用
     """
     # 飞书通知（先发，不阻塞 macOS 通知）
-    try:
-        feishu_send(title, message, change_pct=change_pct, stock_info=stock_info)
-    except Exception as e:
-        logger.warning(f"飞书通知发送失败（不影响主流程）: {e}")
+    # 过滤：只推 L1 和关键 L2（panic_sell / threshold），其余静默减少噪音
+    should_feishu = False
+    if stock_info:
+        lvl = stock_info.get("level")
+        kind = stock_info.get("_kind")
+        if lvl == 1:
+            should_feishu = True
+        elif lvl == 2 and kind in ("panic_sell", "threshold"):
+            should_feishu = True
+    # 无 stock_info（CLI 看板 alerts）→ 不推飞书
+
+    if should_feishu:
+        try:
+            feishu_send(title, message, change_pct=change_pct, stock_info=stock_info)
+        except Exception as e:
+            logger.warning(f"飞书通知发送失败（不影响主流程）: {e}")
 
     # 转义双引号
     safe_title = title.replace('"', '\\"')

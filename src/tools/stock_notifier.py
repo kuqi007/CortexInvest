@@ -1534,6 +1534,8 @@ def stealth_dispatch(alerts: list[dict], *, sound: str = ""):
                 "code": top_symbol,
                 "price": top.get("_price", ""),
                 "change_pct": top.get("_change_pct"),
+                "level": top.get("_level"),
+                "_kind": top.get("_kind"),
                 "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
         else:
