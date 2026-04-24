@@ -75,14 +75,17 @@ class FutuPositionSync:
                     else 0
                 )
 
-                # Preserve existing risk params set by dip-buy or RT engine
+                # Preserve existing risk params set by dip-buy or RT engine.
+                # NOTE: use "existing" check (not entry_time truthiness) to avoid
+                # entry_time=0 being permanently stuck in the else branch.
                 existing = conn.execute(
                     "SELECT entry_time, entry_date, stop_loss, take_profit, "
                     "max_hold_days, entry_strategy, confidence, trigger_signals, "
                     "buy_cost_per_share, atr_at_entry FROM live_state WHERE code = ?",
                     (code,),
                 ).fetchone()
-                if existing and existing["entry_time"]:
+                if existing and existing["entry_time"] and existing["entry_time"] > 0:
+                    # Existing position with valid entry_time — preserve all fields
                     entry_time = existing["entry_time"]
                     entry_date = existing["entry_date"] or ""
                     sl = existing["stop_loss"] or 0
@@ -94,9 +97,13 @@ class FutuPositionSync:
                     bps = existing["buy_cost_per_share"] or 0
                     atr_entry = existing["atr_at_entry"] or 0
                 else:
-                    entry_time = 0
-                    entry_date = ""
-                    sl = 0
+                    # New position or entry_time was 0 (corrupted by prior bug):
+                    # assign now_ts + default SL to ensure risk protection.
+                    now_date = datetime.now().strftime("%Y-%m-%d")
+                    default_sl = round(fp.avg_price * 0.90, 4)
+                    entry_time = now_ts
+                    entry_date = now_date
+                    sl = default_sl
                     tp = None
                     max_hold = 10
                     strategy = "futu_sim"
@@ -104,6 +111,10 @@ class FutuPositionSync:
                     signals = "[]"
                     bps = 0
                     atr_entry = 0
+                    logger.info(
+                        f"sync_live_state: new Futu position {code} "
+                        f"entry_time={now_ts}, SL={default_sl:.2f}"
+                    )
 
                 conn.execute(
                     """INSERT OR REPLACE INTO live_state
@@ -240,6 +251,22 @@ class FutuPositionSync:
             else 0
         )
 
+        # Read entry_time/entry_date from live_state (authoritative source)
+        entry_time = 0
+        entry_date = ""
+        try:
+            conn = get_connection()
+            row = conn.execute(
+                "SELECT entry_time, entry_date FROM live_state WHERE code = ?",
+                (prev_pos.code,),
+            ).fetchone()
+            conn.close()
+            if row and row["entry_time"] and row["entry_time"] > 0:
+                entry_time = row["entry_time"]
+                entry_date = row["entry_date"] or ""
+        except Exception as e:
+            logger.debug(f"_create_trade_record: failed to read entry_time: {e}")
+
         return {
             "trade_id": str(uuid.uuid4())[:8],
             "code": prev_pos.code,
@@ -248,9 +275,9 @@ class FutuPositionSync:
             "entry_price": prev_pos.avg_price,
             "exit_price": exit_price,
             "quantity": qty,
-            "entry_time": 0,
+            "entry_time": entry_time,
             "exit_time": now_ts,
-            "entry_date": "",
+            "entry_date": entry_date,
             "exit_date": today,
             "hold_days": 0,
             "pnl": round(pnl, 2),

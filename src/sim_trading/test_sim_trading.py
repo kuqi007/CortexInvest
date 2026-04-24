@@ -2779,7 +2779,7 @@ class TestSyncLiveStatePreservesRiskParams:
             os.unlink(tmp.name)
 
     def test_sync_new_position_gets_defaults(self):
-        """New position not in live_state gets default SL=0."""
+        """New position not in live_state gets default SL=0.90*price and entry_time>0."""
         import src.sim_trading.db as db_mod
         from .db import get_connection, init_db
         import os
@@ -2807,14 +2807,94 @@ class TestSyncLiveStatePreservesRiskParams:
 
             conn = get_connection()
             row = conn.execute(
-                "SELECT stop_loss, take_profit, entry_strategy FROM live_state WHERE code = ?",
+                "SELECT stop_loss, take_profit, entry_strategy, entry_time, entry_date "
+                "FROM live_state WHERE code = ?",
                 ("HK00700",),
             ).fetchone()
             conn.close()
 
-            assert row["stop_loss"] == 0, "New position should have SL=0"
+            assert row["stop_loss"] == 90.0, (
+                f"New position should have SL=0.90*price=90.0, got {row['stop_loss']}"
+            )
             assert row["take_profit"] is None, "New position should have TP=None"
             assert row["entry_strategy"] == "futu_sim"
+            assert row["entry_time"] > 0, (
+                f"New position should have entry_time>0, got {row['entry_time']}"
+            )
+            assert row["entry_date"] != "", "New position should have entry_date"
+        finally:
+            db_mod._db_path_override = old
+            os.unlink(tmp.name)
+
+    def test_sync_fixes_corrupted_entry_time_zero(self):
+        """Regression: existing live_state row with entry_time=0 gets repaired.
+
+        Prior bug: sync_live_state() checked `existing["entry_time"]` as truthy,
+        so entry_time=0 fell to the else branch and stayed 0 forever.
+        Fix: check `entry_time > 0`; if 0, assign now_ts + default SL.
+        """
+        import src.sim_trading.db as db_mod
+        from .db import get_connection, init_db
+        import os
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp.close()
+        old = db_mod._db_path_override
+        db_mod._db_path_override = tmp.name
+        try:
+            init_db()
+
+            # Seed live_state with corrupted entry_time=0, stop_loss=0
+            conn = get_connection()
+            conn.execute(
+                """INSERT INTO live_state
+                   (code, name, entry_price, quantity, current_price,
+                    entry_time, entry_date, stop_loss, take_profit,
+                    max_hold_days, entry_strategy, confidence,
+                    trigger_signals, unrealized_pnl, pnl_pct,
+                    daily_score, buy_cost_per_share, atr_at_entry, last_updated)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    "HK06651", "五一视界", 57.3, 2200, 57.0,
+                    0, "", 0.0, None,
+                    10, "futu_sim", 0.0,
+                    "[]", -660.0, -0.03,
+                    0, 0, 0, 0,
+                ),
+            )
+            conn.commit()
+            conn.close()
+
+            # Mock Futu adapter returning same position
+            adapter = MagicMock()
+            fp = MagicMock()
+            fp.name = "五一视界"
+            fp.avg_price = 57.3
+            fp.quantity = 2200
+            fp.market_val = 57.0 * 2200
+            fp.unrealized_pnl = -660.0
+            adapter.get_positions.return_value = {"HK06651": fp}
+
+            from .futu_position_sync import FutuPositionSync
+
+            sync = FutuPositionSync(adapter)
+            sync.sync_live_state({})
+
+            # Verify entry_time was repaired (no longer 0)
+            conn = get_connection()
+            row = conn.execute(
+                "SELECT entry_time, entry_date, stop_loss FROM live_state WHERE code = ?",
+                ("HK06651",),
+            ).fetchone()
+            conn.close()
+
+            assert row["entry_time"] > 0, (
+                f"Corrupted entry_time=0 should be repaired, got {row['entry_time']}"
+            )
+            assert row["entry_date"] != "", "entry_date should be set after repair"
+            assert row["stop_loss"] > 0, (
+                f"stop_loss should be >0 after repair, got {row['stop_loss']}"
+            )
         finally:
             db_mod._db_path_override = old
             os.unlink(tmp.name)
