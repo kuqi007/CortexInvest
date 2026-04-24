@@ -170,9 +170,12 @@ function indicatorTag(key: string, val: number | boolean): { text: string; color
   }
 }
 
-/** epoch ms → "MM-DD HH:MM" */
+/** epoch ms → "MM-DD HH:MM"; falls back to date string or label */
 function tsToTime(ts: number | undefined, fallbackDate?: string): string {
-  if (!ts || ts <= 0) return fallbackDate || "-";
+  if (!ts || ts <= 0) {
+    if (fallbackDate && fallbackDate.trim()) return fallbackDate.trim();
+    return "同步数据";
+  }
   const d = new Date(ts);
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
@@ -233,6 +236,7 @@ function strategyCN(s: string): string {
     bollinger_squeeze_breakout: "日K布林突破",
     morning_evening_star: "日K星线形态",
     force_close: "强制平仓",
+    futu_sim: "Futu同步",
     "T3:large_order_reversal": "T3大单翻转",
     "T3:large_order_reversal(v2)": "T3大单翻转(v2)",
     "T3:volume_price_divergence": "T3量价背离",
@@ -471,7 +475,8 @@ function tradeReviewCN(t: Trade): { text: string; color: string } {
   const pnlPct = (t.pnl_pct ?? 0) * 100;
   const fee = t.commission || 0;
   const gross = (t.pnl ?? 0) + fee;
-  const holdMs = (t.exit_time || 0) - (t.entry_time || 0);
+  const holdMs = (t.entry_time && t.exit_time && t.exit_time > t.entry_time)
+    ? t.exit_time - t.entry_time : 0;
   const holdMin = holdMs > 0 ? holdMs / 60000 : 0;
   const er = t.exit_reason;
 
@@ -582,7 +587,7 @@ function TradesTable({ trades, bare }: { trades: Trade[]; bare?: boolean }) {
                   {strategyCN(t.notes)}
                 </span>
                 <span style={{ color: D.comment, width: "6ch", textAlign: "right" }}>
-                  {(t.entry_date || "").slice(5)}
+                  {(t.entry_date && t.entry_date.trim()) ? t.entry_date.slice(5) : (t.entry_time && t.entry_time > 0 ? tsToTime(t.entry_time).slice(0, 5) : "同步")}
                 </span>
                 <span style={{ color: D.comment, width: "4ch", textAlign: "right" }}>
                   {(() => {
@@ -1046,7 +1051,7 @@ function OperationsLog({ live }: { live: LiveData }) {
     if (p.take_profit) parts.push(`TP ${p.take_profit.toFixed(2)}`);
     if (p.daily_score > 0) parts.push(`评分${p.daily_score}`);
     groups.push({
-      sortTs: p.entry_time || 0,
+      sortTs: p.entry_time || p.last_updated || Date.now(),
       code: p.code,
       name: p.name || p.code,
       entry: {
