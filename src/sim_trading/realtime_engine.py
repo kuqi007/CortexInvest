@@ -294,12 +294,37 @@ class RealtimeSimEngine:
             logger.warning(f"Failed to load state from Futu: {e}")
 
     def _sync_shadow_pm(self):
-        """Futu 模式: 定期同步 Futu 持仓到影子 PM（通过 broker 接口）。"""
+        """Futu 模式: 定期同步 Futu 持仓到影子 PM（通过 broker 接口）。
+
+        过滤掉最近通过 T3/风控卖出的股票（_last_exit_ts 冷却），
+        防止 Futu sync 反复拉回刚卖出的持仓导致无限循环割肉。
+        """
         if not self._futu or not self._futu_enabled:
             return
         try:
             positions = self._futu.get_positions()
             funds = self._futu.get_funds()
+
+            # Filter out recently exited stocks to prevent T3 cycle
+            now_ts = int(time.time() * 1000)
+            cooldown_ms = self._score_cfg.get("reentry_cooldown_min", 120) * 60 * 1000
+            exited_codes = {
+                code for code, ts in self._last_exit_ts.items()
+                if (now_ts - ts) < cooldown_ms
+            }
+            if exited_codes:
+                filtered = {
+                    k: v for k, v in positions.items()
+                    if k not in exited_codes
+                }
+                dropped = set(positions) - set(filtered)
+                if dropped:
+                    logger.info(
+                        f"Shadow PM sync: skipping recently exited {dropped} "
+                        f"(cooldown {cooldown_ms // 60000}min)"
+                    )
+                positions = filtered
+
             self._broker.sync_from_futu(positions, funds.cash)
         except Exception as e:
             logger.debug(f"Shadow PM sync failed: {e}")

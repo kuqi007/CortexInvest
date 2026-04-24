@@ -3255,3 +3255,139 @@ class TestMakeAlert:
         )
 
         assert "止损" in result["display"]
+
+
+class TestT3CycleProtection:
+    """Regression tests for T3 sell → Futu sync re-add → T3 sell cycle.
+
+    Bug: HK00700 was T3-closed, then _sync_shadow_pm re-added the position
+    from Futu, restarting the 30-min min_hold timer. This created an endless
+    cycle of -650 (commission-only) loss trades (62 total).
+
+    Fix: _sync_shadow_pm filters out stocks with a recent _last_exit_ts
+    (reentry_cooldown_min) before passing them to sync_from_futu.
+    """
+
+    @pytest.fixture
+    def rules_with_reentry(self):
+        return {
+            "daily_score": {
+                "min_hold_minutes": 30,
+                "reentry_cooldown_min": 120,
+                "max_new_positions_per_day": 1,
+            },
+            "tiers": {
+                "3_correction": {
+                    "large_order_reversal": {"action": "SELL"},
+                },
+            },
+            "dip_buy": {
+                "enabled": True,
+                "reentry_cooldown_min": 120,
+            },
+            "lot_sizes": {},
+        }
+
+    def test_sync_shadow_pm_skips_recently_exited(self, rules_with_reentry):
+        """_sync_shadow_pm must not re-add a stock that was T3-exited within cooldown."""
+        from .realtime_engine import RealtimeSimEngine
+        from .position_manager import Position, PositionManager
+
+        engine = RealtimeSimEngine.__new__(RealtimeSimEngine)
+        engine._rules = rules_with_reentry
+        engine._score_cfg = rules_with_reentry.get("daily_score", {})
+        engine._futu = MagicMock()
+        engine._futu_enabled = True
+        engine._broker = MagicMock()
+        engine._last_exit_ts = {"HK00700": int(time.time() * 1000) - 60_000}  # exited 1 min ago
+        engine._t3_exit_price = {}
+
+        # Futu still has HK00700 (real account position)
+        mock_pos = MagicMock()
+        mock_pos.avg_price = 558.0
+        mock_pos.quantity = 100
+        mock_pos.market_val = 55800.0
+        engine._futu.get_positions.return_value = {"HK00700": mock_pos}
+        engine._futu.get_funds.return_value = MagicMock(cash=400_000)
+
+        engine._sync_shadow_pm()
+
+        # sync_from_futu should be called WITHOUT HK00700
+        call_args = engine._broker.sync_from_futu.call_args
+        assert call_args is not None, "sync_from_futu should have been called"
+        synced_positions = call_args[0][0]
+        assert "HK00700" not in synced_positions, (
+            "HK00700 should be filtered out (within reentry cooldown)"
+        )
+
+    def test_sync_shadow_pm_allows_after_cooldown(self, rules_with_reentry):
+        """_sync_shadow_pm re-adds stock AFTER reentry cooldown expires."""
+        from .realtime_engine import RealtimeSimEngine
+
+        engine = RealtimeSimEngine.__new__(RealtimeSimEngine)
+        engine._rules = rules_with_reentry
+        engine._score_cfg = rules_with_reentry.get("daily_score", {})
+        engine._futu = MagicMock()
+        engine._futu_enabled = True
+        engine._broker = MagicMock()
+        # Exited 3 hours ago (cooldown is 120 min)
+        engine._last_exit_ts = {
+            "HK00700": int(time.time() * 1000) - 180 * 60 * 1000,
+        }
+        engine._t3_exit_price = {}
+
+        mock_pos = MagicMock()
+        mock_pos.avg_price = 558.0
+        mock_pos.quantity = 100
+        mock_pos.market_val = 55800.0
+        engine._futu.get_positions.return_value = {"HK00700": mock_pos}
+        engine._futu.get_funds.return_value = MagicMock(cash=400_000)
+
+        engine._sync_shadow_pm()
+
+        # sync_from_futu should be called WITH HK00700 (cooldown expired)
+        call_args = engine._broker.sync_from_futu.call_args
+        synced_positions = call_args[0][0]
+        assert "HK00700" in synced_positions, (
+            "HK00700 should be included (cooldown expired)"
+        )
+
+    def test_sync_shadow_pm_multiple_codes_partial_filter(self, rules_with_reentry):
+        """Only recently exited stocks are filtered; others sync normally."""
+        from .realtime_engine import RealtimeSimEngine
+
+        engine = RealtimeSimEngine.__new__(RealtimeSimEngine)
+        engine._rules = rules_with_reentry
+        engine._score_cfg = rules_with_reentry.get("daily_score", {})
+        engine._futu = MagicMock()
+        engine._futu_enabled = True
+        engine._broker = MagicMock()
+        # HK00700 exited recently, HK02338 exited long ago, HK00005 never exited
+        now = int(time.time() * 1000)
+        engine._last_exit_ts = {
+            "HK00700": now - 60_000,  # 1 min ago → filtered
+            "HK02338": now - 180 * 60 * 1000,  # 3h ago → not filtered
+        }
+        engine._t3_exit_price = {}
+
+        def make_mock(code):
+            m = MagicMock()
+            m.avg_price = 100.0
+            m.quantity = 100
+            m.market_val = 10000.0
+            return m
+
+        engine._futu.get_positions.return_value = {
+            "HK00700": make_mock("HK00700"),
+            "HK02338": make_mock("HK02338"),
+            "HK00005": make_mock("HK00005"),
+        }
+        engine._futu.get_funds.return_value = MagicMock(cash=400_000)
+
+        engine._sync_shadow_pm()
+
+        call_args = engine._broker.sync_from_futu.call_args
+        synced_positions = call_args[0][0]
+        assert "HK00700" not in synced_positions, "HK00700 should be filtered (recent exit)"
+        assert "HK02338" in synced_positions, "HK02338 should pass (cooldown expired)"
+        assert "HK00005" in synced_positions, "HK00005 should pass (never exited)"
