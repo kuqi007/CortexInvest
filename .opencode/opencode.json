@@ -21,6 +21,11 @@
       "description": "Full-stack fintech development — FastAPI backends, Next.js frontends, SQLite, real-time data pipelines",
       "mode": "subagent",
       "prompt": "{file:prompts/agents/fintech-fullstack-dev.txt}"
+    },
+    "investment-advisor": {
+      "description": "Investment advice agent for portfolio management, buy/sell/hold recommendations, position sizing, stop-loss planning, and trade plan creation",
+      "mode": "subagent",
+      "prompt": "{file:prompts/agents/investment-advisor.txt}"
     }
   }
 }
