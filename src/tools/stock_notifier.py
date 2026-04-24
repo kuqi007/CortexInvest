@@ -615,6 +615,7 @@ class DeltaAlertEngine:
                     "_level": level,
                     "_change_pct": alert_pct,
                     "_price": price,
+                    "_name": name,
                     "_stealth": _notify_line(name, alert_pct, stealth_extra),
                 }
             )
@@ -1103,6 +1104,7 @@ class GapFadeEngine(PatternEngine):
                             "_kind": "gap_fade",
                             "_level": level,
                             "_price": price,
+                            "_name": name,
                             "_change_pct": q.get("change_pct", 0),
                             "_stealth": msg,
                         }
@@ -1133,6 +1135,7 @@ class GapFadeEngine(PatternEngine):
                             "_kind": "gap_recover",
                             "_level": level,
                             "_price": price,
+                            "_name": name,
                             "_change_pct": q.get("change_pct", 0),
                             "_stealth": msg,
                         }
@@ -1226,6 +1229,7 @@ def check_mainline_alerts() -> list[dict]:
                         "_kind": "MAINLINE",
                         "_level": 1 if star else 2,
                         "_change_pct": round(cum_gain, 1),
+                        "_name": f"{tag_name}指数",
                         "message": f"{tag_name} 主线行情确认",
                         "display": (
                             f"\U0001f525 {tag_name}指数 主线行情"
@@ -1250,6 +1254,7 @@ def check_mainline_alerts() -> list[dict]:
                         "_kind": "MAINLINE",
                         "_level": 2,  # approaching is always L2
                         "_change_pct": round(cum_gain, 1),
+                        "_name": f"{tag_name}指数",
                         "message": f"{tag_name} 接近主线",
                         "display": (
                             f"\u26a1 {tag_name}指数 接近主线 累涨{cum_gain:.1f}%"
@@ -1427,6 +1432,8 @@ def check_l2_signals() -> list[dict]:
                 "message": display,
                 "_kind": "l2_strategy",
                 "_change_pct": 0,
+                # message is "{stock_name} {cn_name}" — first word is the stock name
+                "_name": message.split()[0] if message and message.split() else code,
                 "_stealth": message,
                 "_notify": should_notify,
             }
@@ -1508,14 +1515,30 @@ def stealth_dispatch(alerts: list[dict], *, sound: str = ""):
         )
 
         top = stock_alerts[0]
-        stock_info = {
-            "name": top.get("name", ""),
-            "code": top.get("code", ""),
-            "price": top.get("price", ""),
-            "change_pct": top.get("_change_pct"),
-            "level": top.get("_level"),
-            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        }
+
+        # STALE / system alerts have empty symbol → skip stock_info card
+        top_symbol = top.get("symbol", "")
+        if top_symbol:
+            # Extract name: prefer _name, then _stealth prefix, then title prefix
+            alert_name = top.get("_name", "")
+            if not alert_name:
+                stealth = top.get("_stealth", "")
+                if stealth and not stealth.startswith("["):
+                    alert_name = stealth.split()[0] if stealth.split() else ""
+            if not alert_name:
+                title = top.get("title", "")
+                if title and not title.startswith("["):
+                    alert_name = title.split()[0] if title.split() else ""
+            stock_info = {
+                "name": alert_name,
+                "code": top_symbol,
+                "price": top.get("_price", ""),
+                "change_pct": top.get("_change_pct"),
+                "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        else:
+            stock_info = None
+
         notify(
             _notify_title(is_summary=False),
             "\n".join(lines),
@@ -2196,6 +2219,7 @@ class TradePlanEngine:
             "_kind": "trade_plan",
             "_level": 1,  # L1: 交易计划 = 需要立即行动
             "_change_pct": change,
+            "_name": name,
             "_stealth": f"{symbol} {label} {action_text}",
             "_plan_id": plan_id,
             "_condition_id": cond_id,
@@ -2300,6 +2324,7 @@ class WatchDriftTracker:
                         "_kind": "DRIFT",
                         "_level": level,
                         "_change_pct": round(drift_pct, 1),
+                        "_name": name,
                         "message": f"{name} 距关注{direction}{abs(drift_pct):.1f}%",
                         "display": f"{name}({symbol}) 距关注价{wp:.2f}{direction}{abs(drift_pct):.1f}%，现价{price:.2f}",
                         "_stealth": f"{name} 距关注{direction}{abs(drift_pct):.1f}%",
@@ -2353,6 +2378,7 @@ class WatchDriftTracker:
                         "_kind": "DRIFT",
                         "_level": level,
                         "_change_pct": round(drift_pct, 1),
+                        "_name": f"{tag}指数",
                         "message": f"{tag}指数 距创建{direction}{abs(drift_pct):.1f}%",
                         "display": f"{tag}指数 距创建{direction}{abs(drift_pct):.1f}%，当前{val:.1f}",
                         "_stealth": f"{tag}指数 距基线{direction}{abs(drift_pct):.1f}%",
@@ -2417,6 +2443,7 @@ class WatchDriftTracker:
                     "_kind": "DRIFT",
                     "_level": 2,
                     "_change_pct": round(drift_pct, 1),
+                    "_name": name,
                     "message": f"{name} 距基线{direction}{abs(drift_pct):.1f}% ({retrace_dir}自{abs(highest):.0f}%)",
                     "display": f"{name} 距基线{direction}{abs(drift_pct):.1f}%，{retrace_dir}自{abs(highest):.0f}%档，当前{price_or_val:.1f}",
                     "_stealth": f"{name} 距基线{direction}{abs(drift_pct):.1f}% ({retrace_dir}自{abs(highest):.0f}%)",
@@ -2428,6 +2455,7 @@ class WatchDriftTracker:
                     "_kind": "DRIFT",
                     "_level": 2,
                     "_change_pct": round(drift_pct, 1),
+                    "_name": name,
                     "message": f"{name} 距关注{direction}{abs(drift_pct):.1f}% ({retrace_dir}自{abs(highest):.0f}%)",
                     "display": f"{name}({key}) 距关注价{wp_or_baseline:.2f}{direction}{abs(drift_pct):.1f}%，{retrace_dir}自{abs(highest):.0f}%档，现价{price_or_val:.2f}",
                     "_stealth": f"{name} 距关注{direction}{abs(drift_pct):.1f}% ({retrace_dir}自{abs(highest):.0f}%)",
@@ -2620,6 +2648,7 @@ class PanicSellEngine(PatternEngine):
                     "_kind": "panic_sell",
                     "_level": level,
                     "_change_pct": pct,
+                    "_name": name,
                     "_stealth": f"{name} 放量恐慌 跌幅{pct:.1f}%",
                     "amo1": amo1,
                     "market_amo1": market_amo1,

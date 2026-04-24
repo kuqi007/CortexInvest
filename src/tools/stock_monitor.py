@@ -941,9 +941,7 @@ def notify(
     """
     # 飞书通知（先发，不阻塞 macOS 通知）
     try:
-        feishu_send(
-            title, message, change_pct=change_pct, level=level, stock_info=stock_info
-        )
+        feishu_send(title, message, change_pct=change_pct, stock_info=stock_info)
     except Exception as e:
         logger.warning(f"飞书通知发送失败（不影响主流程）: {e}")
 
@@ -1050,112 +1048,68 @@ def feishu_send(
     message: str,
     *,
     change_pct: float | None = None,
-    level: str | None = None,
-    is_portfolio: bool = False,
     stock_info: dict | None = None,
 ) -> bool:
-    """发送飞书点对点消息（Interactive card），返回是否成功
+    """发送飞书消息卡片，返回是否成功
 
-    Args:
-        title: 卡片标题
-        message: 兜底消息内容（stock_info 优先）
-        change_pct: 涨跌幅，正数=红，负数=绿
-        level: 告警级别，如 "L1 ★"
-        is_portfolio: True=组合持仓卡片
-        stock_info: 结构化股票信息 dict，含 name/code/price/change_pct/level/time
+    卡片设计原则：一眼看到重点（方向、股票、涨幅），不多余。
     """
     token = feishu_get_token()
     if not token:
         return False
 
-    # 橙色 header 用于告警卡片
-    header_color = "orange"
-
-    # 构建 elements
-    elements = []
-
-    # 结构化股票信息
+    # ── 构建极简卡片 ──
     if stock_info:
-        # 📌 提醒
-        elements.append(
-            {
-                "tag": "div",
-                "text": {"tag": "lark_md", "content": "**📌 提醒**"},
-            }
-        )
-        elements.append(
-            {
-                "tag": "div",
-                "text": {"tag": "lark_md", "content": "您关注的股票出现价格异动："},
-            }
-        )
-
-        # 股票名 + 代码
         name = stock_info.get("name", "")
         code = stock_info.get("code", "")
         price = stock_info.get("price", "")
         pct = stock_info.get("change_pct", change_pct or 0)
-        lvl = stock_info.get("level", level or "")
+
+        display_name = name or code or "Alert"
+        display_code = code or ""
+        code_part = f"({display_code})" if display_code else ""
 
         pct_str = f"+{pct:.2f}%" if pct > 0 else f"{pct:.2f}%"
-        price_str = f"HK${price}" if price else ""
+        price_part = f" {price}" if price and str(price).strip() else ""
 
-        line = f"**{name}** ({code})"
-        if price_str or pct:
-            detail = f"当前价格 **{price_str}**，今日涨幅 **{pct_str}**"
-            line += f"：{detail}"
-        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": line}})
+        # 极简: 股票名 + 代码 + 价格 + 涨幅 一行
+        body = f"**{display_name}**{code_part}{price_part}  **{pct_str}**"
 
-        # 时间
-        ts = stock_info.get("time") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        elements.append(
-            {
-                "tag": "div",
-                "text": {"tag": "lark_md", "content": f"时间：{ts}"},
-            }
-        )
+        # 多股汇总追加
+        if message and message.strip():
+            body += "\n\n" + message.strip()
     else:
-        # 兜底：直接显示 message
-        for line in message.split("\n"):
-            if line.strip():
-                elements.append(
-                    {"tag": "div", "text": {"tag": "lark_md", "content": line}}
-                )
+        body = message.strip() if message else title
 
-    elements.append({"tag": "hr"})
+    # header 颜色 (涨跌决定)
+    pct_val = (stock_info or {}).get("change_pct", change_pct) or 0
+    if pct_val <= -8:
+        header_color = "red"
+        header_icon = "🔴"
+    elif pct_val < -5:
+        header_color = "orange"
+        header_icon = "🔶"
+    elif pct_val > 8:
+        header_color = "green"
+        header_icon = "🟢"
+    elif pct_val > 5:
+        header_color = "green"
+        header_icon = "🟢"
+    else:
+        header_color = "blue"
+        header_icon = "📌"
 
-    # 查看详情按钮
-    elements.append(
-        {
-            "tag": "action",
-            "actions": [
-                {
-                    "tag": "button",
-                    "text": {"tag": "plain_text", "content": "查看详情 >>"},
-                    "type": "primary",
-                    "url": "http://localhost:3120/alerts",
-                }
-            ],
-        }
-    )
-
-    # 底部勿回复
-    elements.append(
-        {
-            "tag": "note",
-            "elements": [
-                {"tag": "plain_text", "content": "此消息由系统自动发送，请勿直接回复。"}
-            ],
-        }
-    )
-
-    card_content = {
-        "config": {"wide_screen_mode": True},
+    # 极简卡片: 窄屏 + header 显示涨跌% + 一行正文
+    header_title = f"{header_icon} {pct_str}" if stock_info else title
+    card = {
+        "config": {"wide_screen_mode": False},
         "header": {
-            "title": {"tag": "plain_text", "content": title},
+            "title": {"tag": "plain_text", "content": header_title},
             "template": header_color,
         },
-        "elements": elements,
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md", "content": body}},
+        ],
     }
 
     url = "https://open.feishu.cn/open-apis/im/v1/messages"
@@ -1167,7 +1121,7 @@ def feishu_send(
     payload = {
         "receive_id": FEISHU_USER_OPEN_ID,
         "msg_type": "interactive",
-        "content": json.dumps(card_content),
+        "content": json.dumps(card),
     }
 
     try:
