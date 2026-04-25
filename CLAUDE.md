@@ -34,6 +34,13 @@ L1(star,4%,3%,弹窗+声) → L2(holding,6%,5%,弹窗) → L3(watching,threshold
 
 `src/tools/market_data_poller.py` `src/tools/stock_notifier.py` `src/tools/l2_strategy_daemon.py` `src/sim_trading/broker.py` `src/sim_trading/position_manager.py` `start_ai_investor_full.sh`
 
+## 参考数据目录 `stocks/`
+
+`stocks/` 目录包含 AI 投资的参考数据（股票分析、研报、数据文件），**必须提交到 Git**，作为投资决策的重要参考。
+
+- `stocks/{CODE}_{NAME}/` — 每只股票的独立目录，保存 mx-data 缓存、研报、分析结论
+- 分析或研究股票时，将结果存入对应 `stocks/` 子目录
+
 ## 子文档索引
 
 | 文档 | 内容 |

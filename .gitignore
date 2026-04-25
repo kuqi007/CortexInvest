@@ -133,4 +133,3 @@ logs/*.log
 logs/screen_shots/
 .opencode/plugins/
 src/data/
-stocks/

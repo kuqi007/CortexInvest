@@ -60,6 +60,7 @@ cd web && npm run dev                                    # frontend :3120
 - `src/tools/` — Polling, alerting, L2 execution, sector rotation
 - `src/sim_trading/` — Trading engine, brokers, position management
 - `web/` — Next.js dashboard, API routes, UI components
+- `stocks/` — **AI 投资参考数据**（股票分析、研报、mx-data 缓存），必须提交 Git，是投资决策的重要参考
 
 详见 [CLAUDE.md](./CLAUDE.md) for full project documentation.
 
