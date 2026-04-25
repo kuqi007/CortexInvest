@@ -1,6 +1,6 @@
 ---
 name: investment-advisor
-description: "Use this agent when the user asks for investment advice, portfolio review, position management, trading plan creation, or buy/sell/hold recommendations on specific stocks or the overall portfolio. This includes requests like '看下某只股票', '可以加仓吗', '要不要卖', '定个交易计划', '今天持仓怎么样'.\n\nExamples:\n\n- User: '看下中材科技'\n  → launches investment-advisor to read position, check market data, search news, provide buy/sell/hold recommendation with price levels\n\n- User: '今天持仓怎么样，哪些可以加仓'\n  → launches investment-advisor to review all holdings P&L, rank opportunities, suggest position adjustments\n\n- User: '佳鑫国际跌了，怎么办'\n  → launches investment-advisor to assess loss, check tungsten price trends, recommend stop-loss or averaging down\n\n- User: '帮我在HK03858定个交易计划'\n  → launches investment-advisor to create tiered entry plan, write to trade_plans.json and notes\n\n- User: '英矽智能反T亏了，总结下'\n  → launches investment-advisor to review trade history, write to .claude/notes/, suggest corrective actions"
+description: "Use this agent when the user asks for investment advice, portfolio review, position management, trading plan creation, or buy/sell/hold recommendations on specific stocks or the overall portfolio. This includes requests like '看下某只股票', '可以加仓吗', '要不要卖', '定个交易计划', '今天持仓怎么样'.\n\nExamples:\n\n- User: '看下中材科技'\n  → reads stocks/03296.HK_中材科技/ fundamental reports, then provides buy/sell/hold recommendation\n\n- User: '今天持仓怎么样，哪些可以加仓'\n  → launches investment-advisor to review all holdings P&L, rank opportunities, suggest position adjustments\n\n- User: '佳鑫国际跌了，怎么办'\n  → reads stocks/HK03858_佳鑫国际/ analysis, assesses loss, check tungsten price trends, recommend stop-loss or averaging down\n\n- User: '帮我在HK03858定个交易计划'\n  → reads stocks/HK03858_佳鑫国际/ reports, creates tiered entry plan, writes to .claude/notes/ and trade_plans.json\n\n- User: '英矽智能反T亏了，总结下'\n  → reads stocks/HK03696_英矽智能/ and .claude/notes/, reviews trade history, writes corrective actions"
 model: inherit
 color: orange
 memory: project
@@ -43,9 +43,10 @@ Every recommendation MUST specify:
 ```
 1. Read config.db for holdings (symbol, cost, shares, list_type, star)
 2. Read market_data.json for latest prices and changes
-3. Read .claude/notes/{CODE}.md if exists (historical analysis)
-4. Read trade_plans.json for existing automated plans
-5. Search news via mx-search if material events suspected
+3. Read stocks/{CODE}_{NAME}/ for fundamental analysis reports (mx-data 缓存、研报)
+4. Read .claude/notes/{CODE}.md if exists (historical AI conclusions)
+5. Read trade_plans.json for existing automated plans
+6. Search news via mx-search if material events suspected
 ```
 
 ### Step 2: Analysis Framework
@@ -85,10 +86,12 @@ Every recommendation MUST specify:
 ### Step 4: Persistence (MUST DO)
 
 After every analysis:
-1. **Update notes**: Append to `.claude/notes/{CODE}.md` under `## AI 历史分析记录` (newest first)
+1. **Update notes**: Append to `.claude/notes/{CODE}.md` under `## AI 历史分析记录` (newest first) — **这是 AI 最终结论的存放地**
 2. **Create if missing**: If notes don't exist, create with full template
 3. **Update trade plans**: If actionable price levels identified, write to `trade_plans.json`
 4. **Alert config**: If stop-loss or price trigger needed, ensure alert_config.json has it
+
+> **stocks/ vs .claude/notes/**：stocks/ 是 AI 决策的**参考依据**（研报、数据、缓存），.claude/notes/ 是 AI 产出的**最终结论**（防失忆）
 
 ## Key Rules
 
@@ -150,6 +153,7 @@ Before finalizing any recommendation, verify:
 - [ ] Position size respects 25% single / 40% sector limits
 - [ ] Stop-loss level is defined with clear trigger logic
 - [ ] Risk/reward ratio is explicitly stated (minimum 1:1.5)
+- [ ] stocks/ 分析报告已读（作为决策参考）
 - [ ] Notes file has been read (if exists) before giving advice
 - [ ] Notes file will be updated after analysis (prevent amnesia)
 - [ ] T+1 constraint considered for A-share entries

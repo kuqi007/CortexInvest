@@ -33,6 +33,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+import pandas as pd
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -141,62 +143,78 @@ def fetch_earnings_calendar(start_date: str, end_date: str, symbols: list = None
     """
     try:
         import akshare as ak
+        from datetime import datetime
 
-        if not symbols:
-            # 无symbols时用通用接口（全市场，较慢）
-            df = ak.stock_zh_a_disclosure_report_cninfo(symbol="")
-            if df is None or df.empty:
-                return []
-            # 过滤日期范围
-            df = df[df["公告时间"] >= start_date]
-            df = df[df["公告时间"] <= end_date]
-            # 只保留财报相关关键词
-            keywords = ["年报", "半年报", "季报", "季度", "审计", "财务报告", "经营业绩", "净利润", "营业收入"]
-            mask = df["公告标题"].apply(
-                lambda x: any(k in str(x) for k in keywords)
-            )
-            df = df[mask]
-            records = []
-            for _, row in df.iterrows():
-                records.append({
-                    "代码": str(row.get("代码", "")),
-                    "简称": str(row.get("简称", "")),
-                    "公告时间": str(row.get("公告时间", ""))[:10],
-                    "公告标题": str(row.get("公告标题", "")),
-                })
-            logger.info(f"获取到 {len(records)} 条财报披露记录 (全市场, {start_date} ~ {end_date})")
-            return records
+        today_str = datetime.now().strftime('%Y-%m-%d')
 
-        # ── 有限股票列表：逐个查询（限流）──
-        import time
-        records = []
-        for symbol in symbols[:50]:  # 最多50只，避免太慢
+        # ── 方法1: 使用 stock_report_disclosure 获取预约披露（推荐）──
+        # 获取当前可用期间的披露预约数据
+        available_periods = ['2025年报', '2025半年报']
+        all_records = []
+
+        for period in available_periods:
             try:
-                df_sym = ak.stock_zh_a_disclosure_report_cninfo(symbol=symbol)
-                if df_sym is None or df_sym.empty:
+                df = ak.stock_report_disclosure(market='沪深京', period=period)
+                if df is None or df.empty:
                     continue
-                # 过滤日期范围
-                df_sym = df_sym[df_sym["公告时间"] >= start_date]
-                df_sym = df_sym[df_sym["公告时间"] <= end_date]
-                # 过滤财报关键词
-                keywords = ["年报", "半年报", "季报", "季度", "审计", "财务报告", "经营业绩", "净利润", "营业收入"]
-                df_sym = df_sym[df_sym["公告标题"].apply(
-                    lambda x: any(k in str(x) for k in keywords)
-                )]
-                for _, row in df_sym.iterrows():
-                    records.append({
-                        "代码": str(row.get("代码", symbol)),
-                        "简称": str(row.get("简称", "")),
-                        "公告时间": str(row.get("公告时间", ""))[:10],
-                        "公告标题": str(row.get("公告标题", "")),
-                    })
-                time.sleep(0.1)  # 限流
+
+                # 标准化列名
+                df = df.rename(columns={
+                    '股票代码': 'code',
+                    '股票简称': 'name',
+                    '首次预约': 'scheduled_date',
+                    '实际披露': 'actual_date',
+                })
+
+                # 优先使用实际披露日期，如果没有则用预约日期
+                df['report_date'] = df['actual_date'].fillna(df['scheduled_date'])
+                df['period'] = period
+
+                # 只保留未来还未实际披露的
+                for _, row in df.iterrows():
+                    report_str = str(row.get('report_date', ''))[:10]
+                    if report_str and report_str >= today_str and report_str <= end_date:
+                        all_records.append({
+                            'code': str(row.get('code', '')),
+                            'name': str(row.get('name', '')),
+                            'report_date': report_str,
+                            'period': period,
+                            'is_actual': str(row.get('actual_date', ''))[:10] != '' or pd.isna(row.get('actual_date')),
+                        })
             except Exception as e:
-                logger.debug(f"查询 {symbol} 财报日历失败: {e}")
+                logger.debug(f"获取 {period} 财报披露数据失败: {e}")
                 continue
 
-        logger.info(f"获取到 {len(records)} 条财报披露记录 (自选股, {start_date} ~ {end_date})")
-        return records
+        # ── 方法2: 补充 stock_zh_a_disclosure_report_cninfo（历史实际披露）──
+        # 用于填充已实际发布的历史财报（供复盘分析用）
+        try:
+            df_hist = ak.stock_zh_a_disclosure_report_cninfo(symbol="")
+            if df_hist is not None and not df_hist.empty:
+                keywords = ["年报", "半年报", "季报", "季度", "审计", "财务报告", "经营业绩"]
+                df_hist = df_hist[df_hist["公告标题"].apply(
+                    lambda x: any(k in str(x) for k in keywords)
+                )]
+                # 过滤日期范围
+                df_hist = df_hist[df_hist["公告时间"] >= today_str]
+                df_hist = df_hist[df_hist["公告时间"] <= end_date]
+
+                for _, row in df_hist.iterrows():
+                    all_records.append({
+                        'code': str(row.get("代码", "")),
+                        'name': str(row.get("简称", "")),
+                        'report_date': str(row.get("公告时间", ""))[:10],
+                        'period': str(row.get("公告标题", ""))[:50],
+                        'is_actual': True,
+                    })
+        except Exception as e:
+            logger.debug(f"获取历史财报披露数据失败: {e}")
+
+        # 按股票代码过滤（如果指定了symbols）
+        if symbols:
+            all_records = [r for r in all_records if r.get('code') in symbols]
+
+        logger.info(f"获取到 {len(all_records)} 条财报披露记录 ({start_date} ~ {end_date})")
+        return all_records
 
     except Exception as e:
         logger.warning(f"获取财报日历失败: {e}")
@@ -681,12 +699,12 @@ class EarningsCalendar:
             symbols=watchlist if watchlist else None
         )
 
-        # 标准化字段名（akshare 返回中文 key → 统一转英文 + 中文双轨）
+        # 标准化字段名（新API返回 code/name/report_date/period）
         for e in earnings:
-            e["symbol"] = e.get("代码", "")
-            e["name"] = e.get("简称", "")
-            e["report_date"] = (e.get("公告时间") or "")[:10]
-            e["period"] = e.get("公告标题", "")[:50]
+            e["symbol"] = e.get("code") or e.get("代码", "")
+            e["name"] = e.get("name") or e.get("简称", "")
+            e["report_date"] = e.get("report_date") or (e.get("公告时间") or "")[:10]
+            e["period"] = e.get("period") or e.get("公告标题", "")[:50]
 
         _update_cached_earnings(earnings)
         logger.info(f"财报日历刷新: {len(earnings)} 条记录")
