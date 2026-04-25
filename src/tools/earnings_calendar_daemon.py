@@ -14,6 +14,7 @@ Daemon 行为:
 """
 
 import fcntl
+import os
 import sys
 import time
 from datetime import datetime
@@ -29,6 +30,7 @@ from src.utils.logging_config import setup_logger
 logger = setup_logger("earnings_calendar_daemon")
 
 LOCK_FILE = PROJECT_ROOT / "data" / ".earnings_calendar_daemon.lock"
+TRIGGER_FILE = PROJECT_ROOT / "data" / ".earnings_check_trigger"
 CHECK_INTERVAL_SEC = 1800   # 30 分钟（交易时段）
 LONG_CHECK_INTERVAL_SEC = 7200  # 2 小时（非交易时段）
 DAEMON_MODE = True
@@ -55,14 +57,40 @@ def main():
     logger.info("财报日历 Daemon 启动")
     ec = EarningsCalendar()
     consecutive_errors = 0
+    _last_trigger_mtime: float = 0.0
+
+    # 初始化：记录当前 trigger file mtime
+    if TRIGGER_FILE.exists():
+        _last_trigger_mtime = TRIGGER_FILE.stat().st_mtime
 
     while True:
+        # ── 检查触发文件 ──
+        triggered = False
+        if TRIGGER_FILE.exists():
+            current_mtime = TRIGGER_FILE.stat().st_mtime
+            if current_mtime != _last_trigger_mtime:
+                _last_trigger_mtime = current_mtime
+                triggered = True
+                logger.info("检测到触发文件变更，立即执行检查")
+
+        # ── 执行检查（触发或定时） ──
+        if triggered:
+            try:
+                ec.check_and_alert()
+                consecutive_errors = 0
+            except Exception as e:
+                consecutive_errors += 1
+                logger.error(f"触发检查失败 ({consecutive_errors}次): {e}")
+            # 触发后继续，不sleep，直接进入下次循环检查
+            continue
+
+        # ── 定时检查 ──
         try:
             ec.check_and_alert()
             consecutive_errors = 0
         except Exception as e:
             consecutive_errors += 1
-            logger.error(f"检查失败 ({consecutive_errors}次): {e}")
+            logger.error(f"定时检查失败 ({consecutive_errors}次): {e}")
 
         # 根据交易时段调整间隔
         if is_trading_hours():
