@@ -1,0 +1,480 @@
+#!/usr/bin/env python3
+"""Tests for tick_monitor.py"""
+
+import json
+import socket
+import sys
+import time
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+# Import after path setup
+import src.tools.tick_monitor as tm
+
+
+# ══════════════════════════════════════════
+# Fixtures
+# ══════════════════════════════════════════
+
+
+@pytest.fixture(autouse=True)
+def reset_globals():
+    """Reset module-level cache before each test."""
+    tm._plans_cache = None
+    tm._plans_mtime = 0
+    yield
+    tm._plans_cache = None
+    tm._plans_mtime = 0
+
+
+@pytest.fixture
+def tmp_trade_plans(tmp_path):
+    """Return a temporary TRADE_PLANS_PATH pointing to a tmp file."""
+    orig = tm.TRADE_PLANS_PATH
+    tm.TRADE_PLANS_PATH = tmp_path / "trade_plans.json"
+    yield tm.TRADE_PLANS_PATH
+    tm.TRADE_PLANS_PATH = orig
+
+
+@pytest.fixture
+def tmp_state_path(tmp_path):
+    """Return a temporary STATE_PATH."""
+    orig = tm.STATE_PATH
+    tm.STATE_PATH = tmp_path / "tick_monitor_state.json"
+    yield tm.STATE_PATH
+    tm.STATE_PATH = orig
+
+
+# ══════════════════════════════════════════
+# check_trigger
+# ══════════════════════════════════════════
+
+
+class TestCheckTrigger:
+    """Pure-function tests for order trigger logic."""
+
+    @pytest.mark.parametrize(
+        "op,price,tick,expected",
+        [
+            # buy <=
+            ("<=", 85.0, 84.0, True),
+            ("<=", 85.0, 85.0, True),
+            ("<=", 85.0, 86.0, False),
+            # buy >=
+            (">=", 95.0, 96.0, True),
+            (">=", 95.0, 95.0, True),
+            (">=", 95.0, 94.0, False),
+            # sell <=
+            ("<=", 90.0, 89.0, True),
+            # sell >=
+            (">=", 100.0, 101.0, True),
+            # strict < / >
+            ("<", 85.0, 84.0, True),
+            ("<", 85.0, 85.0, False),
+            (">", 95.0, 96.0, True),
+            (">", 95.0, 95.0, False),
+            # ==
+            ("==", 85.0, 85.0, True),
+            ("==", 85.0, 85.0005, True),
+            ("==", 85.0, 85.002, False),
+            ("==", 85.0, 86.0, False),
+            # unknown op
+            ("?", 85.0, 84.0, False),
+        ],
+    )
+    def test_trigger_combinations(self, op, price, tick, expected):
+        order = {"op": op, "price": price}
+        assert tm.check_trigger(order, tick) is expected
+
+    def test_missing_price_returns_false(self):
+        assert tm.check_trigger({"op": "<="}, 85.0) is False
+
+    def test_none_price_returns_false(self):
+        assert tm.check_trigger({"op": "<=", "price": None}, 85.0) is False
+
+
+# ══════════════════════════════════════════
+# load_tick_monitor_plans
+# ══════════════════════════════════════════
+
+
+class TestLoadTickMonitorPlans:
+    def test_empty_when_file_missing(self, tmp_path):
+        tm.TRADE_PLANS_PATH = tmp_path / "nonexistent.json"
+        tm._plans_cache = None
+        assert tm.load_tick_monitor_plans() == {}
+
+    def test_filters_by_scope_and_status(self, tmp_trade_plans):
+        data = {
+            "plans": {
+                "plan_a": {
+                    "name": "A",
+                    "symbol": "HK00001",
+                    "status": "active",
+                    "scope": "tick_monitor",
+                },
+                "plan_b": {
+                    "name": "B",
+                    "symbol": "HK00002",
+                    "status": "inactive",
+                    "scope": "tick_monitor",
+                },
+                "plan_c": {
+                    "name": "C",
+                    "symbol": "HK00003",
+                    "status": "active",
+                    "scope": "l2_strategy",
+                },
+            }
+        }
+        tmp_trade_plans.write_text(json.dumps(data), encoding="utf-8")
+        plans = tm.load_tick_monitor_plans()
+        assert set(plans.keys()) == {"plan_a"}
+        assert plans["plan_a"]["name"] == "A"
+
+    def test_uses_mtime_cache(self, tmp_trade_plans):
+        data = {
+            "plans": {
+                "p1": {
+                    "name": "Cached",
+                    "symbol": "HK00001",
+                    "status": "active",
+                    "scope": "tick_monitor",
+                }
+            }
+        }
+        tmp_trade_plans.write_text(json.dumps(data), encoding="utf-8")
+        first = tm.load_tick_monitor_plans()
+        # overwrite file with different content
+        data["plans"]["p1"]["name"] = "Updated"
+        tmp_trade_plans.write_text(json.dumps(data), encoding="utf-8")
+        # force same mtime (simulate cache hit)
+        original_mtime = tmp_trade_plans.stat().st_mtime
+        tm._plans_mtime = original_mtime
+        second = tm.load_tick_monitor_plans()
+        # because mtime is unchanged we get cached version
+        assert second["p1"]["name"] == "Cached"
+
+    def test_returns_cached_on_parse_error(self, tmp_trade_plans):
+        data = {
+            "plans": {
+                "p1": {
+                    "name": "Fallback",
+                    "symbol": "HK00001",
+                    "status": "active",
+                    "scope": "tick_monitor",
+                }
+            }
+        }
+        tmp_trade_plans.write_text(json.dumps(data), encoding="utf-8")
+        tm.load_tick_monitor_plans()
+        # corrupt file
+        tmp_trade_plans.write_text("not json", encoding="utf-8")
+        result = tm.load_tick_monitor_plans()
+        assert result["p1"]["name"] == "Fallback"
+
+
+# ══════════════════════════════════════════
+# State persistence
+# ══════════════════════════════════════════
+
+
+class TestStatePersistence:
+    def test_load_missing_returns_empty(self, tmp_path):
+        tm.STATE_PATH = tmp_path / "missing.json"
+        assert tm.load_state() == {}
+
+    def test_load_and_save_roundtrip(self, tmp_state_path):
+        state = {"order_1": time.time(), "order_2": time.time() + 10}
+        tm.save_state(state)
+        loaded = tm.load_state()
+        assert loaded == pytest.approx(state, abs=0.001)
+
+    def test_load_corrupted_returns_empty(self, tmp_state_path):
+        tmp_state_path.write_text("not json", encoding="utf-8")
+        assert tm.load_state() == {}
+
+    def test_save_atomic_write(self, tmp_state_path):
+        tm.save_state({"o1": 123.0})
+        assert tmp_state_path.exists()
+        assert tmp_state_path.with_suffix(".tmp").exists() is False
+
+
+# ══════════════════════════════════════════
+# send_tick_notification
+# ══════════════════════════════════════════
+
+
+class TestSendTickNotification:
+    @patch("src.tools.tick_monitor.feishu_send")
+    def test_buy_notification(self, mock_feishu):
+        mock_feishu.return_value = True
+        order = {
+            "side": "buy",
+            "op": "<=",
+            "price": 85,
+            "label": "回踩85买入",
+        }
+        tick = {"price": 84.5, "direction": "BUY", "volume": 100, "time": "10:30:00"}
+        result = tm.send_tick_notification("华勤技术", "HK03296", order, tick)
+        assert result is True
+        mock_feishu.assert_called_once()
+        call = mock_feishu.call_args
+        assert "短线盯盘触发" in call[0][0]       # title positional arg
+        assert "买入信号" in call[0][1]            # message positional arg
+        stock_info = call[1]["stock_info"]
+        assert stock_info["code"] == "HK03296"
+        assert stock_info["price"] == "84.5"
+
+    @patch("src.tools.tick_monitor.feishu_send")
+    def test_sell_notification(self, mock_feishu):
+        mock_feishu.return_value = True
+        order = {
+            "side": "sell",
+            "op": ">=",
+            "price": 95,
+            "label": "反弹95卖出",
+        }
+        tick = {"price": 95.5, "direction": "SELL", "volume": 200, "time": "14:00:00"}
+        result = tm.send_tick_notification("华勤技术", "HK03296", order, tick)
+        assert result is True
+        call = mock_feishu.call_args
+        assert "卖出信号" in call[0][1]
+
+    @patch("src.tools.tick_monitor.feishu_send")
+    def test_feishu_failure(self, mock_feishu):
+        mock_feishu.return_value = False
+        order = {"side": "buy", "op": "<=", "price": 85}
+        tick = {"price": 84.0}
+        result = tm.send_tick_notification("Test", "HK00001", order, tick)
+        assert result is False
+
+
+# ══════════════════════════════════════════
+# FutuConnection
+# ══════════════════════════════════════════
+
+
+class TestFutuConnection:
+    def test_init_defaults(self):
+        conn = tm.FutuConnection()
+        assert conn._host == "127.0.0.1"
+        assert conn._port == 11111
+        assert conn._ctx is None
+
+    @patch("socket.socket")
+    def test_is_port_open_true(self, mock_socket_cls):
+        mock_sock = MagicMock()
+        mock_sock.connect_ex.return_value = 0
+        mock_socket_cls.return_value = mock_sock
+        conn = tm.FutuConnection()
+        assert conn._is_port_open() is True
+
+    @patch("socket.socket")
+    def test_is_port_open_false(self, mock_socket_cls):
+        mock_sock = MagicMock()
+        mock_sock.connect_ex.return_value = 1
+        mock_socket_cls.return_value = mock_sock
+        conn = tm.FutuConnection()
+        assert conn._is_port_open() is False
+
+    def test_connect_returns_true_when_already_connected(self):
+        conn = tm.FutuConnection()
+        conn._ctx = MagicMock()
+        assert conn.connect() is True
+
+    @patch("src.tools.tick_monitor.FutuConnection._is_port_open")
+    def test_connect_skips_when_port_closed(self, mock_port):
+        mock_port.return_value = False
+        conn = tm.FutuConnection()
+        assert conn.connect() is False
+
+    def test_close_sets_ctx_none(self):
+        conn = tm.FutuConnection()
+        conn._ctx = MagicMock()
+        conn.close()
+        assert conn._ctx is None
+
+
+# ══════════════════════════════════════════
+# run_tick_monitor main loop
+# ══════════════════════════════════════════
+
+
+class TestRunTickMonitor:
+    @patch("src.tools.tick_monitor.time.sleep")
+    @patch("src.tools.tick_monitor.is_any_market_open")
+    @patch("src.tools.tick_monitor.FutuConnection")
+    @patch("src.tools.tick_monitor.feishu_send")
+    def test_triggers_and_cools_down(
+        self, mock_feishu, mock_conn_cls, mock_open, mock_sleep
+    ):
+        """
+        Simulate two ticks: first triggers, second is within cooldown.
+        Then a third tick after cooldown passes triggers again.
+        """
+        mock_feishu.return_value = True
+        mock_open.return_value = True
+
+        mock_conn = MagicMock()
+        # tick 1: triggers at price 84
+        # tick 2: still 84 but within cooldown
+        # tick 3: after cooldown, triggers again
+        mock_conn.get_latest_tick.side_effect = [
+            {"price": 84.0, "direction": "BUY", "volume": 100, "time": "10:00:00"},
+            {"price": 84.0, "direction": "BUY", "volume": 100, "time": "10:01:00"},
+            {"price": 84.0, "direction": "BUY", "volume": 100, "time": "10:06:00"},
+            # sentinel: stop the loop after 3 iterations
+            {"price": 84.0, "direction": "BUY", "volume": 100, "time": "10:07:00"},
+        ]
+        mock_conn_cls.return_value = mock_conn
+
+        plans = {
+            "p1": {
+                "name": "测试计划",
+                "symbol": "HK00001",
+                "status": "active",
+                "scope": "tick_monitor",
+                "orders": [
+                    {
+                        "id": "o1",
+                        "side": "buy",
+                        "op": "<=",
+                        "price": 85,
+                        "label": "测试",
+                    }
+                ],
+            }
+        }
+
+        # Override time to simulate cooldown window.
+        # Note: get_latest_tick is mocked via side_effect list, so connect()
+        # body is NOT executed -> time.time() is only called for `now = time.time()`.
+        base_time = 1000.0
+        time_values = [
+            base_time,      # loop 1: now
+            base_time,      # loop 2: now
+            base_time + 10, # loop 3: now (still cooldown)
+            base_time + 400 # loop 4: now (past cooldown)
+        ]
+
+        loop_count = [0]
+
+        def counting_sleep(seconds):
+            loop_count[0] += 1
+            if loop_count[0] >= 4:
+                raise StopIteration("stop loop")
+
+        mock_sleep.side_effect = counting_sleep
+
+        with patch("src.tools.tick_monitor.time.time", side_effect=time_values):
+            with patch.object(tm, "load_tick_monitor_plans", return_value=plans):
+                with patch.object(tm, "load_state", return_value={}):
+                    with pytest.raises(StopIteration):
+                        tm.run_tick_monitor(poll_interval=5)
+
+        # feishu_send should be called twice (tick 1 and tick 4)
+        assert mock_feishu.call_count == 2
+
+    @patch("src.tools.tick_monitor.time.sleep")
+    @patch("src.tools.tick_monitor.is_any_market_open")
+    def test_market_closed_sleeps_60s(self, mock_open, mock_sleep):
+        mock_open.return_value = False
+        loop_count = [0]
+
+        def counting_sleep(seconds):
+            assert seconds == 60
+            loop_count[0] += 1
+            if loop_count[0] >= 2:
+                raise StopIteration("stop loop")
+
+        mock_sleep.side_effect = counting_sleep
+        with pytest.raises(StopIteration):
+            tm.run_tick_monitor()
+
+    @patch("src.tools.tick_monitor.time.sleep")
+    @patch("src.tools.tick_monitor.is_any_market_open")
+    @patch("src.tools.tick_monitor.FutuConnection")
+    def test_no_plans_sleeps_poll_interval(self, mock_conn_cls, mock_open, mock_sleep):
+        mock_open.return_value = True
+        loop_count = [0]
+
+        def counting_sleep(seconds):
+            loop_count[0] += 1
+            if loop_count[0] >= 2:
+                raise StopIteration("stop loop")
+
+        mock_sleep.side_effect = counting_sleep
+        with patch.object(tm, "load_tick_monitor_plans", return_value={}):
+            with pytest.raises(StopIteration):
+                tm.run_tick_monitor(poll_interval=5)
+
+    @patch("src.tools.tick_monitor.time.sleep")
+    @patch("src.tools.tick_monitor.is_any_market_open")
+    @patch("src.tools.tick_monitor.FutuConnection")
+    def test_all_ticks_fail_backoff(self, mock_conn_cls, mock_open, mock_sleep):
+        """When all get_latest_tick calls fail repeatedly, sleep should increase."""
+        mock_open.return_value = True
+        mock_conn = MagicMock()
+        mock_conn.get_latest_tick.return_value = None
+        mock_conn_cls.return_value = mock_conn
+
+        plans = {
+            "p1": {
+                "name": "测试",
+                "symbol": "HK00001",
+                "status": "active",
+                "scope": "tick_monitor",
+                "orders": [
+                    {"id": "o1", "side": "buy", "op": "<=", "price": 85}
+                ],
+            }
+        }
+
+        sleeps = []
+
+        def record_sleep(seconds):
+            sleeps.append(seconds)
+            if len(sleeps) >= 5:
+                raise StopIteration("stop loop")
+
+        mock_sleep.side_effect = record_sleep
+        with patch.object(tm, "load_tick_monitor_plans", return_value=plans):
+            with pytest.raises(StopIteration):
+                tm.run_tick_monitor(poll_interval=5)
+
+        # After repeated failures, backoff kicks in
+        assert any(s > 5 for s in sleeps)
+
+
+# ══════════════════════════════════════════
+# CLI
+# ══════════════════════════════════════════
+
+
+class TestCLI:
+    def test_daemon_lock_prevents_duplicate(self):
+        """Simulate another process already holding the lock."""
+        mock_fcntl = MagicMock()
+        mock_fcntl.flock.side_effect = BlockingIOError()
+        mock_fcntl.LOCK_EX = 2
+        mock_fcntl.LOCK_NB = 4
+        with patch.dict("sys.modules", {"fcntl": mock_fcntl}):
+            with patch.object(sys, "exit") as mock_exit:
+                with patch("builtins.print"):
+                    with patch("os.open", return_value=3):
+                        with patch("os.close"):
+                            with patch("os.getuid", return_value=1000):
+                                with patch(
+                                    "argparse.ArgumentParser.parse_args",
+                                    return_value=MagicMock(interval=5, dry_run=False),
+                                ):
+                                    mock_exit.side_effect = SystemExit(1)
+                                    with pytest.raises(SystemExit) as exc:
+                                        tm.main()
+                                    assert exc.value.code == 1
