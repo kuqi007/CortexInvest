@@ -1,0 +1,193 @@
+{
+  "success": true,
+  "status": 0,
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "requestId": null,
+    "message": "OK",
+    "status": 0,
+    "code": 0,
+    "data": {
+      "protocolType": "SEARCH_DATA",
+      "id": "c2d5995f-7219-42fc-ab81-899434e1edfe",
+      "refSeq": null,
+      "keyEntityList": null,
+      "searchDataResultDTO": {
+        "questionId": "6536060e-d453-4f04-9637-141f8cc04c4c",
+        "dataTableDTOList": [
+          {
+            "code": "600673.SH",
+            "entityName": "东阳光(600673.SH)",
+            "table": {
+              "100000000042343": [
+                "143.3亿元",
+                "69.37亿元",
+                "117.3亿元"
+              ],
+              "headName": [
+                "2025年报",
+                "2025中报",
+                "2024年报"
+              ]
+            },
+            "rawTable": {
+              "100000000042343": [
+                "14333031652.11",
+                "6936564504.42",
+                "11729742291.02"
+              ],
+              "headName": [
+                "2025年报",
+                "2025中报",
+                "2024年报"
+              ]
+            },
+            "truncateRawTable": {},
+            "nameMap": {
+              "100000000042343": "主营业务收入(附注)",
+              "headNameSub": "数据来源"
+            },
+            "headNameMap": {},
+            "field": {
+              "returnCode": "100000000042343",
+              "returnName": "主营业务收入(附注)",
+              "classCode": "007101",
+              "checkedRelatedIndicators": true,
+              "startDate": "2025-04-12 00:00:00",
+              "endDate": "2026-04-12 00:00:00",
+              "fuzzy": true,
+              "dateGranularity": "QUARTER",
+              "defineType": 0,
+              "isLoopN": false,
+              "quantType": "1",
+              "isGroup": false,
+              "returnSourceCode": "MAININCOME",
+              "returnSourceName": "主营业务收入(附注)",
+              "graph": "1",
+              "unit": "1",
+              "tableType": "1",
+              "unitName": "元",
+              "unitDesc": "101:元:元"
+            },
+            "entityCodes": [
+              "600673.SH"
+            ],
+            "macroAttributeExcelMap": {},
+            "fieldSet": [
+              {
+                "returnCode": "100000000042343",
+                "returnName": "主营业务收入(附注)",
+                "classCode": "007101",
+                "checkedRelatedIndicators": true,
+                "startDate": "2025-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": true,
+                "dateGranularity": "QUARTER",
+                "defineType": 0,
+                "isLoopN": false,
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "MAININCOME",
+                "returnSourceName": "主营业务收入(附注)",
+                "graph": "1",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "元",
+                "unitDesc": "101:元:元"
+              }
+            ],
+            "dataTableType": "NORM_TABLE",
+            "rowInfo": {},
+            "colInfo": {},
+            "indicatorOrder": [
+              "100000000042343"
+            ],
+            "tipFlags": [],
+            "dataType": "数据浏览器",
+            "title": "东阳光(600673.SH)的主营业务收入(附注)",
+            "hasThumbnail": true,
+            "indicatorLimited": false,
+            "dataPositionEnum": "MetricLeftTimeTop",
+            "orderCol": {},
+            "jumpUrlList": [
+              {
+                "choiceUrl": "EM://stockdatacenter?type=browser&modType=STOCK&code=600673.SH&indId=100000000042343|100:2024-12-31,100000000042343|100:2025-06-30,100000000042343|100:2025-12-31",
+                "typeName": "股票数据浏览器"
+              }
+            ],
+            "dataTypeEnum": "DATA_BROWSER",
+            "dateRuleSet": [],
+            "freqConvert": false,
+            "deleteInfo": [],
+            "macroCodeMap": {},
+            "entityTagDTO": {
+              "entityId": "1000009463",
+              "entityType": "SEC",
+              "entityTypeCode": "058001001",
+              "entityTypeName": "A股",
+              "classCode": "002001",
+              "className": "沪深京股票",
+              "fullName": "东阳光",
+              "secuCode": "600673",
+              "market": "1",
+              "marketChar": ".SH",
+              "correct": false,
+              "hasKLine": false,
+              "valuation": false
+            },
+            "entityTagDTOList": [
+              {
+                "entityId": "1000009463",
+                "entityType": "SEC",
+                "entityTypeCode": "058001001",
+                "entityTypeName": "A股",
+                "classCode": "002001",
+                "className": "沪深京股票",
+                "fullName": "东阳光",
+                "secuCode": "600673",
+                "market": "1",
+                "marketChar": ".SH",
+                "correct": false,
+                "hasKLine": false,
+                "valuation": false
+              }
+            ],
+            "indexTable": false,
+            "edbThirdData": false,
+            "dataUpdate": {
+              "2025年报": false
+            },
+            "supportsTimeSeries": false,
+            "estimatedTokens": 0,
+            "summaryTips": {
+              "periodicalReport": null
+            },
+            "nestEntityListMap": {},
+            "excelTimeTruncate": false,
+            "frontendEntityName": "",
+            "frontendEntityCode": "",
+            "frontendTitle": "",
+            "frontendDesc": "",
+            "indicatorCount": 0,
+            "fieldParameterStr": "",
+            "tdayEnum": "NORMAL"
+          }
+        ],
+        "condition": {
+          "search_data_task_0": [
+            "东阳光",
+            "主营业务收入(附注)",
+            "2026-04-12至2026-04-12"
+          ]
+        },
+        "entityTagDTOList": []
+      },
+      "entityName": null,
+      "message": null,
+      "tableTruncated": false
+    },
+    "stack": null
+  },
+  "requestId": "37dfec0082e74c2e815dfbc6b54c59d4"
+}

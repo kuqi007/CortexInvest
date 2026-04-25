@@ -1,0 +1,454 @@
+{
+  "success": true,
+  "status": 0,
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "requestId": null,
+    "message": "OK",
+    "status": 0,
+    "code": 0,
+    "data": {
+      "protocolType": "SEARCH_DATA",
+      "id": "6caed507-cedd-42c0-ae3e-49ec0b1f4c9e",
+      "refSeq": null,
+      "keyEntityList": null,
+      "searchDataResultDTO": {
+        "questionId": "d5a2661d-d1d8-4503-b88c-dcf48607cdb7",
+        "dataTableDTOList": [
+          {
+            "code": "600673.SH",
+            "entityName": "东阳光(600673.SH)",
+            "table": {
+              "100000000001395": [
+                "预增",
+                "预增"
+              ],
+              "100000000011200": [
+                "预计2025年1-9月归属于上市公司股东的净利润盈利:84,700万元至93,700万元,同比上年增长:171.08%至199.88%。",
+                "预计2025年1-6月归属于上市公司股东的净利润盈利:58,300万元至66,300万元,同比上年增长:157.48%至192.81%。"
+              ],
+              "100000000020764": [
+                "1、报告期内,制冷剂行业生态和竞争秩序持续优化。第三代制冷剂(HFCs)作为当前的主流制冷剂,由于供给端受配额管控而受限,而全球需求持续增长,导致供需结构深度改善,制冷剂价格稳步攀升,为公司经营利润的显著提升提供了有力支撑。2、报告期内,在数据中心与储能行业等快速发展的背景下,公司凭借在电极箔与电容器领域的深厚技术积累,精准把握行业升级的机遇,进一步巩固了市场优势。3、报告期内,公司实施事业部制变革,优化研产销协同,提升资源配置效率。同时,升级大客户部机制,增强市场响应能力和服务水平。通过精准调研客户需求,制定针对性销售策略,巩固战略客户关系,显著提升市场竞争力和利润率。",
+                "1、报告期内,制冷剂行业生态、竞争秩序持续改善。第三代制冷剂(HFCs)作为当前的主流制冷剂,其供给端因配额管控而受限。随着全球第三代制冷剂市场需求不断提升,行业供需结构得到深度改善,制冷剂价格持续攀升,为公司经营利润的显著提升提供了强力支撑。2、报告期内,受益于数据中心与储能行业等行业对于电子元器件需求的持续提升,公司积层箔与化成箔产能稳步释放,规模效应渐显,成本结构进一步改善。3、报告期内,公司加速在智算中心液冷及人形机器人领域的战略布局。一方面,与中际旭创联合成立合资公司,整合资源,打造从技术研发到市场推广的完整生态体系;另一方面,公司携手智元机器人及北京大学武汉人工智能研究院等合作方,共同成立光谷东智具身智能机器人子公司。今年上半年,具身智能机器人业务已实现营业收入,初步显现成效,为公司新增长曲线奠定坚实基础。4、报告期内,公司实施事业部制变革,优化研产销协同,提升资源配置效率。同时,升级大客户部机制,增强市场响应能力和服务水平。通过精准调研客户需求,制定针对性销售策略,巩固战略客户关系,显著提升市场竞争力和利润率。"
+              ],
+              "100000000018591": [
+                "9.37亿元",
+                "6.63亿元"
+              ],
+              "100000000018592": [
+                "8.47亿元",
+                "5.83亿元"
+              ],
+              "100000000001398": [
+                "199.9",
+                "192.8"
+              ],
+              "100000000028283": [
+                "8.26亿元",
+                "5.51亿元"
+              ],
+              "100000000028284": [
+                "7.36亿元",
+                "4.71亿元"
+              ],
+              "100000000028287": [
+                "185.2",
+                "203.8"
+              ],
+              "100000000045564": [
+                "2.896亿",
+                "1.813亿"
+              ],
+              "headName": [
+                "2025三季报",
+                "2025中报"
+              ]
+            },
+            "rawTable": {
+              "100000000001395": [
+                "预增",
+                "预增"
+              ],
+              "100000000011200": [
+                "预计2025年1-9月归属于上市公司股东的净利润盈利:84,700万元至93,700万元,同比上年增长:171.08%至199.88%。",
+                "预计2025年1-6月归属于上市公司股东的净利润盈利:58,300万元至66,300万元,同比上年增长:157.48%至192.81%。"
+              ],
+              "100000000020764": [
+                "1、报告期内,制冷剂行业生态和竞争秩序持续优化。第三代制冷剂(HFCs)作为当前的主流制冷剂,由于供给端受配额管控而受限,而全球需求持续增长,导致供需结构深度改善,制冷剂价格稳步攀升,为公司经营利润的显著提升提供了有力支撑。2、报告期内,在数据中心与储能行业等快速发展的背景下,公司凭借在电极箔与电容器领域的深厚技术积累,精准把握行业升级的机遇,进一步巩固了市场优势。3、报告期内,公司实施事业部制变革,优化研产销协同,提升资源配置效率。同时,升级大客户部机制,增强市场响应能力和服务水平。通过精准调研客户需求,制定针对性销售策略,巩固战略客户关系,显著提升市场竞争力和利润率。",
+                "1、报告期内,制冷剂行业生态、竞争秩序持续改善。第三代制冷剂(HFCs)作为当前的主流制冷剂,其供给端因配额管控而受限。随着全球第三代制冷剂市场需求不断提升,行业供需结构得到深度改善,制冷剂价格持续攀升,为公司经营利润的显著提升提供了强力支撑。2、报告期内,受益于数据中心与储能行业等行业对于电子元器件需求的持续提升,公司积层箔与化成箔产能稳步释放,规模效应渐显,成本结构进一步改善。3、报告期内,公司加速在智算中心液冷及人形机器人领域的战略布局。一方面,与中际旭创联合成立合资公司,整合资源,打造从技术研发到市场推广的完整生态体系;另一方面,公司携手智元机器人及北京大学武汉人工智能研究院等合作方,共同成立光谷东智具身智能机器人子公司。今年上半年,具身智能机器人业务已实现营业收入,初步显现成效,为公司新增长曲线奠定坚实基础。4、报告期内,公司实施事业部制变革,优化研产销协同,提升资源配置效率。同时,升级大客户部机制,增强市场响应能力和服务水平。通过精准调研客户需求,制定针对性销售策略,巩固战略客户关系,显著提升市场竞争力和利润率。"
+              ],
+              "100000000018591": [
+                "937000000",
+                "663000000"
+              ],
+              "100000000018592": [
+                "847000000",
+                "583000000"
+              ],
+              "100000000001398": [
+                "199.88",
+                "192.81"
+              ],
+              "100000000028283": [
+                "826000000",
+                "551000000"
+              ],
+              "100000000028284": [
+                "736000000",
+                "471000000"
+              ],
+              "100000000028287": [
+                "185.22",
+                "203.84"
+              ],
+              "100000000045564": [
+                "289597200",
+                "181345000"
+              ],
+              "headName": [
+                "2025三季报",
+                "2025中报"
+              ]
+            },
+            "truncateRawTable": {},
+            "nameMap": {
+              "100000000001395": "业绩预告类型",
+              "headNameSub": "数据来源",
+              "100000000011200": "业绩预告摘要",
+              "100000000020764": "业绩预告变动原因",
+              "100000000018591": "预告归属于母公司的净利润上限",
+              "100000000018592": "预告归属于母公司的净利润下限",
+              "100000000001398": "预告归属于母公司的净利润变动幅度(%)",
+              "100000000028283": "预告扣除非经常性损益后的净利润上限",
+              "100000000028284": "预告扣除非经常性损益后的净利润下限",
+              "100000000028287": "预告扣除非经常性损益后的净利润变动幅度(%)",
+              "100000000045564": "上年同期扣非净利润"
+            },
+            "headNameMap": {},
+            "field": {
+              "returnCode": "100000000001395",
+              "returnName": "业绩预告类型",
+              "classCode": "007101",
+              "checkedRelatedIndicators": true,
+              "startDate": "2025-04-12 00:00:00",
+              "endDate": "2026-04-12 00:00:00",
+              "fuzzy": true,
+              "dateGranularity": "QUARTER",
+              "defineType": 0,
+              "isLoopN": false,
+              "quantType": "1",
+              "isGroup": false,
+              "returnSourceCode": "FORECASTTYPE",
+              "returnSourceName": "业绩预告类型",
+              "graph": "0",
+              "unit": "1",
+              "tableType": "1"
+            },
+            "entityCodes": [
+              "600673.SH"
+            ],
+            "macroAttributeExcelMap": {},
+            "fieldSet": [
+              {
+                "returnCode": "100000000001398",
+                "returnName": "预告归属于母公司的净利润变动幅度(%)",
+                "classCode": "007101",
+                "checkedRelatedIndicators": true,
+                "startDate": "2025-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": true,
+                "dateGranularity": "QUARTER",
+                "defineType": 0,
+                "isLoopN": false,
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "DEC_JINGLIRUN",
+                "returnSourceName": "预告归属于母公司的净利润变动幅度(%)",
+                "graph": "2",
+                "unit": "1",
+                "tableType": "1"
+              },
+              {
+                "returnCode": "100000000028284",
+                "returnName": "预告扣除非经常性损益后的净利润下限",
+                "classCode": "007101",
+                "checkedRelatedIndicators": true,
+                "startDate": "2025-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": true,
+                "dateGranularity": "QUARTER",
+                "defineType": 0,
+                "isLoopN": false,
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "DEDUCTEDNPL",
+                "returnSourceName": "预告扣除非经常性损益后的净利润下限",
+                "graph": "1",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "元",
+                "unitDesc": "101:元:元"
+              },
+              {
+                "returnCode": "100000000020764",
+                "returnName": "业绩预告变动原因",
+                "classCode": "007101",
+                "checkedRelatedIndicators": true,
+                "startDate": "2025-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": true,
+                "dateGranularity": "QUARTER",
+                "defineType": 0,
+                "isLoopN": false,
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "YJYGBDYY",
+                "returnSourceName": "业绩预告变动原因",
+                "graph": "0",
+                "unit": "1",
+                "tableType": "1"
+              },
+              {
+                "returnCode": "100000000045564",
+                "returnName": "上年同期扣非净利润",
+                "classCode": "007101",
+                "checkedRelatedIndicators": true,
+                "startDate": "2025-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": true,
+                "dateGranularity": "QUARTER",
+                "defineType": 0,
+                "isLoopN": false,
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "SNTQKFNETPROFIT",
+                "returnSourceName": "上年同期扣非净利润",
+                "graph": "1",
+                "unit": "1",
+                "tableType": "1"
+              },
+              {
+                "returnCode": "100000000018591",
+                "returnName": "预告归属于母公司的净利润上限",
+                "classCode": "007101",
+                "checkedRelatedIndicators": true,
+                "startDate": "2025-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": true,
+                "dateGranularity": "QUARTER",
+                "defineType": 0,
+                "isLoopN": false,
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "YGGSYMGSDJLRSX",
+                "returnSourceName": "预告归属于母公司的净利润上限",
+                "graph": "1",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "元",
+                "unitDesc": "101:元:元"
+              },
+              {
+                "returnCode": "100000000028283",
+                "returnName": "预告扣除非经常性损益后的净利润上限",
+                "classCode": "007101",
+                "checkedRelatedIndicators": true,
+                "startDate": "2025-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": true,
+                "dateGranularity": "QUARTER",
+                "defineType": 0,
+                "isLoopN": false,
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "DEDUCTEDNPT",
+                "returnSourceName": "预告扣除非经常性损益后的净利润上限",
+                "graph": "1",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "元",
+                "unitDesc": "101:元:元"
+              },
+              {
+                "returnCode": "100000000001395",
+                "returnName": "业绩预告类型",
+                "classCode": "007101",
+                "checkedRelatedIndicators": true,
+                "startDate": "2025-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": true,
+                "dateGranularity": "QUARTER",
+                "defineType": 0,
+                "isLoopN": false,
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "FORECASTTYPE",
+                "returnSourceName": "业绩预告类型",
+                "graph": "0",
+                "unit": "1",
+                "tableType": "1"
+              },
+              {
+                "returnCode": "100000000011200",
+                "returnName": "业绩预告摘要",
+                "classCode": "007101",
+                "checkedRelatedIndicators": true,
+                "startDate": "2025-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": true,
+                "dateGranularity": "QUARTER",
+                "defineType": 0,
+                "isLoopN": false,
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "ABSTRACT",
+                "returnSourceName": "业绩预告摘要",
+                "graph": "0",
+                "unit": "1",
+                "tableType": "1"
+              },
+              {
+                "returnCode": "100000000018592",
+                "returnName": "预告归属于母公司的净利润下限",
+                "classCode": "007101",
+                "checkedRelatedIndicators": true,
+                "startDate": "2025-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": true,
+                "dateGranularity": "QUARTER",
+                "defineType": 0,
+                "isLoopN": false,
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "YGGSYMGSDJLRXX",
+                "returnSourceName": "预告归属于母公司的净利润下限",
+                "graph": "1",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "元",
+                "unitDesc": "101:元:元"
+              },
+              {
+                "returnCode": "100000000028287",
+                "returnName": "预告扣除非经常性损益后的净利润变动幅度(%)",
+                "classCode": "007101",
+                "checkedRelatedIndicators": true,
+                "startDate": "2025-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": true,
+                "dateGranularity": "QUARTER",
+                "defineType": 0,
+                "isLoopN": false,
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "YGKCFJCXSYHDJLRBDFD",
+                "returnSourceName": "预告扣除非经常性损益后的净利润变动幅度(%)",
+                "graph": "2",
+                "unit": "1",
+                "tableType": "1"
+              }
+            ],
+            "dataTableType": "NORM_TABLE",
+            "rowInfo": {},
+            "colInfo": {},
+            "indicatorOrder": [
+              "100000000001395",
+              "100000000011200",
+              "100000000020764",
+              "100000000018591",
+              "100000000018592",
+              "100000000001398",
+              "100000000028283",
+              "100000000028284",
+              "100000000028287",
+              "100000000045564"
+            ],
+            "tipFlags": [],
+            "dataType": "数据浏览器",
+            "title": "东阳光(600673.SH)的业绩预告类型、业绩预告摘要等",
+            "hasThumbnail": true,
+            "indicatorLimited": false,
+            "dataPositionEnum": "MetricLeftTimeTop",
+            "orderCol": {},
+            "jumpUrlList": [
+              {
+                "choiceUrl": "EM://stockdatacenter?type=browser&modType=STOCK&code=600673.SH&indId=100000000001395|100:2025-06-30,100000000001395|100:2025-09-30,100000000011200|100:2025-06-30,100000000011200|100:2025-09-30,100000000020764|100:2025-06-30,100000000020764|100:2025-09-30,100000000018591|100:2025-06-30,100000000018591|100:2025-09-30,100000000018592|100:2025-06-30,100000000018592|100:2025-09-30,100000000001398|100:2025-06-30,100000000001398|100:2025-09-30,100000000028283|100:2025-06-30,100000000028283|100:2025-09-30,100000000028284|100:2025-06-30,100000000028284|100:2025-09-30,100000000028287|100:2025-06-30,100000000028287|100:2025-09-30,100000000045564|100:2025-06-30,100000000045564|100:2025-09-30",
+                "typeName": "股票数据浏览器"
+              }
+            ],
+            "dataTypeEnum": "DATA_BROWSER",
+            "dateRuleSet": [],
+            "freqConvert": false,
+            "deleteInfo": [],
+            "macroCodeMap": {},
+            "entityTagDTO": {
+              "entityId": "1000009463",
+              "entityType": "SEC",
+              "entityTypeCode": "058001001",
+              "entityTypeName": "A股",
+              "classCode": "002001",
+              "className": "沪深京股票",
+              "fullName": "东阳光",
+              "secuCode": "600673",
+              "market": "1",
+              "marketChar": ".SH",
+              "correct": false,
+              "hasKLine": false,
+              "valuation": false
+            },
+            "entityTagDTOList": [
+              {
+                "entityId": "1000009463",
+                "entityType": "SEC",
+                "entityTypeCode": "058001001",
+                "entityTypeName": "A股",
+                "classCode": "002001",
+                "className": "沪深京股票",
+                "fullName": "东阳光",
+                "secuCode": "600673",
+                "market": "1",
+                "marketChar": ".SH",
+                "correct": false,
+                "hasKLine": false,
+                "valuation": false
+              }
+            ],
+            "indexTable": false,
+            "edbThirdData": false,
+            "dataUpdate": {
+              "2025三季报": false
+            },
+            "supportsTimeSeries": false,
+            "estimatedTokens": 0,
+            "summaryTips": {
+              "periodicalReport": null
+            },
+            "nestEntityListMap": {},
+            "excelTimeTruncate": false,
+            "frontendEntityName": "",
+            "frontendEntityCode": "",
+            "frontendTitle": "",
+            "frontendDesc": "",
+            "indicatorCount": 0,
+            "fieldParameterStr": "",
+            "tdayEnum": "NORMAL"
+          }
+        ],
+        "condition": {
+          "search_data_task_0": [
+            "东阳光",
+            "业绩预告类型业绩预告摘要业绩预告变动原因预告归属于母公司的净利润上限预告归属于母公司的净利润下限预告归属于母公司的净利润变动幅度(%)预告扣除非经常性损益后的净利润上限预告扣除非经常性损益后的净利润下限预告扣除非经常性损益后的净利润变动幅度(%)上年同期扣非净利润",
+            "2026-04-12至2026-04-12"
+          ]
+        },
+        "entityTagDTOList": []
+      },
+      "entityName": null,
+      "message": null,
+      "tableTruncated": false
+    },
+    "stack": null
+  },
+  "requestId": "1b493e8fde604966bc6eee57d559ad19"
+}

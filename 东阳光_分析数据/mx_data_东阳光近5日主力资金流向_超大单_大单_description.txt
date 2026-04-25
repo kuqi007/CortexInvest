@@ -1,0 +1,8 @@
+金融数据查询结果说明
+========================================
+查询内容: 东阳光近5日主力资金流向 超大单 大单
+数据文件路径: /Users/zhuqiqi/Documents/development/aiSpace/ai-investor/东阳光_分析数据/mx_data_东阳光近5日主力资金流向_超大单_大单.xlsx
+描述文件路径: /Users/zhuqiqi/Documents/development/aiSpace/ai-investor/东阳光_分析数据/mx_data_东阳光近5日主力资金流向_超大单_大单_description.txt
+数据行数: 4
+表数量: 1
+Sheet 列表: 东阳光(600673.SH)的(区间)超大单流入资金、(区间)大单流入资金等

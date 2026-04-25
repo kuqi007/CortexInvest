@@ -1,0 +1,8 @@
+金融数据查询结果说明
+========================================
+查询内容: 东阳光总股本 流通股
+数据文件路径: /Users/zhuqiqi/Documents/development/aiSpace/ai-investor/东阳光_分析数据/mx_data_东阳光总股本_流通股.xlsx
+描述文件路径: /Users/zhuqiqi/Documents/development/aiSpace/ai-investor/东阳光_分析数据/mx_data_东阳光总股本_流通股_description.txt
+数据行数: 58
+表数量: 1
+Sheet 列表: 东阳光(600673.SH)的流通股本、总股本

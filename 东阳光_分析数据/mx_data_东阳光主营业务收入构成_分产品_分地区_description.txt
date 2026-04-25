@@ -1,0 +1,8 @@
+金融数据查询结果说明
+========================================
+查询内容: 东阳光主营业务收入构成 分产品 分地区
+数据文件路径: /Users/zhuqiqi/Documents/development/aiSpace/ai-investor/东阳光_分析数据/mx_data_东阳光主营业务收入构成_分产品_分地区.xlsx
+描述文件路径: /Users/zhuqiqi/Documents/development/aiSpace/ai-investor/东阳光_分析数据/mx_data_东阳光主营业务收入构成_分产品_分地区_description.txt
+数据行数: 3
+表数量: 1
+Sheet 列表: 东阳光(600673.SH)的主营业务收入(附注)

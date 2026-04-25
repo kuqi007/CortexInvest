@@ -1,0 +1,1415 @@
+{
+  "success": true,
+  "status": 0,
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "requestId": null,
+    "message": "OK",
+    "status": 0,
+    "code": 0,
+    "data": {
+      "protocolType": "SEARCH_DATA",
+      "id": "fa1c2aec-69af-4719-802d-61132316cfb1",
+      "refSeq": null,
+      "keyEntityList": null,
+      "searchDataResultDTO": {
+        "questionId": "ed71c49d-066e-4379-a13f-86b7bb58fe88",
+        "dataTableDTOList": [
+          {
+            "code": "000338.SZ",
+            "entityName": "类型",
+            "table": {
+              "headName": [
+                "主营构成",
+                "主营业务收入(元)",
+                "主营业务收入占比",
+                "主营成本(元)",
+                "主营成本占比",
+                "主营利润(元)",
+                "主营利润占比",
+                "毛利率"
+              ],
+              "0": [
+                "交通运输设备制造业",
+                "1738亿",
+                "74.97%",
+                "1336亿",
+                "73.39%",
+                "402亿",
+                "80.75%",
+                "23.13%"
+              ],
+              "1": [
+                "专用设备制造业",
+                "557亿",
+                "24.03%",
+                "467.2亿",
+                "25.67%",
+                "89.73亿",
+                "18.02%",
+                "16.11%"
+              ],
+              "2": [
+                "其他",
+                "23.34亿",
+                "1.01%",
+                "17.22亿",
+                "0.95%",
+                "6.113亿",
+                "1.23%",
+                "26.19%"
+              ],
+              "3": [
+                "整车及关键零部件",
+                "1004亿",
+                "43.32%",
+                "824.9亿",
+                "45.32%",
+                "179.2亿",
+                "36.00%",
+                "17.85%"
+              ],
+              "4": [
+                "智能物流",
+                "910.8亿",
+                "39.29%",
+                "668.8亿",
+                "36.74%",
+                "241.9亿",
+                "48.60%",
+                "26.56%"
+              ],
+              "5": [
+                "农业装备",
+                "187.9亿",
+                "8.11%",
+                "161.1亿",
+                "8.85%",
+                "26.79亿",
+                "5.38%",
+                "14.26%"
+              ],
+              "6": [
+                "其他汽车零部件",
+                "118.8亿",
+                "5.12%",
+                "86.4亿",
+                "4.75%",
+                "32.36亿",
+                "6.50%",
+                "27.25%"
+              ],
+              "7": [
+                "其他主营业务",
+                "96.57亿",
+                "4.17%",
+                "79.07亿",
+                "4.34%",
+                "17.5亿",
+                "3.52%",
+                "18.12%"
+              ],
+              "8": [
+                "国外",
+                "1229亿",
+                "53.01%",
+                "951.7亿",
+                "52.28%",
+                "277.1亿",
+                "55.67%",
+                "22.55%"
+              ],
+              "9": [
+                "中国大陆",
+                "1089亿",
+                "46.99%",
+                "868.6亿",
+                "47.72%",
+                "220.7亿",
+                "44.33%",
+                "20.26%"
+              ],
+              "10": [
+                "直销",
+                "1814亿",
+                "78.25%",
+                "1349亿",
+                "74.14%",
+                "464.3亿",
+                "93.27%",
+                "25.60%"
+              ],
+              "11": [
+                "经销",
+                "435.4亿",
+                "18.78%",
+                "414.2亿",
+                "22.75%",
+                "21.19亿",
+                "4.26%",
+                "4.87%"
+              ],
+              "12": [
+                "分销",
+                "68.9亿",
+                "2.97%",
+                "0",
+                "0.00%",
+                "0",
+                "0.00%",
+                "0.00%"
+              ],
+              "13": [
+                "其他项目",
+                "0",
+                "0.00%",
+                "56.61亿",
+                "3.11%",
+                "12.29亿",
+                "2.47%",
+                "-"
+              ]
+            },
+            "rawTable": {
+              "headName": [
+                "主营构成",
+                "主营业务收入(元)",
+                "主营业务收入占比",
+                "主营成本(元)",
+                "主营成本占比",
+                "主营利润(元)",
+                "主营利润占比",
+                "毛利率"
+              ],
+              "0": [
+                "交通运输设备制造业",
+                "173779279754.4",
+                "74.97%",
+                "133581348282.15",
+                "73.39%",
+                "40197931472.25",
+                "80.75%",
+                "23.13%"
+              ],
+              "1": [
+                "专用设备制造业",
+                "55696452129.48",
+                "24.03%",
+                "46723712112.09",
+                "25.67%",
+                "8972740017.39",
+                "18.02%",
+                "16.11%"
+              ],
+              "2": [
+                "其他",
+                "2333549222.94",
+                "1.01%",
+                "1722277341.78",
+                "0.95%",
+                "611271881.16",
+                "1.23%",
+                "26.19%"
+              ],
+              "3": [
+                "整车及关键零部件",
+                "100410725808.64",
+                "43.32%",
+                "82488299415.84",
+                "45.32%",
+                "17922426392.8",
+                "36.00%",
+                "17.85%"
+              ],
+              "4": [
+                "智能物流",
+                "91076800865.77",
+                "39.29%",
+                "66882581642.2",
+                "36.74%",
+                "24194219223.57",
+                "48.60%",
+                "26.56%"
+              ],
+              "5": [
+                "农业装备",
+                "18788699730.23",
+                "8.11%",
+                "16109430797.63",
+                "8.85%",
+                "2679268932.6",
+                "5.38%",
+                "14.26%"
+              ],
+              "6": [
+                "其他汽车零部件",
+                "11876205617.81",
+                "5.12%",
+                "8640021571.21",
+                "4.75%",
+                "3236184046.6",
+                "6.50%",
+                "27.25%"
+              ],
+              "7": [
+                "其他主营业务",
+                "9656849084.37",
+                "4.17%",
+                "7907004309.14",
+                "4.34%",
+                "1749844775.23",
+                "3.52%",
+                "18.12%"
+              ],
+              "8": [
+                "国外",
+                "122882970124.33",
+                "53.01%",
+                "95171115316.17",
+                "52.28%",
+                "27711854808.16",
+                "55.67%",
+                "22.55%"
+              ],
+              "9": [
+                "中国大陆",
+                "108926310982.49",
+                "46.99%",
+                "86856222419.85",
+                "47.72%",
+                "22070088562.64",
+                "44.33%",
+                "20.26%"
+              ],
+              "10": [
+                "直销",
+                "181382026971.65",
+                "78.25%",
+                "134948523245.44",
+                "74.14%",
+                "46433503726.21",
+                "93.27%",
+                "25.60%"
+              ],
+              "11": [
+                "经销",
+                "43536910661.47",
+                "18.78%",
+                "41417924809.68",
+                "22.75%",
+                "2118985851.79",
+                "4.26%",
+                "4.87%"
+              ],
+              "12": [
+                "分销",
+                "6890343473.7",
+                "2.97%",
+                "0",
+                "0.00%",
+                "0",
+                "0.00%",
+                "0.00%"
+              ],
+              "13": [
+                "其他项目",
+                "0",
+                "0.00%",
+                "5660889680.9",
+                "3.11%",
+                "1229453792.8",
+                "2.47%",
+                "-"
+              ]
+            },
+            "truncateRawTable": {},
+            "nameMap": {
+              "0": "行业",
+              "1": "",
+              "2": "",
+              "3": "产品",
+              "4": "",
+              "5": "",
+              "6": "",
+              "7": "",
+              "8": "地区",
+              "9": "",
+              "10": "销售模式",
+              "11": "",
+              "12": "",
+              "13": ""
+            },
+            "headNameMap": {},
+            "field": {
+              "returnCode": "RPT_HSF9_FN_MAINOPBUSINESS_NORMAL",
+              "returnName": "主营业务构成",
+              "classCode": "007202",
+              "checkedRelatedIndicators": false,
+              "startDate": "2025-01-01 00:00:00",
+              "endDate": "2025-12-31 00:00:00",
+              "fuzzy": false,
+              "dateGranularity": "YEAR",
+              "defineType": -1,
+              "isLoopN": false,
+              "isGroup": false,
+              "returnSourceCode": "SecuCode,SECURITY_NAME_ABBR,SECURITY_CODE,ReportDate,STD_REPORT_NAME,ACT_REPORT_NAME,MAIN_BUSINESS_INCOME,MAIN_BUSINESS_COST,MAIN_BUSINESS_RPOFIT,MBI_RATIO,MBC_RATIO,MBR_RATIO,GROSS_RPOFIT_RATIO,STD_CLASSIFY_CODE,REPORT_TYPE,REPORT_YEAR,REPORT_CODE,Type,BELONG_TYPE_CODE,IS_MAXREPORTDATE,METHOD_TYPE,METHOD_CODE,CURRENCY,CURRENCY_CH",
+              "returnSourceName": "证券代码（带后缀）,证券简称,证券代码,报告日期,标准披露项目名称,实际披露项目名称,本期主营业务收入,本期主营业务成本,本期主营业务利润,收入构成,营业成本占比,利润构成,本期毛利率,项目编码,报告期类型,报告年度,报告期编码,分布类型,分布类型编码,是否最新报告期,计算方式类型,计算方式代码,币种(英文),币种(中文)",
+              "tableType": "10"
+            },
+            "macroAttributeExcelMap": {},
+            "fieldSet": [
+              {
+                "returnCode": "RPT_HSF9_FN_MAINOPBUSINESS_NORMAL",
+                "returnName": "主营业务构成",
+                "classCode": "007202",
+                "checkedRelatedIndicators": false,
+                "startDate": "2025-01-01 00:00:00",
+                "endDate": "2025-12-31 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "YEAR",
+                "defineType": -1,
+                "isLoopN": false,
+                "isGroup": false,
+                "returnSourceCode": "SecuCode,SECURITY_NAME_ABBR,SECURITY_CODE,ReportDate,STD_REPORT_NAME,ACT_REPORT_NAME,MAIN_BUSINESS_INCOME,MAIN_BUSINESS_COST,MAIN_BUSINESS_RPOFIT,MBI_RATIO,MBC_RATIO,MBR_RATIO,GROSS_RPOFIT_RATIO,STD_CLASSIFY_CODE,REPORT_TYPE,REPORT_YEAR,REPORT_CODE,Type,BELONG_TYPE_CODE,IS_MAXREPORTDATE,METHOD_TYPE,METHOD_CODE,CURRENCY,CURRENCY_CH",
+                "returnSourceName": "证券代码（带后缀）,证券简称,证券代码,报告日期,标准披露项目名称,实际披露项目名称,本期主营业务收入,本期主营业务成本,本期主营业务利润,收入构成,营业成本占比,利润构成,本期毛利率,项目编码,报告期类型,报告年度,报告期编码,分布类型,分布类型编码,是否最新报告期,计算方式类型,计算方式代码,币种(英文),币种(中文)",
+                "tableType": "10"
+              }
+            ],
+            "dataTableType": "F10_TABLE",
+            "inputTitle": "潍柴动力(000338.SZ)主营构成分析(2025-12-31)",
+            "rowInfo": {},
+            "colInfo": {},
+            "indicatorOrder": [
+              "0",
+              "1",
+              "2",
+              "3",
+              "4",
+              "5",
+              "6",
+              "7",
+              "8",
+              "9",
+              "10",
+              "11",
+              "12",
+              "13"
+            ],
+            "tipFlags": [],
+            "hasThumbnail": true,
+            "indicatorLimited": false,
+            "dataPositionEnum": "MetricLeftTimeTop",
+            "orderCol": {},
+            "jumpUrlList": [
+              {
+                "choiceUrl": "https://choicewzp2.eastmoney.com/stock/cn/f9/index.html#/mainCompositionByProjectName?securitycode=000338.SZ",
+                "typeName": "F9深度资料",
+                "securityName": "潍柴动力"
+              }
+            ],
+            "dataTypeEnum": "F9",
+            "dateRuleSet": [],
+            "freqConvert": false,
+            "deleteInfo": [],
+            "macroCodeMap": {},
+            "entityTagDTO": {
+              "entityId": "1000010157",
+              "entityType": "SEC",
+              "entityTypeCode": "058001001",
+              "entityTypeName": "A股",
+              "classCode": "002001",
+              "className": "沪深京股票",
+              "fullName": "潍柴动力",
+              "secuCode": "000338",
+              "market": "0",
+              "marketChar": ".SZ",
+              "correct": false,
+              "hasKLine": false,
+              "valuation": false
+            },
+            "entityTagDTOList": [
+              {
+                "entityId": "1000010157",
+                "entityType": "SEC",
+                "entityTypeCode": "058001001",
+                "entityTypeName": "A股",
+                "classCode": "002001",
+                "className": "沪深京股票",
+                "fullName": "潍柴动力",
+                "secuCode": "000338",
+                "market": "0",
+                "marketChar": ".SZ",
+                "correct": false,
+                "hasKLine": false,
+                "valuation": false
+              }
+            ],
+            "indexTable": false,
+            "edbThirdData": false,
+            "dataUpdate": {},
+            "supportsTimeSeries": false,
+            "estimatedTokens": 0,
+            "summaryTips": {
+              "periodicalReport": null
+            },
+            "nestEntityListMap": {},
+            "excelTimeTruncate": false,
+            "frontendEntityName": "潍柴动力",
+            "frontendEntityCode": "000338.SZ",
+            "frontendTitle": "主营构成分析(2025-12-31)",
+            "frontendDesc": "",
+            "indicatorCount": 0,
+            "fieldParameterStr": "",
+            "tdayEnum": "NORMAL"
+          },
+          {
+            "code": "000338.SZ",
+            "entityName": "类型",
+            "table": {
+              "headName": [
+                "主营构成",
+                "主营业务收入(元)",
+                "主营业务收入占比",
+                "主营成本(元)",
+                "主营成本占比",
+                "主营利润(元)",
+                "主营利润占比",
+                "毛利率"
+              ],
+              "0": [
+                "交通运输设备制造业",
+                "879.7亿",
+                "77.74%",
+                "662.4亿",
+                "75.23%",
+                "217.3亿",
+                "86.57%",
+                "24.70%"
+              ],
+              "1": [
+                "专用设备制造业",
+                "233.5亿",
+                "20.63%",
+                "204.1亿",
+                "23.18%",
+                "29.36亿",
+                "11.70%",
+                "12.58%"
+              ],
+              "2": [
+                "其他",
+                "18.34亿",
+                "1.62%",
+                "0",
+                "0.00%",
+                "0",
+                "0.00%",
+                "0.00%"
+              ],
+              "3": [
+                "其他项目",
+                "0",
+                "0.00%",
+                "13.99亿",
+                "1.59%",
+                "4.349亿",
+                "1.73%",
+                "-"
+              ],
+              "4": [
+                "整车及关键零部件",
+                "479.3亿",
+                "42.36%",
+                "387.5亿",
+                "44.01%",
+                "91.77亿",
+                "36.57%",
+                "19.15%"
+              ],
+              "5": [
+                "智能物流",
+                "431.8亿",
+                "38.16%",
+                "313.6亿",
+                "35.61%",
+                "118.2亿",
+                "47.12%",
+                "27.38%"
+              ],
+              "6": [
+                "农业装备",
+                "103亿",
+                "9.10%",
+                "0",
+                "0.00%",
+                "0",
+                "0.00%",
+                "0.00%"
+              ],
+              "7": [
+                "其他汽车零部件",
+                "67.42亿",
+                "5.96%",
+                "0",
+                "0.00%",
+                "0",
+                "0.00%",
+                "0.00%"
+              ],
+              "8": [
+                "其他主营业务",
+                "49.96亿",
+                "4.42%",
+                "0",
+                "0.00%",
+                "0",
+                "0.00%",
+                "0.00%"
+              ],
+              "9": [
+                "其他项目",
+                "0",
+                "0.00%",
+                "179.4亿",
+                "20.38%",
+                "40.95亿",
+                "16.32%",
+                "-"
+              ],
+              "10": [
+                "国外",
+                "574.9亿",
+                "50.81%",
+                "434.8亿",
+                "49.38%",
+                "140.1亿",
+                "55.81%",
+                "24.36%"
+              ],
+              "11": [
+                "中国大陆",
+                "556.6亿",
+                "49.19%",
+                "445.7亿",
+                "50.62%",
+                "110.9亿",
+                "44.19%",
+                "19.92%"
+              ]
+            },
+            "rawTable": {
+              "headName": [
+                "主营构成",
+                "主营业务收入(元)",
+                "主营业务收入占比",
+                "主营成本(元)",
+                "主营成本占比",
+                "主营利润(元)",
+                "主营利润占比",
+                "毛利率"
+              ],
+              "0": [
+                "交通运输设备制造业",
+                "87969849627.01",
+                "77.74%",
+                "66244365098.15",
+                "75.23%",
+                "21725484528.86",
+                "86.57%",
+                "24.70%"
+              ],
+              "1": [
+                "专用设备制造业",
+                "23347738002.83",
+                "20.63%",
+                "20411448172.57",
+                "23.18%",
+                "2936289830.26",
+                "11.70%",
+                "12.58%"
+              ],
+              "2": [
+                "其他",
+                "1834200477.93",
+                "1.62%",
+                "0",
+                "0.00%",
+                "0",
+                "0.00%",
+                "0.00%"
+              ],
+              "3": [
+                "其他项目",
+                "0",
+                "0.00%",
+                "1399347781.82",
+                "1.59%",
+                "434852696.11",
+                "1.73%",
+                "-"
+              ],
+              "4": [
+                "整车及关键零部件",
+                "47932214952.35",
+                "42.36%",
+                "38754748453.88",
+                "44.01%",
+                "9177466498.47",
+                "36.57%",
+                "19.15%"
+              ],
+              "5": [
+                "智能物流",
+                "43182565932.45",
+                "38.16%",
+                "31358061278.29",
+                "35.61%",
+                "11824504654.16",
+                "47.12%",
+                "27.38%"
+              ],
+              "6": [
+                "农业装备",
+                "10298632782.46",
+                "9.10%",
+                "0",
+                "0.00%",
+                "0",
+                "0.00%",
+                "0.00%"
+              ],
+              "7": [
+                "其他汽车零部件",
+                "6742026300.63",
+                "5.96%",
+                "0",
+                "0.00%",
+                "0",
+                "0.00%",
+                "0.00%"
+              ],
+              "8": [
+                "其他主营业务",
+                "4996348139.88",
+                "4.42%",
+                "0",
+                "0.00%",
+                "0",
+                "0.00%",
+                "0.00%"
+              ],
+              "9": [
+                "其他项目",
+                "0",
+                "0.00%",
+                "17942351320.37",
+                "20.38%",
+                "4094655902.6",
+                "16.32%",
+                "-"
+              ],
+              "10": [
+                "国外",
+                "57491360696.72",
+                "50.81%",
+                "43483771900.12",
+                "49.38%",
+                "14007588796.6",
+                "55.81%",
+                "24.36%"
+              ],
+              "11": [
+                "中国大陆",
+                "55660427411.05",
+                "49.19%",
+                "44571389152.42",
+                "50.62%",
+                "11089038258.63",
+                "44.19%",
+                "19.92%"
+              ]
+            },
+            "truncateRawTable": {},
+            "nameMap": {
+              "0": "行业",
+              "1": "",
+              "2": "",
+              "3": "",
+              "4": "产品",
+              "5": "",
+              "6": "",
+              "7": "",
+              "8": "",
+              "9": "",
+              "10": "地区",
+              "11": ""
+            },
+            "headNameMap": {},
+            "field": {
+              "returnCode": "RPT_HSF9_FN_MAINOPBUSINESS_NORMAL",
+              "returnName": "主营业务构成",
+              "classCode": "007202",
+              "checkedRelatedIndicators": false,
+              "startDate": "2025-01-01 00:00:00",
+              "endDate": "2025-12-31 00:00:00",
+              "fuzzy": false,
+              "dateGranularity": "YEAR",
+              "defineType": -1,
+              "isLoopN": false,
+              "isGroup": false,
+              "returnSourceCode": "SecuCode,SECURITY_NAME_ABBR,SECURITY_CODE,ReportDate,STD_REPORT_NAME,ACT_REPORT_NAME,MAIN_BUSINESS_INCOME,MAIN_BUSINESS_COST,MAIN_BUSINESS_RPOFIT,MBI_RATIO,MBC_RATIO,MBR_RATIO,GROSS_RPOFIT_RATIO,STD_CLASSIFY_CODE,REPORT_TYPE,REPORT_YEAR,REPORT_CODE,Type,BELONG_TYPE_CODE,IS_MAXREPORTDATE,METHOD_TYPE,METHOD_CODE,CURRENCY,CURRENCY_CH",
+              "returnSourceName": "证券代码（带后缀）,证券简称,证券代码,报告日期,标准披露项目名称,实际披露项目名称,本期主营业务收入,本期主营业务成本,本期主营业务利润,收入构成,营业成本占比,利润构成,本期毛利率,项目编码,报告期类型,报告年度,报告期编码,分布类型,分布类型编码,是否最新报告期,计算方式类型,计算方式代码,币种(英文),币种(中文)",
+              "tableType": "10"
+            },
+            "macroAttributeExcelMap": {},
+            "fieldSet": [
+              {
+                "returnCode": "RPT_HSF9_FN_MAINOPBUSINESS_NORMAL",
+                "returnName": "主营业务构成",
+                "classCode": "007202",
+                "checkedRelatedIndicators": false,
+                "startDate": "2025-01-01 00:00:00",
+                "endDate": "2025-12-31 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "YEAR",
+                "defineType": -1,
+                "isLoopN": false,
+                "isGroup": false,
+                "returnSourceCode": "SecuCode,SECURITY_NAME_ABBR,SECURITY_CODE,ReportDate,STD_REPORT_NAME,ACT_REPORT_NAME,MAIN_BUSINESS_INCOME,MAIN_BUSINESS_COST,MAIN_BUSINESS_RPOFIT,MBI_RATIO,MBC_RATIO,MBR_RATIO,GROSS_RPOFIT_RATIO,STD_CLASSIFY_CODE,REPORT_TYPE,REPORT_YEAR,REPORT_CODE,Type,BELONG_TYPE_CODE,IS_MAXREPORTDATE,METHOD_TYPE,METHOD_CODE,CURRENCY,CURRENCY_CH",
+                "returnSourceName": "证券代码（带后缀）,证券简称,证券代码,报告日期,标准披露项目名称,实际披露项目名称,本期主营业务收入,本期主营业务成本,本期主营业务利润,收入构成,营业成本占比,利润构成,本期毛利率,项目编码,报告期类型,报告年度,报告期编码,分布类型,分布类型编码,是否最新报告期,计算方式类型,计算方式代码,币种(英文),币种(中文)",
+                "tableType": "10"
+              }
+            ],
+            "dataTableType": "F10_TABLE",
+            "inputTitle": "潍柴动力(000338.SZ)主营构成分析(2025-06-30)",
+            "rowInfo": {},
+            "colInfo": {},
+            "indicatorOrder": [
+              "0",
+              "1",
+              "2",
+              "3",
+              "4",
+              "5",
+              "6",
+              "7",
+              "8",
+              "9",
+              "10",
+              "11"
+            ],
+            "tipFlags": [],
+            "hasThumbnail": true,
+            "indicatorLimited": false,
+            "dataPositionEnum": "MetricLeftTimeTop",
+            "orderCol": {},
+            "jumpUrlList": [
+              {
+                "choiceUrl": "https://choicewzp2.eastmoney.com/stock/cn/f9/index.html#/mainCompositionByProjectName?securitycode=000338.SZ",
+                "typeName": "F9深度资料",
+                "securityName": "潍柴动力"
+              }
+            ],
+            "dataTypeEnum": "F9",
+            "dateRuleSet": [],
+            "freqConvert": false,
+            "deleteInfo": [],
+            "macroCodeMap": {},
+            "entityTagDTO": {
+              "entityId": "1000010157",
+              "entityType": "SEC",
+              "entityTypeCode": "058001001",
+              "entityTypeName": "A股",
+              "classCode": "002001",
+              "className": "沪深京股票",
+              "fullName": "潍柴动力",
+              "secuCode": "000338",
+              "market": "0",
+              "marketChar": ".SZ",
+              "correct": false,
+              "hasKLine": false,
+              "valuation": false
+            },
+            "entityTagDTOList": [
+              {
+                "entityId": "1000010157",
+                "entityType": "SEC",
+                "entityTypeCode": "058001001",
+                "entityTypeName": "A股",
+                "classCode": "002001",
+                "className": "沪深京股票",
+                "fullName": "潍柴动力",
+                "secuCode": "000338",
+                "market": "0",
+                "marketChar": ".SZ",
+                "correct": false,
+                "hasKLine": false,
+                "valuation": false
+              }
+            ],
+            "indexTable": false,
+            "edbThirdData": false,
+            "dataUpdate": {},
+            "supportsTimeSeries": false,
+            "estimatedTokens": 0,
+            "summaryTips": {
+              "periodicalReport": null
+            },
+            "nestEntityListMap": {},
+            "excelTimeTruncate": false,
+            "frontendEntityName": "潍柴动力",
+            "frontendEntityCode": "000338.SZ",
+            "frontendTitle": "主营构成分析(2025-06-30)",
+            "frontendDesc": "",
+            "indicatorCount": 0,
+            "fieldParameterStr": "",
+            "tdayEnum": "NORMAL"
+          },
+          {
+            "code": "02338.HK",
+            "entityName": "类型",
+            "table": {
+              "headName": [
+                "主营构成",
+                "营业收入(元)",
+                "营业成本(元)",
+                "毛利(元)",
+                "毛利率",
+                "收入构成",
+                "利润构成",
+                "币种"
+              ],
+              "0": [
+                "合计",
+                "2318亿",
+                "1820亿",
+                "497.8亿",
+                "21.48%",
+                "100.00%",
+                "100.00%",
+                "CNY"
+              ],
+              "1": [
+                "发动机和汽车及汽车零部件",
+                "1219亿",
+                "990.4亿",
+                "229.1亿",
+                "18.79%",
+                "52.61%",
+                "46.02%",
+                "CNY"
+              ],
+              "2": [
+                "智慧物流",
+                "910.8亿",
+                "668.8亿",
+                "241.9亿",
+                "26.56%",
+                "39.29%",
+                "48.60%",
+                "CNY"
+              ],
+              "3": [
+                "农业装备",
+                "187.9亿",
+                "161.1亿",
+                "26.79亿",
+                "14.26%",
+                "8.11%",
+                "5.38%",
+                "CNY"
+              ],
+              "4": [
+                "合计",
+                "2318亿",
+                "-",
+                "-",
+                "-",
+                "100.00%",
+                "-",
+                "CNY"
+              ],
+              "5": [
+                "其他国家和地区",
+                "1229亿",
+                "-",
+                "-",
+                "-",
+                "53.01%",
+                "-",
+                "CNY"
+              ],
+              "6": [
+                "中国大陆",
+                "1089亿",
+                "-",
+                "-",
+                "-",
+                "46.99%",
+                "-",
+                "CNY"
+              ]
+            },
+            "rawTable": {
+              "headName": [
+                "主营构成",
+                "营业收入(元)",
+                "营业成本(元)",
+                "毛利(元)",
+                "毛利率",
+                "收入构成",
+                "利润构成",
+                "币种"
+              ],
+              "0": [
+                "合计",
+                "231809281106.82",
+                "182027337736.02",
+                "49781943370.8",
+                "21.48",
+                "100",
+                "100",
+                "CNY"
+              ],
+              "1": [
+                "发动机和汽车及汽车零部件",
+                "121943780510.82",
+                "99035325296.19",
+                "22908455214.63",
+                "18.79",
+                "52.6052",
+                "46.0176",
+                "CNY"
+              ],
+              "2": [
+                "智慧物流",
+                "91076800865.77",
+                "66882581642.2",
+                "24194219223.57",
+                "26.56",
+                "39.2895",
+                "48.6004",
+                "CNY"
+              ],
+              "3": [
+                "农业装备",
+                "18788699730.23",
+                "16109430797.63",
+                "2679268932.6",
+                "14.26",
+                "8.1052",
+                "5.382",
+                "CNY"
+              ],
+              "4": [
+                "合计",
+                "231809281106.82",
+                "-",
+                "-",
+                "-",
+                "100",
+                "-",
+                "CNY"
+              ],
+              "5": [
+                "其他国家和地区",
+                "122882970124.33",
+                "-",
+                "-",
+                "-",
+                "53.0104",
+                "-",
+                "CNY"
+              ],
+              "6": [
+                "中国大陆",
+                "108926310982.49",
+                "-",
+                "-",
+                "-",
+                "46.9896",
+                "-",
+                "CNY"
+              ]
+            },
+            "truncateRawTable": {},
+            "nameMap": {
+              "0": "产品",
+              "1": "",
+              "2": "",
+              "3": "",
+              "4": "地区",
+              "5": "",
+              "6": ""
+            },
+            "headNameMap": {},
+            "field": {
+              "returnCode": "RPT_HKF9_MAINOPBUSINESS",
+              "returnName": "主营业务构成",
+              "classCode": "007202",
+              "checkedRelatedIndicators": false,
+              "startDate": "2025-01-01 00:00:00",
+              "endDate": "2025-12-31 00:00:00",
+              "fuzzy": false,
+              "dateGranularity": "YEAR",
+              "defineType": -1,
+              "isLoopN": false,
+              "isGroup": false,
+              "returnSourceCode": "ORG_CODE,REPORT_DATE,REPORT_TYPE,REPORT_TYPE_CODE,DATE_TYPE_CODE,REPORTDATE_TYPE,TYPE,STD_PRODUCT_NAME,MAIN_BUSINESS_INCOME,MAIN_BUSINESS_COST,GROSS_PROFIT,GROSS_RPOFIT_RATIO,INCOME_RATIO,PROFIT_RATIO,CURRENCY,SECUCODE,IS_MAXREPORTDATE,BELONG_TYPE_NAME",
+              "returnSourceName": "公司代码,报告期,报告期类型,报告期类型编码,日期类型,报告期名称,数据类型,标准产品名称,主营业务收入,主营业务成本,毛利,毛利率,收入构成,利润构成,计量币种,证券代码,是否最新报告期,类型名称",
+              "tableType": "10"
+            },
+            "macroAttributeExcelMap": {},
+            "fieldSet": [
+              {
+                "returnCode": "RPT_HKF9_MAINOPBUSINESS",
+                "returnName": "主营业务构成",
+                "classCode": "007202",
+                "checkedRelatedIndicators": false,
+                "startDate": "2025-01-01 00:00:00",
+                "endDate": "2025-12-31 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "YEAR",
+                "defineType": -1,
+                "isLoopN": false,
+                "isGroup": false,
+                "returnSourceCode": "ORG_CODE,REPORT_DATE,REPORT_TYPE,REPORT_TYPE_CODE,DATE_TYPE_CODE,REPORTDATE_TYPE,TYPE,STD_PRODUCT_NAME,MAIN_BUSINESS_INCOME,MAIN_BUSINESS_COST,GROSS_PROFIT,GROSS_RPOFIT_RATIO,INCOME_RATIO,PROFIT_RATIO,CURRENCY,SECUCODE,IS_MAXREPORTDATE,BELONG_TYPE_NAME",
+                "returnSourceName": "公司代码,报告期,报告期类型,报告期类型编码,日期类型,报告期名称,数据类型,标准产品名称,主营业务收入,主营业务成本,毛利,毛利率,收入构成,利润构成,计量币种,证券代码,是否最新报告期,类型名称",
+                "tableType": "10"
+              }
+            ],
+            "dataTableType": "F10_TABLE",
+            "inputTitle": "潍柴动力(02338.HK)主营业务构成(2025-12-31,年报)",
+            "rowInfo": {},
+            "colInfo": {},
+            "indicatorOrder": [
+              "0",
+              "1",
+              "2",
+              "3",
+              "4",
+              "5",
+              "6"
+            ],
+            "tipFlags": [],
+            "hasThumbnail": true,
+            "indicatorLimited": false,
+            "dataPositionEnum": "MetricLeftTimeTop",
+            "orderCol": {},
+            "jumpUrlList": [],
+            "dataTypeEnum": "F9",
+            "dateRuleSet": [],
+            "freqConvert": false,
+            "deleteInfo": [],
+            "macroCodeMap": {},
+            "entityTagDTO": {
+              "entityId": "1000145762",
+              "entityType": "SEC",
+              "entityTypeCode": "058001003001",
+              "entityTypeName": "H股",
+              "classCode": "002003",
+              "className": "港股",
+              "fullName": "潍柴动力",
+              "secuCode": "02338",
+              "market": "116",
+              "marketChar": ".HK",
+              "correct": false,
+              "hasKLine": false,
+              "valuation": false
+            },
+            "entityTagDTOList": [
+              {
+                "entityId": "1000145762",
+                "entityType": "SEC",
+                "entityTypeCode": "058001003001",
+                "entityTypeName": "H股",
+                "classCode": "002003",
+                "className": "港股",
+                "fullName": "潍柴动力",
+                "secuCode": "02338",
+                "market": "116",
+                "marketChar": ".HK",
+                "correct": false,
+                "hasKLine": false,
+                "valuation": false
+              }
+            ],
+            "indexTable": false,
+            "edbThirdData": false,
+            "dataUpdate": {},
+            "supportsTimeSeries": false,
+            "estimatedTokens": 0,
+            "summaryTips": {
+              "periodicalReport": null
+            },
+            "nestEntityListMap": {},
+            "excelTimeTruncate": false,
+            "frontendEntityName": "潍柴动力",
+            "frontendEntityCode": "02338.HK",
+            "frontendTitle": "主营业务构成(2025-12-31,年报)",
+            "frontendDesc": "",
+            "indicatorCount": 0,
+            "fieldParameterStr": "",
+            "tdayEnum": "NORMAL"
+          },
+          {
+            "code": "02338.HK",
+            "entityName": "类型",
+            "table": {
+              "headName": [
+                "主营构成",
+                "营业收入(元)",
+                "收入构成",
+                "币种"
+              ],
+              "0": [
+                "合计",
+                "1132亿",
+                "100.00%",
+                "CNY"
+              ],
+              "1": [
+                "智慧物流",
+                "431.8亿",
+                "38.16%",
+                "CNY"
+              ],
+              "2": [
+                "汽车及汽车零部件",
+                "339.7亿",
+                "30.02%",
+                "CNY"
+              ],
+              "3": [
+                "发动机",
+                "257亿",
+                "22.72%",
+                "CNY"
+              ],
+              "4": [
+                "农业装备",
+                "103亿",
+                "9.10%",
+                "CNY"
+              ],
+              "5": [
+                "合计",
+                "1132亿",
+                "100.00%",
+                "CNY"
+              ],
+              "6": [
+                "其他国家和地区",
+                "574.9亿",
+                "50.81%",
+                "CNY"
+              ],
+              "7": [
+                "中国大陆",
+                "556.6亿",
+                "49.19%",
+                "CNY"
+              ]
+            },
+            "rawTable": {
+              "headName": [
+                "主营构成",
+                "营业收入(元)",
+                "收入构成",
+                "币种"
+              ],
+              "0": [
+                "合计",
+                "113151788107.77",
+                "100",
+                "CNY"
+              ],
+              "1": [
+                "智慧物流",
+                "43182565932.45",
+                "38.1634",
+                "CNY"
+              ],
+              "2": [
+                "汽车及汽车零部件",
+                "33966054559.84",
+                "30.0181",
+                "CNY"
+              ],
+              "3": [
+                "发动机",
+                "25704534833.02",
+                "22.7169",
+                "CNY"
+              ],
+              "4": [
+                "农业装备",
+                "10298632782.46",
+                "9.1016",
+                "CNY"
+              ],
+              "5": [
+                "合计",
+                "113151788107.77",
+                "100",
+                "CNY"
+              ],
+              "6": [
+                "其他国家和地区",
+                "57491360696.72",
+                "50.8091",
+                "CNY"
+              ],
+              "7": [
+                "中国大陆",
+                "55660427411.05",
+                "49.1909",
+                "CNY"
+              ]
+            },
+            "truncateRawTable": {},
+            "nameMap": {
+              "0": "产品",
+              "1": "",
+              "2": "",
+              "3": "",
+              "4": "",
+              "5": "地区",
+              "6": "",
+              "7": ""
+            },
+            "headNameMap": {},
+            "field": {
+              "returnCode": "RPT_HKF9_MAINOPBUSINESS",
+              "returnName": "主营业务构成",
+              "classCode": "007202",
+              "checkedRelatedIndicators": false,
+              "startDate": "2025-01-01 00:00:00",
+              "endDate": "2025-12-31 00:00:00",
+              "fuzzy": false,
+              "dateGranularity": "YEAR",
+              "defineType": -1,
+              "isLoopN": false,
+              "isGroup": false,
+              "returnSourceCode": "ORG_CODE,REPORT_DATE,REPORT_TYPE,REPORT_TYPE_CODE,DATE_TYPE_CODE,REPORTDATE_TYPE,TYPE,STD_PRODUCT_NAME,MAIN_BUSINESS_INCOME,MAIN_BUSINESS_COST,GROSS_PROFIT,GROSS_RPOFIT_RATIO,INCOME_RATIO,PROFIT_RATIO,CURRENCY,SECUCODE,IS_MAXREPORTDATE,BELONG_TYPE_NAME",
+              "returnSourceName": "公司代码,报告期,报告期类型,报告期类型编码,日期类型,报告期名称,数据类型,标准产品名称,主营业务收入,主营业务成本,毛利,毛利率,收入构成,利润构成,计量币种,证券代码,是否最新报告期,类型名称",
+              "tableType": "10"
+            },
+            "macroAttributeExcelMap": {},
+            "fieldSet": [
+              {
+                "returnCode": "RPT_HKF9_MAINOPBUSINESS",
+                "returnName": "主营业务构成",
+                "classCode": "007202",
+                "checkedRelatedIndicators": false,
+                "startDate": "2025-01-01 00:00:00",
+                "endDate": "2025-12-31 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "YEAR",
+                "defineType": -1,
+                "isLoopN": false,
+                "isGroup": false,
+                "returnSourceCode": "ORG_CODE,REPORT_DATE,REPORT_TYPE,REPORT_TYPE_CODE,DATE_TYPE_CODE,REPORTDATE_TYPE,TYPE,STD_PRODUCT_NAME,MAIN_BUSINESS_INCOME,MAIN_BUSINESS_COST,GROSS_PROFIT,GROSS_RPOFIT_RATIO,INCOME_RATIO,PROFIT_RATIO,CURRENCY,SECUCODE,IS_MAXREPORTDATE,BELONG_TYPE_NAME",
+                "returnSourceName": "公司代码,报告期,报告期类型,报告期类型编码,日期类型,报告期名称,数据类型,标准产品名称,主营业务收入,主营业务成本,毛利,毛利率,收入构成,利润构成,计量币种,证券代码,是否最新报告期,类型名称",
+                "tableType": "10"
+              }
+            ],
+            "dataTableType": "F10_TABLE",
+            "inputTitle": "潍柴动力(02338.HK)主营业务构成(2025-06-30,中报)",
+            "rowInfo": {},
+            "colInfo": {},
+            "indicatorOrder": [
+              "0",
+              "1",
+              "2",
+              "3",
+              "4",
+              "5",
+              "6",
+              "7"
+            ],
+            "tipFlags": [],
+            "hasThumbnail": true,
+            "indicatorLimited": false,
+            "dataPositionEnum": "MetricLeftTimeTop",
+            "orderCol": {},
+            "jumpUrlList": [],
+            "dataTypeEnum": "F9",
+            "dateRuleSet": [],
+            "freqConvert": false,
+            "deleteInfo": [],
+            "macroCodeMap": {},
+            "entityTagDTO": {
+              "entityId": "1000145762",
+              "entityType": "SEC",
+              "entityTypeCode": "058001003001",
+              "entityTypeName": "H股",
+              "classCode": "002003",
+              "className": "港股",
+              "fullName": "潍柴动力",
+              "secuCode": "02338",
+              "market": "116",
+              "marketChar": ".HK",
+              "correct": false,
+              "hasKLine": false,
+              "valuation": false
+            },
+            "entityTagDTOList": [
+              {
+                "entityId": "1000145762",
+                "entityType": "SEC",
+                "entityTypeCode": "058001003001",
+                "entityTypeName": "H股",
+                "classCode": "002003",
+                "className": "港股",
+                "fullName": "潍柴动力",
+                "secuCode": "02338",
+                "market": "116",
+                "marketChar": ".HK",
+                "correct": false,
+                "hasKLine": false,
+                "valuation": false
+              }
+            ],
+            "indexTable": false,
+            "edbThirdData": false,
+            "dataUpdate": {},
+            "supportsTimeSeries": false,
+            "estimatedTokens": 0,
+            "summaryTips": {
+              "periodicalReport": null
+            },
+            "nestEntityListMap": {},
+            "excelTimeTruncate": false,
+            "frontendEntityName": "潍柴动力",
+            "frontendEntityCode": "02338.HK",
+            "frontendTitle": "主营业务构成(2025-06-30,中报)",
+            "frontendDesc": "",
+            "indicatorCount": 0,
+            "fieldParameterStr": "",
+            "tdayEnum": "NORMAL"
+          }
+        ],
+        "condition": {
+          "search_data_task_0": [
+            "潍柴动力",
+            "主营业务构成",
+            "2025-01-01至2025-12-31"
+          ],
+          "search_data_task_1": [
+            "潍柴动力",
+            "主营业务构成",
+            "2025-01-01至2025-12-31"
+          ]
+        },
+        "entityTagDTOList": []
+      },
+      "entityName": null,
+      "message": null,
+      "tableTruncated": false
+    },
+    "stack": null
+  },
+  "requestId": "2b514ac6bef44620b9ec108f0a4a3fe6"
+}

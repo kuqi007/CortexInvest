@@ -1,0 +1,1530 @@
+{
+  "success": true,
+  "status": 0,
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "requestId": null,
+    "message": "OK",
+    "status": 0,
+    "code": 0,
+    "data": {
+      "protocolType": "SEARCH_DATA",
+      "id": "14c1b62f-613f-470f-a364-80ce8270125c",
+      "refSeq": null,
+      "keyEntityList": null,
+      "searchDataResultDTO": {
+        "questionId": "61a528fe-8abd-4d1f-a0b4-c82e9f1d3c4c",
+        "dataTableDTOList": [
+          {
+            "code": "000338.SZ",
+            "entityName": "潍柴动力(000338.SZ)",
+            "table": {
+              "100000000003703": [
+                "136.8亿元",
+                "142.8亿元",
+                "112.1亿元"
+              ],
+              "100000000003705": [
+                "109.3亿元",
+                "114亿元",
+                "90.14亿元"
+              ],
+              "100000000003470": [
+                "5.902%",
+                "6.62%",
+                "5.24%"
+              ],
+              "100000000003466": [
+                "12.15%",
+                "13.74%",
+                "11.82%"
+              ],
+              "100000000003674": [
+                "2318亿元",
+                "2157亿元",
+                "2140亿元"
+              ],
+              "100000000002940": [
+                "10.69",
+                "9.935",
+                "9.091"
+              ],
+              "100000000002972": [
+                "21.48%",
+                "22.43%",
+                "21.09%"
+              ],
+              "100000000000210": [
+                "2318亿元",
+                "2157亿元",
+                "2140亿元"
+              ],
+              "100000000004682": [
+                "7.473%",
+                "0.8095%",
+                "22.15%"
+              ],
+              "100000000000688": [
+                "612.4亿元",
+                "537.4亿元",
+                "535.8亿元"
+              ],
+              "100000000003199": [
+                "13.96%",
+                "0.3015%",
+                "20.03%"
+              ],
+              "100000000004686": [
+                "-4.146%",
+                "26.51%",
+                "83.77%"
+              ],
+              "100000000000626": [
+                "20.53亿元",
+                "30.02亿元",
+                "25.13亿元"
+              ],
+              "100000000003207": [
+                "-31.62%",
+                "19.46%",
+                "57.75%"
+              ],
+              "100000000003520": [
+                "96.62亿元",
+                "105.3亿元",
+                "80.8亿元"
+              ],
+              "100000000004687": [
+                "-8.223%",
+                "30.29%",
+                "146.1%"
+              ],
+              "100000000003177": [
+                "16.87亿元",
+                "28.17亿元",
+                "24.41亿元"
+              ],
+              "100000000015540": [
+                "-40.12%",
+                "15.41%",
+                "101%"
+              ],
+              "headName": [
+                "2025年报",
+                "2024年报",
+                "2023年报"
+              ]
+            },
+            "rawTable": {
+              "100000000003703": [
+                "13680319243.39",
+                "14277681970.39",
+                "11211614275.25"
+              ],
+              "100000000003705": [
+                "10930504451.02",
+                "11403288984.59",
+                "9013894024.19"
+              ],
+              "100000000003470": [
+                "5.901540774400",
+                "6.619522726600",
+                "5.240088873400"
+              ],
+              "100000000003466": [
+                "12.152663144200",
+                "13.736290976200",
+                "11.819992536600"
+              ],
+              "100000000003674": [
+                "231809281106.82",
+                "215690504589.82",
+                "213958475631.13"
+              ],
+              "100000000002940": [
+                "10.694823213711",
+                "9.934772709018",
+                "9.091237408034"
+              ],
+              "100000000002972": [
+                "21.475388359400",
+                "22.432877740500",
+                "21.086430702100"
+              ],
+              "100000000000210": [
+                "231809281106.82",
+                "215690504589.82",
+                "213958475631.13"
+              ],
+              "100000000004682": [
+                "7.473104366700",
+                "0.809516404300",
+                "22.152024385700"
+              ],
+              "100000000000688": [
+                "61238656112.47",
+                "53736926028.93",
+                "53575412104.18"
+              ],
+              "100000000003199": [
+                "13.960102741100",
+                "0.301470242400",
+                "20.032500041800"
+              ],
+              "100000000004686": [
+                "-4.14603658829399100",
+                "26.50791049892239300",
+                "83.7690123717280700"
+              ],
+              "100000000000626": [
+                "2052953332.72",
+                "3002273595.19",
+                "2513202461.86"
+              ],
+              "100000000003207": [
+                "-31.620045021600",
+                "19.460076963600",
+                "57.745306204400"
+              ],
+              "100000000003520": [
+                "9661710486.4",
+                "10527430597.44",
+                "8079911264.23"
+              ],
+              "100000000004687": [
+                "-8.223470133828494",
+                "30.291413521398923",
+                "146.12867485858223"
+              ],
+              "100000000003177": [
+                "1686872493.71",
+                "2817289491.5700006",
+                "2441075577.0199995"
+              ],
+              "100000000015540": [
+                "-40.124275522400",
+                "15.411809371700",
+                "101.001785584500"
+              ],
+              "headName": [
+                "2025年报",
+                "2024年报",
+                "2023年报"
+              ]
+            },
+            "truncateRawTable": {},
+            "nameMap": {
+              "100000000003703": "净利润",
+              "headNameSub": "数据来源",
+              "100000000003705": "归属于母公司股东的净利润",
+              "100000000003470": "净利润/营业总收入(销售净利率)",
+              "100000000003466": "净资产收益率ROE",
+              "100000000003674": "营业收入",
+              "100000000002940": "每股净资产BPS",
+              "100000000002972": "销售毛利率",
+              "100000000000210": "营业总收入",
+              "100000000004682": "营业总收入同比增长率",
+              "100000000000688": "单季度.营业总收入",
+              "100000000003199": "单季度.营业总收入同比增长率",
+              "100000000004686": "归属母公司股东的净利润同比增长率",
+              "100000000000626": "单季度.归属母公司股东的净利润",
+              "100000000003207": "单季度.归属母公司股东的净利润同比增长率",
+              "100000000003520": "扣除非经常性损益后归属于母公司股东的净利润",
+              "100000000004687": "归属母公司股东的净利润同比增长率(扣除非经常性损益)",
+              "100000000003177": "单季度.扣除非经常损益后的净利润",
+              "100000000015540": "单季度.扣除非经常损益后的净利润同比增长率"
+            },
+            "headNameMap": {},
+            "field": {
+              "returnCode": "100000000003703",
+              "returnName": "净利润",
+              "classCode": "007101",
+              "checkedRelatedIndicators": false,
+              "startDate": "2023-04-12 00:00:00",
+              "endDate": "2026-04-12 00:00:00",
+              "fuzzy": false,
+              "dateGranularity": "FISCAL_YEAR",
+              "defineType": -1,
+              "rangeCount": -3,
+              "isLoopN": false,
+              "fixedParamValue": "type=1,ItemsCode=60",
+              "quantType": "1",
+              "isGroup": false,
+              "returnSourceCode": "NETPROFIT",
+              "returnSourceName": "净利润",
+              "graph": "1",
+              "unit": "1",
+              "tableType": "1",
+              "unitName": "元",
+              "unitDesc": "101:元:元"
+            },
+            "entityCodes": [
+              "000338.SZ"
+            ],
+            "macroAttributeExcelMap": {},
+            "fieldSet": [
+              {
+                "returnCode": "100000000003674",
+                "returnName": "营业收入",
+                "classCode": "007101",
+                "checkedRelatedIndicators": false,
+                "startDate": "2023-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "FISCAL_YEAR",
+                "defineType": -1,
+                "rangeCount": -3,
+                "isLoopN": false,
+                "fixedParamValue": "type=1,ItemsCode=9",
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "OPERATEREVE",
+                "returnSourceName": "营业收入",
+                "graph": "1",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "元",
+                "unitDesc": "101:元:元"
+              },
+              {
+                "returnCode": "100000000000210",
+                "returnName": "营业总收入",
+                "classCode": "007101",
+                "checkedRelatedIndicators": false,
+                "startDate": "2023-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "FISCAL_YEAR",
+                "defineType": -1,
+                "rangeCount": -3,
+                "isLoopN": false,
+                "fixedParamValue": "type=1,ItemsCode=83",
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "TOTALOPERATEREVE",
+                "returnSourceName": "营业总收入",
+                "graph": "1",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "元",
+                "unitDesc": "101:元:元"
+              },
+              {
+                "returnCode": "100000000004682",
+                "returnName": "营业总收入同比增长率",
+                "classCode": "007101",
+                "checkedRelatedIndicators": false,
+                "startDate": "2023-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "FISCAL_YEAR",
+                "defineType": -1,
+                "rangeCount": -3,
+                "isLoopN": false,
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "TYSTZ",
+                "returnSourceName": "营业总收入同比增长率",
+                "graph": "2",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "%",
+                "unitDesc": "10802:%:%"
+              },
+              {
+                "returnCode": "100000000015540",
+                "returnName": "单季度.扣除非经常损益后的净利润同比增长率",
+                "classCode": "007101",
+                "checkedRelatedIndicators": false,
+                "startDate": "2023-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "FISCAL_YEAR",
+                "defineType": -1,
+                "rangeCount": -3,
+                "isLoopN": false,
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "DJDKCFJCSYHDJLRTBZCL",
+                "returnSourceName": "单季度.扣除非经常损益后的净利润同比增长率",
+                "graph": "2",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "%",
+                "unitDesc": "10802:%:%"
+              },
+              {
+                "returnCode": "100000000000688",
+                "returnName": "单季度.营业总收入",
+                "classCode": "007101",
+                "checkedRelatedIndicators": false,
+                "startDate": "2023-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "FISCAL_YEAR",
+                "defineType": -1,
+                "rangeCount": -3,
+                "isLoopN": false,
+                "fixedParamValue": "Type=1,ItemsCode=83",
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "TOTALOPERATEREVE_S",
+                "returnSourceName": "单季度.营业总收入",
+                "graph": "1",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "元",
+                "unitDesc": "101:元:元"
+              },
+              {
+                "returnCode": "100000000004687",
+                "returnName": "归属母公司股东的净利润同比增长率(扣除非经常性损益)",
+                "classCode": "007101",
+                "checkedRelatedIndicators": false,
+                "startDate": "2023-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "FISCAL_YEAR",
+                "defineType": -1,
+                "rangeCount": -3,
+                "isLoopN": false,
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "SJLKTZ",
+                "returnSourceName": "归属母公司股东的净利润同比增长率(扣除非经常性损益)",
+                "graph": "2",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "%",
+                "unitDesc": "108:%:%"
+              },
+              {
+                "returnCode": "100000000002972",
+                "returnName": "销售毛利率",
+                "classCode": "007101",
+                "checkedRelatedIndicators": false,
+                "startDate": "2023-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "FISCAL_YEAR",
+                "defineType": -1,
+                "rangeCount": -3,
+                "isLoopN": false,
+                "fixedParamValue": "DataAdjustType=1",
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "XSMLL",
+                "returnSourceName": "销售毛利率",
+                "graph": "2",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "%",
+                "unitDesc": "10802:%:%"
+              },
+              {
+                "returnCode": "100000000000626",
+                "returnName": "单季度.归属母公司股东的净利润",
+                "classCode": "007101",
+                "checkedRelatedIndicators": false,
+                "startDate": "2023-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "FISCAL_YEAR",
+                "defineType": -1,
+                "rangeCount": -3,
+                "isLoopN": false,
+                "fixedParamValue": "Type=1,ItemsCode=61",
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "PARENTNETPROFIT_S",
+                "returnSourceName": "单季度.归属母公司股东的净利润",
+                "graph": "1",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "元",
+                "unitDesc": "101:元:元"
+              },
+              {
+                "returnCode": "100000000003703",
+                "returnName": "净利润",
+                "classCode": "007101",
+                "checkedRelatedIndicators": false,
+                "startDate": "2023-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "FISCAL_YEAR",
+                "defineType": -1,
+                "rangeCount": -3,
+                "isLoopN": false,
+                "fixedParamValue": "type=1,ItemsCode=60",
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "NETPROFIT",
+                "returnSourceName": "净利润",
+                "graph": "1",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "元",
+                "unitDesc": "101:元:元"
+              },
+              {
+                "returnCode": "100000000003705",
+                "returnName": "归属于母公司股东的净利润",
+                "classCode": "007101",
+                "checkedRelatedIndicators": false,
+                "startDate": "2023-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "FISCAL_YEAR",
+                "defineType": -1,
+                "rangeCount": -3,
+                "isLoopN": false,
+                "fixedParamValue": "type=1,ItemsCode=61",
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "PARENTNETPROFIT",
+                "returnSourceName": "归属于母公司股东的净利润",
+                "graph": "1",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "元",
+                "unitDesc": "101:元:元"
+              },
+              {
+                "returnCode": "100000000003470",
+                "returnName": "净利润/营业总收入(销售净利率)",
+                "classCode": "007101",
+                "checkedRelatedIndicators": false,
+                "startDate": "2023-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "FISCAL_YEAR",
+                "defineType": -1,
+                "rangeCount": -3,
+                "isLoopN": false,
+                "fixedParamValue": "DataAdjustType=1",
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "JLRCZSR",
+                "returnSourceName": "净利润/营业总收入",
+                "graph": "2",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "%",
+                "unitDesc": "10802:%:%"
+              },
+              {
+                "returnCode": "100000000004686",
+                "returnName": "归属母公司股东的净利润同比增长率",
+                "classCode": "007101",
+                "checkedRelatedIndicators": false,
+                "startDate": "2023-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "FISCAL_YEAR",
+                "defineType": -1,
+                "rangeCount": -3,
+                "isLoopN": false,
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "SJLTZ",
+                "returnSourceName": "归属母公司股东的净利润同比增长率",
+                "graph": "2",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "%",
+                "unitDesc": "10802:%:%"
+              },
+              {
+                "returnCode": "100000000003207",
+                "returnName": "单季度.归属母公司股东的净利润同比增长率",
+                "classCode": "007101",
+                "checkedRelatedIndicators": false,
+                "startDate": "2023-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "FISCAL_YEAR",
+                "defineType": -1,
+                "rangeCount": -3,
+                "isLoopN": false,
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "DJDSJLTZ",
+                "returnSourceName": "单季度.归属母公司股东的净利润同比增长率",
+                "graph": "2",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "%",
+                "unitDesc": "10802:%:%"
+              },
+              {
+                "returnCode": "100000000003177",
+                "returnName": "单季度.扣除非经常损益后的净利润",
+                "classCode": "007101",
+                "checkedRelatedIndicators": false,
+                "startDate": "2023-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "FISCAL_YEAR",
+                "defineType": -1,
+                "rangeCount": -3,
+                "isLoopN": false,
+                "fixedParamValue": "DataAdjustType=1",
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "DJDKCFJSJLR",
+                "returnSourceName": "单季度.扣除非经常损益后的净利润",
+                "graph": "1",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "元",
+                "unitDesc": "101:元:元"
+              },
+              {
+                "returnCode": "100000000000200",
+                "returnName": "归属于母公司股东的净利润",
+                "classCode": "007101",
+                "checkedRelatedIndicators": false,
+                "startDate": "2023-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "FISCAL_YEAR",
+                "defineType": -1,
+                "rangeCount": -3,
+                "isLoopN": false,
+                "fixedParamValue": "type=1,ItemsCode=61",
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "PARENTNETPROFIT",
+                "returnSourceName": "归属于母公司股东的净利润",
+                "graph": "1",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "元",
+                "unitDesc": "101:元:元"
+              },
+              {
+                "returnCode": "100000000002940",
+                "returnName": "每股净资产BPS",
+                "classCode": "007101",
+                "checkedRelatedIndicators": false,
+                "startDate": "2023-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "FISCAL_YEAR",
+                "defineType": -1,
+                "rangeCount": -3,
+                "isLoopN": false,
+                "fixedParamValue": "DataAdjustType=1",
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "BPS",
+                "returnSourceName": "每股净资产BPS",
+                "graph": "2",
+                "unit": "1",
+                "tableType": "1"
+              },
+              {
+                "returnCode": "100000000003199",
+                "returnName": "单季度.营业总收入同比增长率",
+                "classCode": "007101",
+                "checkedRelatedIndicators": false,
+                "startDate": "2023-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "FISCAL_YEAR",
+                "defineType": -1,
+                "rangeCount": -3,
+                "isLoopN": false,
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "DJDYZSTZ",
+                "returnSourceName": "单季度.营业总收入同比增长率",
+                "graph": "2",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "%",
+                "unitDesc": "10802:%:%"
+              },
+              {
+                "returnCode": "100000000003466",
+                "returnName": "净资产收益率ROE",
+                "classCode": "007101",
+                "checkedRelatedIndicators": false,
+                "startDate": "2023-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "FISCAL_YEAR",
+                "defineType": -1,
+                "rangeCount": -3,
+                "isLoopN": false,
+                "fixedParamValue": "DataAdjustType=1",
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "ROEPJ",
+                "returnSourceName": "净资产收益率ROE",
+                "graph": "2",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "%",
+                "unitDesc": "10802:%:%"
+              },
+              {
+                "returnCode": "100000000003520",
+                "returnName": "扣除非经常性损益后归属于母公司股东的净利润",
+                "classCode": "007101",
+                "checkedRelatedIndicators": false,
+                "startDate": "2023-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "FISCAL_YEAR",
+                "defineType": -1,
+                "rangeCount": -3,
+                "isLoopN": false,
+                "fixedParamValue": "DataAdjustType=1",
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "KCFJCXSYJLR",
+                "returnSourceName": "扣除非经常性损益后归属于母公司股东的净利润",
+                "graph": "1",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "元",
+                "unitDesc": "101:元:元"
+              }
+            ],
+            "dataTableType": "NORM_TABLE",
+            "rowInfo": {},
+            "colInfo": {},
+            "indicatorOrder": [
+              "100000000003703",
+              "100000000003705",
+              "100000000003470",
+              "100000000003466",
+              "100000000003674",
+              "100000000002940",
+              "100000000002972",
+              "100000000000210",
+              "100000000004682",
+              "100000000000688",
+              "100000000003199",
+              "100000000004686",
+              "100000000000626",
+              "100000000003207",
+              "100000000003520",
+              "100000000004687",
+              "100000000003177",
+              "100000000015540"
+            ],
+            "tipFlags": [],
+            "dataType": "数据浏览器",
+            "title": "潍柴动力(000338.SZ)的净利润、归属于母公司股东的净利润等",
+            "hasThumbnail": true,
+            "indicatorLimited": false,
+            "dataPositionEnum": "MetricLeftTimeTop",
+            "orderCol": {},
+            "jumpUrlList": [
+              {
+                "choiceUrl": "EM://stockdatacenter?type=browser&modType=STOCK&code=000338.SZ&indId=100000000003703|100:2025-12-31|115:1,100000000003703|100:2024-12-31|115:1,100000000003703|100:2023-12-31|115:1,100000000003705|100:2025-12-31|115:1,100000000003705|100:2024-12-31|115:1,100000000003705|100:2023-12-31|115:1,100000000003470|100:2025-12-31,100000000003470|100:2024-12-31,100000000003470|100:2023-12-31,100000000003466|100:2025-12-31,100000000003466|100:2024-12-31,100000000003466|100:2023-12-31,100000000003674|100:2025-12-31|115:1,100000000003674|100:2024-12-31|115:1,100000000003674|100:2023-12-31|115:1,100000000002940|100:2025-12-31,100000000002940|100:2024-12-31,100000000002940|100:2023-12-31,100000000002972|100:2025-12-31|314:1,100000000002972|100:2024-12-31|314:1,100000000002972|100:2023-12-31|314:1,100000000000210|100:2025-12-31|115:1,100000000000210|100:2024-12-31|115:1,100000000000210|100:2023-12-31|115:1,100000000004682|100:2025-12-31,100000000004682|100:2024-12-31,100000000004682|100:2023-12-31,100000000000688|115:1|451:2025-12-31,100000000000688|115:1|451:2024-12-31,100000000000688|115:1|451:2023-12-31,100000000003199|451:2025-12-31,100000000003199|451:2024-12-31,100000000003199|451:2023-12-31,100000000000200|100:2025-12-31|115:1,100000000000200|100:2024-12-31|115:1,100000000000200|100:2023-12-31|115:1,100000000004686|100:2025-12-31,100000000004686|100:2024-12-31,100000000004686|100:2023-12-31,100000000000626|115:1|451:2025-12-31,100000000000626|115:1|451:2024-12-31,100000000000626|115:1|451:2023-12-31,100000000003207|451:2025-12-31,100000000003207|451:2024-12-31,100000000003207|451:2023-12-31,100000000003520|100:2025-12-31|314:1,100000000003520|100:2024-12-31|314:1,100000000003520|100:2023-12-31|314:1,100000000004687|100:2025-12-31,100000000004687|100:2024-12-31,100000000004687|100:2023-12-31,100000000003177|451:2025-12-31|314:1,100000000003177|451:2024-12-31|314:1,100000000003177|451:2023-12-31|314:1,100000000015540|451:2025-12-31,100000000015540|451:2024-12-31,100000000015540|451:2023-12-31",
+                "typeName": "股票数据浏览器"
+              }
+            ],
+            "dataTypeEnum": "DATA_BROWSER",
+            "dateRuleSet": [],
+            "freqConvert": false,
+            "deleteInfo": [],
+            "macroCodeMap": {},
+            "entityTagDTO": {
+              "entityId": "1000010157",
+              "entityType": "SEC",
+              "entityTypeCode": "058001001",
+              "entityTypeName": "A股",
+              "classCode": "002001",
+              "className": "沪深京股票",
+              "fullName": "潍柴动力",
+              "secuCode": "000338",
+              "market": "0",
+              "marketChar": ".SZ",
+              "correct": false,
+              "hasKLine": false,
+              "valuation": false
+            },
+            "entityTagDTOList": [
+              {
+                "entityId": "1000010157",
+                "entityType": "SEC",
+                "entityTypeCode": "058001001",
+                "entityTypeName": "A股",
+                "classCode": "002001",
+                "className": "沪深京股票",
+                "fullName": "潍柴动力",
+                "secuCode": "000338",
+                "market": "0",
+                "marketChar": ".SZ",
+                "correct": false,
+                "hasKLine": false,
+                "valuation": false
+              }
+            ],
+            "indexTable": false,
+            "edbThirdData": false,
+            "dataUpdate": {
+              "2025年报": false
+            },
+            "supportsTimeSeries": false,
+            "estimatedTokens": 0,
+            "summaryTips": {
+              "periodicalReport": null
+            },
+            "nestEntityListMap": {},
+            "excelTimeTruncate": false,
+            "frontendEntityName": "",
+            "frontendEntityCode": "",
+            "frontendTitle": "",
+            "frontendDesc": "",
+            "indicatorCount": 0,
+            "fieldParameterStr": "",
+            "tdayEnum": "NORMAL"
+          },
+          {
+            "code": "02338.HK",
+            "entityName": "潍柴动力(02338.HK)(最新年结日12-31)",
+            "table": {
+              "100000000047277": [
+                "151.5亿港元",
+                "154.2亿港元",
+                "123.7亿港元"
+              ],
+              "100000000046675": [
+                "121亿港元",
+                "123.1亿港元",
+                "99.47亿港元"
+              ],
+              "100000000051343": [
+                "2566亿港元",
+                "2329亿港元",
+                "2361亿港元"
+              ],
+              "100000000047139": [
+                "11.73",
+                "13.15",
+                "11.36"
+              ],
+              "100000000046871": [
+                "11.84港元",
+                "10.73港元",
+                "10.03港元"
+              ],
+              "100000000046899": [
+                "5.902",
+                "6.62",
+                "5.24"
+              ],
+              "headName": [
+                "2025年报",
+                "2024年报",
+                "2023年报"
+              ]
+            },
+            "rawTable": {
+              "100000000047277": [
+                "15146165101.957447",
+                "15417997030.787008",
+                "12371845992.41906"
+              ],
+              "100000000046675": [
+                "12101707724.607521",
+                "12314035014.243446",
+                "9946695089.70228"
+              ],
+              "100000000051343": [
+                "256647639674.52017",
+                "232917049576.4978",
+                "236099926762.96045"
+              ],
+              "100000000047139": [
+                "11.729240950100001",
+                "13.1531348899",
+                "11.3617839815"
+              ],
+              "100000000046871": [
+                "11.840773248722355",
+                "10.728232807457562",
+                "10.032042338542519"
+              ],
+              "100000000046899": [
+                "5.9015407744",
+                "6.6195227266",
+                "5.2400888733999995"
+              ],
+              "headName": [
+                "2025年报",
+                "2024年报",
+                "2023年报"
+              ]
+            },
+            "truncateRawTable": {},
+            "nameMap": {
+              "100000000047277": "净利润",
+              "headNameSub": "数据来源",
+              "100000000046675": "归属于母公司股东的净利润",
+              "100000000051343": "营业收入",
+              "100000000047139": "净资产收益率ROE(摊薄)(%)",
+              "100000000046871": "每股净资产BPS",
+              "100000000046899": "销售净利率(%)"
+            },
+            "headNameMap": {},
+            "field": {
+              "returnCode": "100000000047277",
+              "returnName": "净利润",
+              "classCode": "007101",
+              "checkedRelatedIndicators": false,
+              "startDate": "2023-04-12 00:00:00",
+              "endDate": "2026-04-12 00:00:00",
+              "fuzzy": false,
+              "dateGranularity": "FISCAL_YEAR",
+              "defineType": -1,
+              "rangeCount": -3,
+              "isLoopN": false,
+              "fixedParamValue": "type=1,CurType=4",
+              "quantType": "1",
+              "isGroup": false,
+              "returnSourceCode": "NI",
+              "returnSourceName": "净利润",
+              "graph": "1",
+              "unit": "1",
+              "tableType": "1",
+              "unitName": "元",
+              "unitDesc": "101:元:元"
+            },
+            "entityCodes": [
+              "02338.HK"
+            ],
+            "macroAttributeExcelMap": {},
+            "fieldSet": [
+              {
+                "returnCode": "100000000047277",
+                "returnName": "净利润",
+                "classCode": "007101",
+                "checkedRelatedIndicators": false,
+                "startDate": "2023-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "FISCAL_YEAR",
+                "defineType": -1,
+                "rangeCount": -3,
+                "isLoopN": false,
+                "fixedParamValue": "type=1,CurType=4",
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "NI",
+                "returnSourceName": "净利润",
+                "graph": "1",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "元",
+                "unitDesc": "101:元:元"
+              },
+              {
+                "returnCode": "100000000046871",
+                "returnName": "每股净资产BPS",
+                "classCode": "007101",
+                "checkedRelatedIndicators": false,
+                "startDate": "2023-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "FISCAL_YEAR",
+                "defineType": -1,
+                "rangeCount": -3,
+                "isLoopN": false,
+                "fixedParamValue": "type=1,CurType=4",
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "BPS",
+                "returnSourceName": "每股净资产BPS",
+                "graph": "2",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "元",
+                "unitDesc": "101:元:元"
+              },
+              {
+                "returnCode": "100000000046675",
+                "returnName": "归属于母公司股东的净利润",
+                "classCode": "007101",
+                "checkedRelatedIndicators": false,
+                "startDate": "2023-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "FISCAL_YEAR",
+                "defineType": -1,
+                "rangeCount": -3,
+                "isLoopN": false,
+                "fixedParamValue": "type=1,CurType=4",
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "NETPROFIT",
+                "returnSourceName": "归属于母公司股东的净利润",
+                "graph": "1",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "元",
+                "unitDesc": "101:元:元"
+              },
+              {
+                "returnCode": "100000000051343",
+                "returnName": "营业收入",
+                "classCode": "007101",
+                "checkedRelatedIndicators": false,
+                "startDate": "2023-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "FISCAL_YEAR",
+                "defineType": -1,
+                "rangeCount": -3,
+                "isLoopN": false,
+                "fixedParamValue": "type=1,CurType=4",
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "OPREVENUE",
+                "returnSourceName": "营业收入",
+                "graph": "0",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "元",
+                "unitDesc": "101:元:元"
+              },
+              {
+                "returnCode": "100000000046899",
+                "returnName": "销售净利率(%)",
+                "classCode": "007101",
+                "checkedRelatedIndicators": false,
+                "startDate": "2023-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "FISCAL_YEAR",
+                "defineType": -1,
+                "rangeCount": -3,
+                "isLoopN": false,
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "NETPROFITMARGIN",
+                "returnSourceName": "销售净利率(%)",
+                "graph": "2",
+                "unit": "1",
+                "tableType": "1"
+              },
+              {
+                "returnCode": "100000000047139",
+                "returnName": "净资产收益率ROE(摊薄)(%)",
+                "classCode": "007101",
+                "checkedRelatedIndicators": false,
+                "startDate": "2023-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "FISCAL_YEAR",
+                "defineType": -1,
+                "rangeCount": -3,
+                "isLoopN": false,
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "ROE_DILUTED",
+                "returnSourceName": "净资产收益率ROE(摊薄)(%)",
+                "graph": "2",
+                "unit": "1",
+                "tableType": "1"
+              }
+            ],
+            "dataTableType": "NORM_TABLE",
+            "rowInfo": {},
+            "colInfo": {},
+            "indicatorOrder": [
+              "100000000047277",
+              "100000000046675",
+              "100000000051343",
+              "100000000047139",
+              "100000000046871",
+              "100000000046899"
+            ],
+            "tipFlags": [],
+            "dataType": "数据浏览器",
+            "title": "潍柴动力(02338.HK)(最新年结日12-31)的净利润、归属于母公司股东的净利润等",
+            "hasThumbnail": true,
+            "indicatorLimited": false,
+            "dataPositionEnum": "MetricLeftTimeTop",
+            "orderCol": {},
+            "jumpUrlList": [
+              {
+                "choiceUrl": "EM://stockdatacenter?type=browser&modType=STOCK&code=02338.HK&indId=100000000047277|100:2025-12-31|115:1|453:4,100000000047277|100:2024-12-31|115:1|453:4,100000000047277|100:2023-12-31|115:1|453:4,100000000046675|100:2025-12-31|115:1|453:4,100000000046675|100:2024-12-31|115:1|453:4,100000000046675|100:2023-12-31|115:1|453:4,100000000051343|100:2025-12-31|115:1|453:4,100000000051343|100:2024-12-31|115:1|453:4,100000000051343|100:2023-12-31|115:1|453:4,100000000047139|100:2025-12-31,100000000047139|100:2024-12-31,100000000047139|100:2023-12-31,100000000046871|100:2025-12-31|652:4,100000000046871|100:2024-12-31|652:4,100000000046871|100:2023-12-31|652:4,100000000046899|100:2025-12-31,100000000046899|100:2024-12-31,100000000046899|100:2023-12-31",
+                "typeName": "股票数据浏览器"
+              }
+            ],
+            "dataTypeEnum": "DATA_BROWSER",
+            "dateRuleSet": [],
+            "freqConvert": false,
+            "deleteInfo": [],
+            "macroCodeMap": {},
+            "entityTagDTO": {
+              "entityId": "1000145762",
+              "entityType": "SEC",
+              "entityTypeCode": "058001003001",
+              "entityTypeName": "H股",
+              "classCode": "002003",
+              "className": "港股",
+              "fullName": "潍柴动力",
+              "secuCode": "02338",
+              "market": "116",
+              "marketChar": ".HK",
+              "correct": false,
+              "hasKLine": false,
+              "valuation": false
+            },
+            "entityTagDTOList": [
+              {
+                "entityId": "1000145762",
+                "entityType": "SEC",
+                "entityTypeCode": "058001003001",
+                "entityTypeName": "H股",
+                "classCode": "002003",
+                "className": "港股",
+                "fullName": "潍柴动力",
+                "secuCode": "02338",
+                "market": "116",
+                "marketChar": ".HK",
+                "correct": false,
+                "hasKLine": false,
+                "valuation": false
+              }
+            ],
+            "indexTable": false,
+            "edbThirdData": false,
+            "dataUpdate": {
+              "2025年报": false
+            },
+            "supportsTimeSeries": false,
+            "estimatedTokens": 0,
+            "summaryTips": {
+              "periodicalReport": null
+            },
+            "nestEntityListMap": {},
+            "excelTimeTruncate": false,
+            "frontendEntityName": "",
+            "frontendEntityCode": "",
+            "frontendTitle": "",
+            "frontendDesc": "",
+            "indicatorCount": 0,
+            "fieldParameterStr": "",
+            "tdayEnum": "NORMAL"
+          },
+          {
+            "code": "000338.SZ",
+            "entityName": "潍柴动力(000338.SZ)",
+            "table": {
+              "100000000004890": [
+                "124.3亿元"
+              ],
+              "100000000004891": [
+                "8.202%"
+              ],
+              "headName": [
+                "2025"
+              ]
+            },
+            "rawTable": {
+              "100000000004890": [
+                "12427000000"
+              ],
+              "100000000004891": [
+                "8.201663903500"
+              ],
+              "headName": [
+                "2025"
+              ]
+            },
+            "truncateRawTable": {},
+            "nameMap": {
+              "100000000004890": "预测归属于母公司的净利润中值(2026-04-11)",
+              "headNameSub": "数据来源",
+              "100000000004891": "预测归属于母公司的净利润增长率(2026-04-11)"
+            },
+            "headNameMap": {},
+            "field": {
+              "returnCode": "100000000004890",
+              "returnName": "预测归属于母公司的净利润中值",
+              "classCode": "007101",
+              "checkedRelatedIndicators": false,
+              "startDate": "2023-04-12 00:00:00",
+              "endDate": "2026-04-12 00:00:00",
+              "fuzzy": false,
+              "dateGranularity": "FISCAL_YEAR",
+              "defineType": -1,
+              "rangeCount": -3,
+              "isLoopN": false,
+              "fixedParamValue": "Cycle=180",
+              "quantType": "1",
+              "isGroup": false,
+              "returnSourceCode": "DEC_LIRUNZZ",
+              "returnSourceName": "预测归属于母公司的净利润中值",
+              "graph": "1",
+              "unit": "1",
+              "tableType": "1",
+              "unitName": "元",
+              "unitDesc": "101:元:元"
+            },
+            "entityCodes": [
+              "000338.SZ"
+            ],
+            "macroAttributeExcelMap": {},
+            "fieldSet": [
+              {
+                "returnCode": "100000000004891",
+                "returnName": "预测归属于母公司的净利润增长率",
+                "classCode": "007101",
+                "checkedRelatedIndicators": false,
+                "startDate": "2023-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "FISCAL_YEAR",
+                "defineType": -1,
+                "rangeCount": -3,
+                "isLoopN": false,
+                "fixedParamValue": "Cycle=180",
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "DEC_LRZZL",
+                "returnSourceName": "预测归属于母公司的净利润增长率",
+                "graph": "2",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "%",
+                "unitDesc": "10802:%:%"
+              },
+              {
+                "returnCode": "100000000004890",
+                "returnName": "预测归属于母公司的净利润中值",
+                "classCode": "007101",
+                "checkedRelatedIndicators": false,
+                "startDate": "2023-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "FISCAL_YEAR",
+                "defineType": -1,
+                "rangeCount": -3,
+                "isLoopN": false,
+                "fixedParamValue": "Cycle=180",
+                "quantType": "1",
+                "isGroup": false,
+                "returnSourceCode": "DEC_LIRUNZZ",
+                "returnSourceName": "预测归属于母公司的净利润中值",
+                "graph": "1",
+                "unit": "1",
+                "tableType": "1",
+                "unitName": "元",
+                "unitDesc": "101:元:元"
+              }
+            ],
+            "dataTableType": "NORM_TABLE",
+            "rowInfo": {},
+            "colInfo": {},
+            "indicatorOrder": [
+              "100000000004890",
+              "100000000004891"
+            ],
+            "tipFlags": [],
+            "dataType": "数据浏览器",
+            "title": "潍柴动力(000338.SZ)的预测归属于母公司的净利润中值(2026-04-11)、预测归属于母公司的净利润增长率(2026-04-11)",
+            "hasThumbnail": true,
+            "indicatorLimited": false,
+            "dataPositionEnum": "MetricLeftTimeTop",
+            "orderCol": {},
+            "jumpUrlList": [
+              {
+                "choiceUrl": "EM://stockdatacenter?type=browser&modType=STOCK&code=000338.SZ&indId=100000000004890|117:2025|119:2026-04-11|521:180,100000000004891|117:2025|119:2026-04-11|521:180",
+                "typeName": "股票数据浏览器"
+              }
+            ],
+            "dataTypeEnum": "DATA_BROWSER",
+            "dateRuleSet": [],
+            "freqConvert": false,
+            "deleteInfo": [],
+            "macroCodeMap": {},
+            "entityTagDTO": {
+              "entityId": "1000010157",
+              "entityType": "SEC",
+              "entityTypeCode": "058001001",
+              "entityTypeName": "A股",
+              "classCode": "002001",
+              "className": "沪深京股票",
+              "fullName": "潍柴动力",
+              "secuCode": "000338",
+              "market": "0",
+              "marketChar": ".SZ",
+              "correct": false,
+              "hasKLine": false,
+              "valuation": false
+            },
+            "entityTagDTOList": [
+              {
+                "entityId": "1000010157",
+                "entityType": "SEC",
+                "entityTypeCode": "058001001",
+                "entityTypeName": "A股",
+                "classCode": "002001",
+                "className": "沪深京股票",
+                "fullName": "潍柴动力",
+                "secuCode": "000338",
+                "market": "0",
+                "marketChar": ".SZ",
+                "correct": false,
+                "hasKLine": false,
+                "valuation": false
+              }
+            ],
+            "indexTable": false,
+            "edbThirdData": false,
+            "dataUpdate": {
+              "2025": false
+            },
+            "supportsTimeSeries": false,
+            "estimatedTokens": 0,
+            "summaryTips": {
+              "periodicalReport": null
+            },
+            "nestEntityListMap": {},
+            "excelTimeTruncate": false,
+            "frontendEntityName": "",
+            "frontendEntityCode": "",
+            "frontendTitle": "",
+            "frontendDesc": "",
+            "indicatorCount": 0,
+            "fieldParameterStr": "",
+            "tdayEnum": "NORMAL"
+          },
+          {
+            "code": "02338.HK",
+            "entityName": "指标名称",
+            "table": {
+              "headName": [
+                "2025-12-31",
+                "2025-09-30",
+                "2025-06-30",
+                "2025-03-31",
+                "2024-12-31",
+                "2024-09-30",
+                "2024-06-30",
+                "2024-03-31",
+                "2023-12-31",
+                "2023-09-30",
+                "2023-06-30"
+              ],
+              "毛利(元)": [
+                "497.8亿",
+                "373.7亿",
+                "251亿",
+                "127.7亿",
+                "483.9亿",
+                "354.1亿",
+                "244.7亿",
+                "122.2亿",
+                "435.2亿",
+                "315.9亿",
+                "199.5亿"
+              ],
+              "原始币种": [
+                "人民币",
+                "人民币",
+                "人民币",
+                "人民币",
+                "人民币",
+                "人民币",
+                "人民币",
+                "人民币",
+                "人民币",
+                "人民币",
+                "人民币"
+              ]
+            },
+            "rawTable": {
+              "headName": [
+                "2025-12-31",
+                "2025-09-30",
+                "2025-06-30",
+                "2025-03-31",
+                "2024-12-31",
+                "2024-09-30",
+                "2024-06-30",
+                "2024-03-31",
+                "2023-12-31",
+                "2023-09-30",
+                "2023-06-30"
+              ],
+              "毛利(元)": [
+                "49781943370.8",
+                "37370291538.59",
+                "25096627055.23",
+                "12772825622.28",
+                "48385587192.5",
+                "35406757590.37",
+                "24465796892.42",
+                "12219911439.96",
+                "43521224208.79",
+                "31587972590.14",
+                "19952420385.97"
+              ],
+              "原始币种": [
+                "人民币",
+                "人民币",
+                "人民币",
+                "人民币",
+                "人民币",
+                "人民币",
+                "人民币",
+                "人民币",
+                "人民币",
+                "人民币",
+                "人民币"
+              ]
+            },
+            "truncateRawTable": {},
+            "nameMap": {
+              "headName": "headName",
+              "毛利(元)": "毛利(元)",
+              "原始币种": "原始币种"
+            },
+            "headNameMap": {},
+            "field": {
+              "returnCode": "RPT_CUSTOM_HKF9_ORIGFN_ITEM",
+              "returnName": "利润表",
+              "classCode": "007202",
+              "checkedRelatedIndicators": false,
+              "startDate": "2023-04-12 00:00:00",
+              "endDate": "2026-04-12 00:00:00",
+              "fuzzy": false,
+              "dateGranularity": "FISCAL_YEAR",
+              "defineType": -1,
+              "rangeCount": -3,
+              "isLoopN": false,
+              "isGroup": false,
+              "returnSourceCode": "STD_ITEM_CODE,ORIG_ITEM_NAME,TYPE",
+              "returnSourceName": "标准科目编码,原始科目名称,字段类型",
+              "tableType": "10"
+            },
+            "macroAttributeExcelMap": {},
+            "fieldSet": [
+              {
+                "returnCode": "RPT_CUSTOM_HKF9_ORIGFN_ITEM",
+                "returnName": "利润表",
+                "classCode": "007202",
+                "checkedRelatedIndicators": false,
+                "startDate": "2023-04-12 00:00:00",
+                "endDate": "2026-04-12 00:00:00",
+                "fuzzy": false,
+                "dateGranularity": "FISCAL_YEAR",
+                "defineType": -1,
+                "rangeCount": -3,
+                "isLoopN": false,
+                "isGroup": false,
+                "returnSourceCode": "STD_ITEM_CODE,ORIG_ITEM_NAME,TYPE",
+                "returnSourceName": "标准科目编码,原始科目名称,字段类型",
+                "tableType": "10"
+              }
+            ],
+            "dataTableType": "F10_TABLE",
+            "inputTitle": "潍柴动力(02338.HK)利润表[合并报表(调整)](2023-04-12~2026-04-12)",
+            "rowInfo": {},
+            "colInfo": {},
+            "indicatorOrder": [
+              "毛利(元)",
+              "原始币种"
+            ],
+            "tipFlags": [],
+            "hasThumbnail": true,
+            "indicatorLimited": false,
+            "dataPositionEnum": "MetricLeftTimeTop",
+            "orderCol": {},
+            "jumpUrlList": [
+              {
+                "choiceUrl": "https://choicewh2.eastmoney.com/stock/hk/f9/index.html#/profitTable_Original?securitycode=02338.HK",
+                "typeName": "F9深度资料",
+                "securityName": "潍柴动力"
+              }
+            ],
+            "dataTypeEnum": "F9",
+            "dateRuleSet": [],
+            "freqConvert": false,
+            "deleteInfo": [],
+            "macroCodeMap": {},
+            "entityTagDTO": {
+              "entityId": "1000145762",
+              "entityType": "SEC",
+              "entityTypeCode": "058001003001",
+              "entityTypeName": "H股",
+              "classCode": "002003",
+              "className": "港股",
+              "fullName": "潍柴动力",
+              "secuCode": "02338",
+              "market": "116",
+              "marketChar": ".HK",
+              "correct": false,
+              "hasKLine": false,
+              "valuation": false
+            },
+            "entityTagDTOList": [
+              {
+                "entityId": "1000145762",
+                "entityType": "SEC",
+                "entityTypeCode": "058001003001",
+                "entityTypeName": "H股",
+                "classCode": "002003",
+                "className": "港股",
+                "fullName": "潍柴动力",
+                "secuCode": "02338",
+                "market": "116",
+                "marketChar": ".HK",
+                "correct": false,
+                "hasKLine": false,
+                "valuation": false
+              }
+            ],
+            "indexTable": false,
+            "edbThirdData": false,
+            "dataUpdate": {},
+            "supportsTimeSeries": false,
+            "estimatedTokens": 0,
+            "summaryTips": {
+              "periodicalReport": null
+            },
+            "nestEntityListMap": {},
+            "excelTimeTruncate": false,
+            "frontendEntityName": "潍柴动力",
+            "frontendEntityCode": "02338.HK",
+            "frontendTitle": "利润表[合并报表(调整)](2023-04-12~2026-04-12)",
+            "frontendDesc": "",
+            "indicatorCount": 0,
+            "fieldParameterStr": "",
+            "tdayEnum": "NORMAL"
+          }
+        ],
+        "condition": {
+          "search_data_task_0": [
+            "潍柴动力",
+            "净利润归属于母公司股东的净利润净利润/营业总收入(销售净利率)净资产收益率ROE营业收入每股净资产BPS销售毛利率营业总收入营业总收入同比增长率单季度.营业总收入单季度.营业总收入同比增长率归属母公司股东的净利润同比增长率单季度.归属母公司股东的净利润单季度.归属母公司股东的净利润同比增长率扣除非经常性损益后归属于母公司股东的净利润归属母公司股东的净利润同比增长率(扣除非经常性损益)单季度.扣除非经常损益后的净利润单季度.扣除非经常损益后的净利润同比增长率预测归属于母公司的净利润中值预测归属于母公司的净利润增长率",
+            "2023-04-12至2026-04-12"
+          ],
+          "search_data_task_1": [
+            "潍柴动力",
+            "净利润归属于母公司股东的净利润营业收入净资产收益率ROE(摊薄)(%)每股净资产BPS销售净利率(%)利润表",
+            "2023-04-12至2026-04-12"
+          ]
+        },
+        "entityTagDTOList": []
+      },
+      "entityName": null,
+      "message": null,
+      "tableTruncated": false
+    },
+    "stack": null
+  },
+  "requestId": "01b12484ee454241aa66f30b104acf07"
+}

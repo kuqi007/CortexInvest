@@ -1,0 +1,8 @@
+金融数据查询结果说明
+========================================
+查询内容: 东阳光近三年年报净利润 营业收入 毛利率 净利率 ROE 每股净资产
+数据文件路径: /Users/zhuqiqi/Documents/development/aiSpace/ai-investor/东阳光_分析数据/mx_data_东阳光近三年年报净利润_营业收入_毛利率_净利率_ROE_每股净资产.xlsx
+描述文件路径: /Users/zhuqiqi/Documents/development/aiSpace/ai-investor/东阳光_分析数据/mx_data_东阳光近三年年报净利润_营业收入_毛利率_净利率_ROE_每股净资产_description.txt
+数据行数: 4
+表数量: 2
+Sheet 列表: 东阳光(600673.SH)的净利润、归属于母公司股东的净利润等, 东阳光(600673.SH)的预测归属于母公司的净利润中值(2026-04-11)、预测归属于母公司的净利润增长率(2026-04-11)
