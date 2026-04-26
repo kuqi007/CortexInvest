@@ -63,6 +63,25 @@ function WatchingContent() {
   const { logs, addLogs, clearLogs } = useLogEntries();
   const { planMap, refresh: refreshPlans } = useTradePlans();
   const [drawerSymbol, setDrawerSymbol] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [addCode, setAddCode] = useState("");
+
+  async function handleAdd() {
+    const code = addCode.trim();
+    if (!code) return;
+    try {
+      const resp = await fetch("/api/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "add", code, data: { type: "watching" } }),
+      });
+      const result = await resp.json();
+      if (result?.success) {
+        setAddCode("");
+        refresh();
+      }
+    } catch { /* ignore */ }
+  }
 
   const allTags = useMemo(
     () => [...new Set(services.flatMap((s) => s.tags ?? []))],
@@ -114,11 +133,18 @@ function WatchingContent() {
   const tagFiltered = useMemo(() => filterTag
     ? tabServices.filter((s) => s.tags?.includes(filterTag))
     : tabServices, [tabServices, filterTag]);
-  const pinnedList = useMemo(() => applySortList(tagFiltered.filter((s) => !s.hidden && (s.star || (s.pin_order ?? 0) > 0))), [tagFiltered, watchSort]);
+  const searchFiltered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return tagFiltered;
+    return tagFiltered.filter((s) =>
+      s.id.toLowerCase().includes(q) || (s.alias || s.name).toLowerCase().includes(q)
+    );
+  }, [tagFiltered, search]);
+  const pinnedList = useMemo(() => applySortList(searchFiltered.filter((s) => !s.hidden && (s.star || (s.pin_order ?? 0) > 0))), [searchFiltered, watchSort]);
   const pinnedIds = useMemo(() => new Set(pinnedList.map((s) => s.id)), [pinnedList]);
-  const watchStock = useMemo(() => applySortList(tagFiltered.filter((s) => !s.hidden && !isETF(s) && !pinnedIds.has(s.id))), [tagFiltered, watchSort, pinnedIds]);
-  const watchETF = useMemo(() => applySortList(tagFiltered.filter((s) => !s.hidden && isETF(s) && !pinnedIds.has(s.id))), [tagFiltered, watchSort, pinnedIds]);
-  const hiddenList = useMemo(() => applySortList(tagFiltered.filter((s) => s.hidden)), [tagFiltered, watchSort]);
+  const watchStock = useMemo(() => applySortList(searchFiltered.filter((s) => !s.hidden && !isETF(s) && !pinnedIds.has(s.id))), [searchFiltered, watchSort, pinnedIds]);
+  const watchETF = useMemo(() => applySortList(searchFiltered.filter((s) => !s.hidden && isETF(s) && !pinnedIds.has(s.id))), [searchFiltered, watchSort, pinnedIds]);
+  const hiddenList = useMemo(() => applySortList(searchFiltered.filter((s) => s.hidden)), [searchFiltered, watchSort]);
 
   const now = ts ? new Date(ts).toLocaleTimeString("zh-CN", { hour12: false }) : "--:--:--";
   const isStale = (ts > 0 && Date.now() - ts > pollMs * 3) || fetchError !== null;
@@ -238,7 +264,7 @@ function WatchingContent() {
 
         {loading && (
           <div style={{ color: D.comment, padding: "16px 0" }}>
-            <span style={{ color: D.green }}>info</span> Loading watching list...
+            <span style={{ color: D.green }}>info</span> 加载中...
           </div>
         )}
 
@@ -251,8 +277,69 @@ function WatchingContent() {
                 <span style={{ cursor: "pointer", color: D.red, fontWeight: 500 }} onClick={() => setFilterTag(null)}>x</span>
               </div>
             )}
+
+            {/* search + add */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+              <span style={{ color: D.comment }}>搜索:</span>
+              <input
+                placeholder="代码或名称..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                style={{
+                  background: D.currentLine,
+                  border: `1px solid ${D.comment}`,
+                  color: D.fg,
+                  fontFamily: "JetBrains Mono, monospace",
+                  fontSize: 12,
+                  padding: "2px 8px",
+                  outline: "none",
+                  borderRadius: 2,
+                  width: 140,
+                }}
+              />
+              {search && (
+                <span style={{ color: D.comment, fontSize: 11 }}>
+                  {searchFiltered.length}/{tabServices.length} 匹配
+                </span>
+              )}
+              <div style={{ flex: 1 }} />
+              <input
+                placeholder="代码"
+                value={addCode}
+                onChange={(e) => setAddCode(e.target.value.toUpperCase())}
+                style={{
+                  background: D.currentLine,
+                  border: `1px solid ${D.comment}`,
+                  color: D.fg,
+                  fontFamily: "JetBrains Mono, monospace",
+                  fontSize: 12,
+                  padding: "2px 8px",
+                  outline: "none",
+                  borderRadius: 2,
+                  width: 90,
+                }}
+                onKeyDown={(e) => { if (e.key === "Enter") handleAdd(); }}
+              />
+              <button
+                onClick={handleAdd}
+                style={{
+                  background: D.purple,
+                  color: D.bg,
+                  border: "none",
+                  fontFamily: "JetBrains Mono, monospace",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  padding: "3px 12px",
+                  borderRadius: 3,
+                  cursor: "pointer",
+                }}
+              >
+                添加自选
+              </button>
+            </div>
+
             <div style={{ color: D.comment, marginBottom: 6 }}>
-              <span>Every {pollMs / 1000}.0s: svc-monitor --watching</span>
+              <span>每 {pollMs / 1000} 秒轮询一次</span>
               <span style={{ float: "right" }}>
                 {isStale && <span style={{ color: D.red, fontWeight: 500, marginRight: 8 }}>STALE</span>}
                 {tradingStatus?.trading ? "交易中" : "休市"}
@@ -267,15 +354,15 @@ function WatchingContent() {
             )}
 
             <div style={{ color: D.comment, marginBottom: 6 }}>
-              Nodes: <span style={{ color: D.purple }}>{tabServices.length}</span>{"  "}
-              visible:<span style={{ color: D.fg }}>{watchStock.length + watchETF.length}</span>{"  "}
-              hidden:<span style={{ color: D.comment }}>{hiddenList.length}</span>
+              节点: <span style={{ color: D.purple }}>{tabServices.length}</span>{"  "}
+              可见:<span style={{ color: D.fg }}>{watchStock.length + watchETF.length}</span>{"  "}
+              隐藏:<span style={{ color: D.comment }}>{hiddenList.length}</span>
             </div>
 
             {pinnedList.length > 0 && (
               <>
                 <div style={{ color: D.comment, padding: "4px 0 1px" }}>
-                  <span style={{ color: D.yellow }}>★</span> # ── pinned ({pinnedList.length}) ──
+                  <span style={{ color: D.yellow }}>★</span> # ── 置顶 ({pinnedList.length}) ──
                 </div>
                 {header}{pinnedList.map((s) => <WatchRow key={s.id} s={s} />)}
               </>
@@ -284,7 +371,7 @@ function WatchingContent() {
             {watchStock.length > 0 && (
               <>
                 <div style={{ color: D.comment, padding: "4px 0 1px", cursor: "pointer", userSelect: "none" }} onClick={() => setWatchStockOpen((v) => !v)}>
-                  <span style={{ color: D.purple }}>{watchStockOpen ? "▾" : "▸"}</span> # ── watching:stocks ({watchStock.length}) ──
+                  <span style={{ color: D.purple }}>{watchStockOpen ? "▾" : "▸"}</span> # ── 自选:股票 ({watchStock.length}) ──
                 </div>
                 {watchStockOpen && <>{header}{watchStock.map((s) => <WatchRow key={s.id} s={s} />)}</>}
               </>
@@ -293,7 +380,7 @@ function WatchingContent() {
             {watchETF.length > 0 && (
               <>
                 <div style={{ color: D.comment, padding: "4px 0 1px", cursor: "pointer", userSelect: "none" }} onClick={() => setWatchETFOpen((v) => !v)}>
-                  <span style={{ color: D.purple }}>{watchETFOpen ? "▾" : "▸"}</span> # ── watching:ETF ({watchETF.length}) ──
+                  <span style={{ color: D.purple }}>{watchETFOpen ? "▾" : "▸"}</span> # ── 自选:ETF ({watchETF.length}) ──
                 </div>
                 {watchETFOpen && <>{header}{watchETF.map((s) => <WatchRow key={s.id} s={s} />)}</>}
               </>
@@ -302,7 +389,7 @@ function WatchingContent() {
             {hiddenList.length > 0 && (
               <>
                 <div style={{ color: D.comment, opacity: 0.6, padding: "4px 0 1px", cursor: "pointer", userSelect: "none" }} onClick={() => setHiddenOpen((v) => !v)}>
-                  <span style={{ color: D.purple }}>{hiddenOpen ? "▾" : "▸"}</span> # ── hidden ({hiddenList.length}) ──
+                  <span style={{ color: D.purple }}>{hiddenOpen ? "▾" : "▸"}</span> # ── 隐藏 ({hiddenList.length}) ──
                 </div>
                 {hiddenOpen && <>{header}{hiddenList.map((s) => <WatchRow key={s.id} s={s} />)}</>}
               </>
@@ -310,7 +397,7 @@ function WatchingContent() {
 
             {watchStock.length === 0 && watchETF.length === 0 && hiddenList.length === 0 && (
               <div style={{ color: D.comment, padding: "8px 0" }}>
-                # no watching services in {activeTab === "HK" ? "HK" : "A-share"} tab
+                # 当前市场无自选
               </div>
             )}
 

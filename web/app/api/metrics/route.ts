@@ -363,7 +363,7 @@ export async function GET() {
 
     let posValHkd = 0;
     let posValRmb = 0;
-    for (const svc of services) {
+    for (const svc of services as Array<Record<string, any>>) {
       if (svc.type === "holding" && svc.shares != null && svc.price > 0) {
         const mktVal = svc.price * svc.shares;
         if (svc.id.startsWith("HK")) posValHkd += mktVal;
@@ -374,7 +374,7 @@ export async function GET() {
     const totalAssetsHkd = availHkd + posValHkd;
     const totalAssetsRmb = availRmb + posValRmb;
 
-    for (const svc of services) {
+    for (const svc of services as Array<Record<string, any>>) {
       if (svc.type !== "holding" || svc.shares == null || svc.price <= 0) {
         (svc as Record<string, unknown>).position_pct = null;
         continue;
