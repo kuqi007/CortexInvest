@@ -29,6 +29,7 @@ interface DailySummary {
     signalCount: number;
     direction: string;
     keySignals: string[];
+    sentiment?: number | null;  // 新闻情感分，-1~1，由 Kimi json_schema 分析
   }[];
   report?: string;
   morning?: {

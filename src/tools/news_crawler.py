@@ -5,7 +5,14 @@ from datetime import datetime, timedelta
 import time
 import pandas as pd
 from urllib.parse import urlparse
-from src.tools.openrouter_config import get_chat_completion
+
+# 先加载 .env，再导入 LLM 客户端（避免 openrouter_config 模块级初始化的时序问题）
+from dotenv import load_dotenv
+
+_project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+load_dotenv(os.path.join(_project_root, ".env"), override=True)
+
+from src.utils.llm_clients import LLMClientFactory
 
 # 导入新的搜索模块
 try:
@@ -23,6 +30,77 @@ try:
 except ImportError:
     print("警告: akshare 不可用")
     ak = None
+
+
+# ── MX Search（东方财富妙想搜索）──
+_mx_api_key = os.getenv("MX_APIKEY")
+_mx_base_url = "https://mkapi2.dfcfs.com/finskillshub/api/claw/news-search"
+
+
+def _mx_search(query: str) -> list:
+    """使用 MX 妙想搜索获取新闻列表"""
+    if not _mx_api_key:
+        return []
+    try:
+        # requests 在模块头部 try 块导入，失败时为 None
+        if requests is None:
+            return []
+        resp = requests.post(
+            _mx_base_url,
+            headers={"Content-Type": "application/json", "apikey": _mx_api_key},
+            json={"query": query},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        items = []
+        try:
+            inner = data.get("data", {}).get("data", {})
+            items = inner.get("llmSearchResponse", {}).get("data", [])
+        except (KeyError, TypeError):
+            return []
+
+        news_list = []
+        for item in items:
+            title = item.get("title", "")
+            content = item.get("content", "") or item.get("trunk", "") or title
+            date_str = item.get("date", "")[:10] if item.get("date") else ""
+            ins_name = item.get("insName", "") or item.get("informationType", "") or "妙想资讯"
+
+            news_list.append({
+                "title": title,
+                "content": content,
+                "source": ins_name,
+                "url": item.get("url", ""),
+                "keyword": "",
+                "publish_time": f"{date_str} 00:00:00" if len(date_str) == 10 else "",
+                "search_time": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            })
+        return news_list
+    except Exception as e:
+        print(f"MX 搜索失败: {e}")
+        return []
+
+
+def get_stock_news_via_mx(symbol: str, max_news: int = 10) -> list:
+    """使用 MX 妙想搜索获取个股新闻"""
+    symbol_clean = symbol.replace("HK", "").replace("KR", "").lstrip("0")
+    query = f"{symbol} 股票 新闻"
+    results = _mx_search(query)
+
+    news_list = []
+    for item in results[:max_news]:
+        news_list.append({
+            "title": item["title"],
+            "content": item["content"],
+            "source": item["source"],
+            "url": item["url"],
+            "keyword": symbol,
+            "publish_time": item.get("publish_time", ""),
+            "search_time": item.get("search_time", datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+        })
+    return news_list
 
 
 def build_search_query(symbol: str, date: str = None) -> str:
@@ -71,7 +149,7 @@ def extract_domain(url: str) -> str:
     try:
         parsed = urlparse(url)
         return parsed.netloc
-    except:
+    except Exception:
         return "未知来源"
 
 
@@ -126,7 +204,7 @@ def convert_search_results_to_news_format(search_results, symbol: str) -> list:
                         elif '-' in time_str and len(time_str) == 10:
                             publish_time = f"{time_str} 00:00:00"
                         break
-                    except:
+                    except Exception:
                         continue
 
         news_item = {
@@ -242,7 +320,7 @@ def get_stock_news_via_akshare(symbol: str, max_news: int = 10) -> list:
                 "keyword": row["关键词"].strip() if "关键词" in row and not pd.isna(row["关键词"]) else symbol
             }
             news_list.append(news_item)
-        except:
+        except Exception:
             continue
 
     news_list.sort(key=lambda x: x["publish_time"], reverse=True)
@@ -317,38 +395,26 @@ def get_stock_news(symbol: str, max_news: int = 10, date: str = None) -> list:
     need_more_news = max_news - len(cached_news)
     fetch_count = max(need_more_news, max_news)  # 至少获取请求的数量
 
-    # 优先尝试使用新的 Google 搜索方法
+    # ── Google 搜索已禁用（Google 在当前环境不可用）──
+    # 注释掉优先 Google 搜索逻辑，保留代码备用地
+    # if google_search_sync and SearchOptions:
+    #     try:
+    #         print("使用 Google 搜索获取新闻...")
+    #         ...
+    #     except Exception as e:
+    #         print(f"Google 搜索获取新闻时出错: {e}，回退到 akshare")
+
+    # 直接使用 akshare 获取新闻
+    # ── MX 优先，akshare 回退 ──
     new_news_list = []
-    if google_search_sync and SearchOptions:
-        try:
-            print("使用 Google 搜索获取新闻...")
+    if _mx_api_key:
+        print("使用 MX 妙想搜索获取新闻...")
+        new_news_list = get_stock_news_via_mx(symbol, fetch_count)
+        if new_news_list:
+            print(f"通过 MX 搜索成功获取到 {len(new_news_list)} 条新闻")
+        else:
+            print("MX 搜索未返回有效结果，回退到 akshare")
 
-            # 构建搜索查询
-            search_query = build_search_query(symbol, date)
-            print(f"搜索查询: {search_query}")
-
-            # 执行搜索
-            search_options = SearchOptions(
-                limit=min(fetch_count * 2, 10),  # 限制搜索结果数量，避免过慢
-                timeout=5000, # 缩短超时时间到5秒
-                locale="zh-CN"
-            )
-
-            search_response = google_search_sync(search_query, search_options)
-
-            if search_response.results:
-                # 转换搜索结果为新闻格式
-                new_news_list = convert_search_results_to_news_format(
-                    search_response.results, symbol)
-
-                print(f"通过 Google 搜索成功获取到{len(new_news_list)}条新闻")
-            else:
-                print("Google search未返回有效结果，尝试回退到 akshare")
-
-        except Exception as e:
-            print(f"Google 搜索获取新闻时出错: {e}，回退到 akshare")
-
-    # 如果 Google 搜索失败，回退到 akshare
     if not new_news_list:
         print("使用 akshare 获取新闻...")
         new_news_list = get_stock_news_via_akshare(symbol, fetch_count)
@@ -375,7 +441,7 @@ def get_stock_news(symbol: str, max_news: int = 10, date: str = None) -> list:
     try:
         combined_news.sort(key=lambda x: x.get(
             "publish_time", ""), reverse=True)
-    except:
+    except Exception:
         pass  # 如果排序失败，保持原顺序
 
     # 只保留指定条数的新闻
@@ -386,8 +452,8 @@ def get_stock_news(symbol: str, max_news: int = 10, date: str = None) -> list:
         try:
             save_data = {
                 "date": cache_date,
-                "method": "online_search" if new_news_list and google_search_sync else "akshare",
-                "query": build_search_query(symbol, date) if new_news_list and google_search_sync else None,
+                "method": "mx" if new_news_list and _mx_api_key else "akshare",
+                "query": f"{symbol} 股票 新闻",
                 "news": combined_news,  # 保存所有新闻，不只是返回的部分
                 "cached_count": len(cached_news),
                 "new_count": len(new_news_list),
@@ -403,12 +469,14 @@ def get_stock_news(symbol: str, max_news: int = 10, date: str = None) -> list:
     return final_news_list
 
 
-def get_news_sentiment(news_list: list, num_of_news: int = 5) -> float:
+def get_news_sentiment(news_list: list, num_of_news: int = 5,
+                      use_structured_output: bool = True) -> float:
     """分析新闻情感得分
 
     Args:
         news_list (list): 新闻列表
         num_of_news (int): 用于分析的新闻数量，默认为5条
+        use_structured_output (bool): 是否使用 json_schema 结构化输出（默认开）
 
     Returns:
         float: 情感得分，范围[-1, 1]，-1最消极，1最积极
@@ -416,20 +484,16 @@ def get_news_sentiment(news_list: list, num_of_news: int = 5) -> float:
     if not news_list:
         return 0.0
 
-    # # 获取项目根目录
-    # project_root = os.path.dirname(os.path.dirname(
-    #     os.path.dirname(os.path.abspath(__file__))))
-
-    # 检查是否有缓存的情感分析结果
     # 检查是否有缓存的情感分析结果
     cache_file = "src/data/sentiment_cache.json"
     os.makedirs(os.path.dirname(cache_file), exist_ok=True)
 
-    # 生成新闻内容的唯一标识
+    # 生成新闻内容的唯一标识（含结构化输出标识，避免缓存版本冲突）
+    cache_suffix = "_v2" if use_structured_output else "_v1"
     news_key = "|".join([
         f"{news['title']}|{news['content'][:100]}|{news['publish_time']}"
         for news in news_list[:num_of_news]
-    ])
+    ]) + cache_suffix
 
     # 检查缓存
     if os.path.exists(cache_file):
@@ -482,22 +546,88 @@ def get_news_sentiment(news_list: list, num_of_news: int = 5) -> float:
         f"来源：{news['source']}\n"
         f"时间：{news['publish_time']}\n"
         f"内容：{news['content']}"
-        for news in news_list[:num_of_news]  # 使用指定数量的新闻
+        for news in news_list[:num_of_news]
     ])
 
     user_message = {
         "role": "user",
-        "content": f"请分析以下A股上市公司相关新闻的情感倾向：\n\n{news_content}\n\n请直接返回一个数字，范围是-1到1，无需解释。"
+        "content": f"请分析以下A股上市公司相关新闻的情感倾向：\n\n{news_content}"
     }
 
+    # ── json_schema 结构化输出 ──
+    if use_structured_output:
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "sentiment_analysis",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "score": {
+                            "type": "number",
+                            "description": "情感分数，-1到1，-1最消极，1最积极",
+                        },
+                        "confidence": {
+                            "type": "number",
+                            "description": "置信度，0到1，0最低，1最高",
+                        },
+                        "key_factors": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "影响情感的关键因素列表，最多3条",
+                        },
+                    },
+                    "required": ["score", "confidence", "key_factors"],
+                    "additionalProperties": False,
+                },
+            },
+        }
+
+        try:
+            client = LLMClientFactory.create_client()
+            result = client.get_completion(
+                [system_message, user_message],
+                response_format=response_format,
+            )
+            if result is None:
+                print("Error: LLM returned None")
+                return 0.0
+
+            parsed = _json.loads(result)
+            sentiment_score = float(parsed["score"])
+            confidence = float(parsed.get("confidence", 0.5))
+            factors = parsed.get("key_factors", [])
+
+            sentiment_score = max(-1.0, min(1.0, sentiment_score))
+            print(f"情感分析: score={sentiment_score:.2f}, "
+                  f"confidence={confidence:.2f}, factors={factors}")
+
+            cache[news_key] = sentiment_score
+            try:
+                with open(cache_file, 'w', encoding='utf-8') as f:
+                    _json.dump(cache, f, ensure_ascii=False, indent=2)
+            except Exception as e:
+                print(f"Error writing cache: {e}")
+
+            return sentiment_score
+
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
+            print(f"Error parsing structured output: {e}")
+            print(f"Raw result: {result}")
+            # Fall through to unstructured fallback
+
+
+    # ── 旧版 fallback：裸 float 解析 ──
+    user_message["content"] += "\n\n请直接返回一个数字，范围是-1到1，无需解释。"
+
     try:
-        # 获取LLM分析结果
-        result = get_chat_completion([system_message, user_message])
+        client = LLMClientFactory.create_client()
+        result = client.get_completion([system_message, user_message])
         if result is None:
             print("Error: PI error occurred, LLM returned None")
             return 0.0
 
-        # 提取数字结果
         try:
             sentiment_score = float(result.strip())
         except ValueError as e:
@@ -505,10 +635,8 @@ def get_news_sentiment(news_list: list, num_of_news: int = 5) -> float:
             print(f"Raw result: {result}")
             return 0.0
 
-        # 确保分数在-1到1之间
         sentiment_score = max(-1.0, min(1.0, sentiment_score))
 
-        # 缓存结果
         cache[news_key] = sentiment_score
         try:
             with open(cache_file, 'w', encoding='utf-8') as f:
@@ -520,4 +648,4 @@ def get_news_sentiment(news_list: list, num_of_news: int = 5) -> float:
 
     except Exception as e:
         print(f"Error analyzing news sentiment: {e}")
-        return 0.0  # 出错时返回中性分数
+        return 0.0

@@ -669,7 +669,7 @@ def _build_llm_prompt(
 - 如有条件单数据，在操作建议中结合条件单距离给出提醒（如"阿里距买入条件单125仅3.5%"）
 - ★重点自选标的同样需要深度分析微观数据，不能只给一句话
 - 风格：专业简洁，像给基金经理写的晨会纪要
-- 输出纯 Markdown，不要代码块包裹
+- **输出格式**: 你必须输出 JSON，report 字段包含完整的 Markdown 报告
 - **数据来源约束**：每只标的的"微观:"行列出了该标的的全部微观数据。如果该行写"无微观数据"，则该标的不能出现任何tick、大单、主力资金流的具体数字。如果你在文中写了任何tick偏买/偏卖X%、大单净买/卖X亿、主力流入/流出X亿的数字，该数字必须能在对应标的的"微观:"行中找到完全一致的值。违规即视为严重错误"""
 
     # Build data section
@@ -774,7 +774,11 @@ def _build_llm_prompt(
             if ps.get("pnl_pct") is not None:
                 tags.append(f"盈亏{ps['pnl_pct']:+.1f}%")
             tag_str = f" [{', '.join(tags)}]" if tags else ""
-            line = f"- {ps['code']} {ps['name']}{tag_str} | 涨跌:{ps['change']:+.2f}% | 信号:{ps['signalCount']}条 | 方向:{ps['direction']} | {sigs}"
+            sentiment_tag = ""
+            if ps.get("sentiment") is not None:
+                s = ps["sentiment"]
+                sentiment_tag = f" | 新闻情感:{s:+.2f}"
+            line = f"- {ps['code']} {ps['name']}{tag_str} | 涨跌:{ps['change']:+.2f}%{sentiment_tag} | 信号:{ps['signalCount']}条 | 方向:{ps['direction']} | {sigs}"
             # Append L2 microstructure digest (or explicit "无微观数据" to prevent LLM hallucination)
             d = digest_map.get(ps["code"])
             if d:
@@ -811,7 +815,11 @@ def _build_llm_prompt(
         lines.append("## ★ 重点自选")
         for ps in star_watching:
             sigs = ", ".join(ps["keySignals"]) if ps["keySignals"] else "无信号"
-            line = f"- {ps['code']} {ps['name']} [★重点] | 涨跌:{ps['change']:+.2f}% | 信号:{ps['signalCount']}条 | 方向:{ps['direction']} | {sigs}"
+            sentiment_tag = ""
+            if ps.get("sentiment") is not None:
+                s = ps["sentiment"]
+                sentiment_tag = f" | 新闻情感:{s:+.2f}"
+            line = f"- {ps['code']} {ps['name']} [★重点] | 涨跌:{ps['change']:+.2f}%{sentiment_tag} | 信号:{ps['signalCount']}条 | 方向:{ps['direction']} | {sigs}"
             d = digest_map.get(ps["code"])
             if d:
                 lo_net_yi = d["lo_net_amount"] / 1e8
@@ -919,6 +927,135 @@ def _build_llm_prompt(
         {"role": "system", "content": system},
         {"role": "user", "content": user_msg},
     ]
+
+
+def _build_analysis_tools(
+    per_stock: list[dict],
+    l2_digest_map: dict,
+    market_data: dict,
+) -> list[dict]:
+    """构建 Kimi function calling 分析工具定义。
+
+    让模型自主调用这些工具查询特定股票的行情/信号/微观数据，
+    替代当前"全量灌 prompt"的粗放模式（可选开启）。
+
+    工具:
+    - get_stock_quote: 获取行情价格和涨跌幅
+    - get_stock_signals: 获取今日 L2 信号
+    - get_stock_microstructure: 获取微观结构数据（大单/tick/资金流）
+    """
+
+    # 构建快速查找索引
+    stock_index = {ps["code"]: ps for ps in per_stock}
+
+    def _get_quote(args: dict) -> str:
+        code = args.get("code", "")
+        ps = stock_index.get(code)
+        if not ps:
+            return f"未找到 {code} 的行情数据"
+        import json as _j
+        return _j.dumps({
+            "code": code,
+            "name": ps.get("name", ""),
+            "price": ps.get("price", 0),
+            "change_pct": ps.get("change", 0),
+            "type": ps.get("type", ""),
+            "star": ps.get("star", False),
+            "cost": ps.get("cost", 0),
+            "pnl_pct": ps.get("pnl_pct"),
+        }, ensure_ascii=False)
+
+    def _get_signals(args: dict) -> str:
+        code = args.get("code", "")
+        ps = stock_index.get(code)
+        if not ps:
+            return f"未找到 {code} 的信号数据"
+        import json as _j
+        return _j.dumps({
+            "code": code,
+            "signal_count": ps.get("signalCount", 0),
+            "direction": ps.get("direction", "neutral"),
+            "key_signals": ps.get("keySignals", []),
+        }, ensure_ascii=False)
+
+    def _get_microstructure(args: dict) -> str:
+        code = args.get("code", "")
+        d = l2_digest_map.get(code)
+        if not d:
+            return f"{{'code': '{code}', 'status': '无微观数据'}}"
+        import json as _j
+        return _j.dumps({
+            "code": code,
+            "lo_net_amount_yi": round(d.get("lo_net_amount", 0) / 1e8, 2),
+            "tick_imbalance_pct": round(d.get("tick_imbalance", 0) * 100, 1),
+            "cf_net_inflow_yi": round(d.get("cf_net_inflow", 0) / 1e8, 2),
+            "vpd_count": d.get("vpd_count", 0),
+            "lor_count": d.get("lor_count", 0),
+            "direction_score": d.get("direction_score", 0),
+            "direction": d.get("direction", "neutral"),
+        }, ensure_ascii=False)
+
+    tool_handlers = {
+        "get_stock_quote": _get_quote,
+        "get_stock_signals": _get_signals,
+        "get_stock_microstructure": _get_microstructure,
+    }
+
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_stock_quote",
+                "description": "获取某只股票的最新行情：价格、涨跌幅、持仓成本、浮盈亏",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "code": {
+                            "type": "string",
+                            "description": "股票代码，如 00700、600519",
+                        },
+                    },
+                    "required": ["code"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_stock_signals",
+                "description": "获取某只股票今日的 L2 策略信号：信号数、多空方向、关键信号列表",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "code": {
+                            "type": "string",
+                            "description": "股票代码",
+                        },
+                    },
+                    "required": ["code"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_stock_microstructure",
+                "description": "获取某只股票的微观结构数据：大单净额、tick偏买/卖、主力资金流向、量价背离次数",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "code": {
+                            "type": "string",
+                            "description": "股票代码",
+                        },
+                    },
+                    "required": ["code"],
+                },
+            },
+        },
+    ]
+
+    return tools, tool_handlers
 
 
 def _compute_l2_digest(date_str: str) -> list[dict]:
@@ -1169,16 +1306,116 @@ def generate_daily_summary(date_str: str | None = None) -> dict | None:
         trade_plans,
         include_morning_briefing=True,
     )
+
+    # ── Kimi 高级能力: thinking + prompt cache + json_schema ──
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "daily_report",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "report": {
+                        "type": "string",
+                        "description": "完整的持仓信号日报（Markdown 格式）",
+                    },
+                    "market_direction": {
+                        "type": "string",
+                        "enum": ["bullish", "bearish", "neutral"],
+                        "description": "市场整体方向",
+                    },
+                    "key_topics": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "maxItems": 5,
+                        "description": "今日最关键的市场话题",
+                    },
+                },
+                "required": ["report", "market_direction", "key_topics"],
+                "additionalProperties": False,
+            },
+        },
+    }
+
+    extra_body = {
+        "thinking": {"type": "enabled"},
+        "prompt_cache_key": "daily-summary-v2",
+    }
+
     report = None
+    reasoning = None
     try:
         client = LLMClientFactory.create_client()
-        report = client.get_completion(messages)
+        result = client.get_completion(
+            messages,
+            response_format=response_format,
+            extra_body=extra_body,
+            return_extra=True,
+        )
+        if isinstance(result, dict):
+            import json as _json
+
+            parsed = _json.loads(result["content"])
+            report = parsed.get("report", "")
+            reasoning = result.get("reasoning")
+            # 将 market_direction 和 key_topics 融合到 report 头部
+            direction = parsed.get("market_direction", "neutral")
+            topics = parsed.get("key_topics", [])
+            if direction or topics:
+                meta_lines = []
+                if direction:
+                    dir_label = {"bullish": "偏多", "bearish": "偏空", "neutral": "中性"}
+                    meta_lines.append(f"**市场方向**: {dir_label.get(direction, direction)}")
+                if topics:
+                    meta_lines.append(f"**关键主题**: {', '.join(topics)}")
+                if meta_lines:
+                    report = "\n".join(meta_lines) + "\n\n" + report
+        else:
+            report = result
     except Exception as e:
         logger.error(f"LLM call failed: {e}")
 
     if not report:
         logger.warning("LLM returned empty response — using stats-only summary")
         report = _fallback_report(stats, per_stock)
+
+    # ── 新闻情感分析（并行拉取持仓股新闻 → Kimi json_schema）──
+    def _fetch_sentiment(ps: dict) -> dict:
+        """获取单只股票的新闻情感分（不会失败）"""
+        code = ps.get("code", "")
+        try:
+            from src.tools.news_crawler import get_stock_news, get_news_sentiment
+            news = get_stock_news(code, max_news=5, date=today)
+            if not news:
+                return {**ps, "sentiment": None}
+            score = get_news_sentiment(news, use_structured_output=True)
+            return {**ps, "sentiment": score}
+        except Exception as e:
+            logger.debug(f"Sentiment fetch failed for {code}: {e}")
+            return {**ps, "sentiment": None}
+
+    try:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        # 只对持仓股和重点自选做情感分析
+        priority = [ps for ps in per_stock if ps.get("type") == "holding" or ps.get("star")]
+        other = [ps for ps in per_stock if ps not in priority]
+
+        # max_workers=1：Kimi 账号并发上限为 3，串行避免 429
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            futures = {pool.submit(_fetch_sentiment, ps): ps for ps in priority}
+            for f in as_completed(futures):
+                result_ps = f.result()
+                for i, ps in enumerate(per_stock):
+                    if ps["code"] == result_ps["code"]:
+                        per_stock[i] = result_ps
+                        break
+
+        sentiment_count = sum(1 for ps in per_stock if ps.get("sentiment") is not None)
+        logger.info(f"Sentiment analysis: {sentiment_count}/{len(per_stock)} stocks")
+    except Exception as e:
+        logger.warning(f"Parallel sentiment fetch failed: {e}")
 
     # ── Build output ──
     summary = {
@@ -1194,11 +1431,17 @@ def generate_daily_summary(date_str: str | None = None) -> dict | None:
                 "signalCount": ps["signalCount"],
                 "direction": ps["direction"],
                 "keySignals": ps["keySignals"],
+                # 新闻情感（通过 Kimi json_schema 分析）
+                "sentiment": ps.get("sentiment"),
             }
             for ps in per_stock
         ],
         "report": report,
     }
+    # 保存思考链供审计
+    if reasoning:
+        summary["report_chain"] = reasoning
+        logger.info(f"Thinking chain saved ({len(reasoning)} chars)")
 
     # ── Atomic write ──
     tmp = DAILY_SUMMARY_PATH.with_suffix(".tmp")

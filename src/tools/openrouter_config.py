@@ -29,14 +29,19 @@ class ChatCompletion:
 # 获取项目根目录
 project_root = os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__))))
-env_path = os.path.join(project_root, '.env')
 
-# 加载环境变量
+# 加载环境变量（优先从显式路径，不存在则尝试 cwd）
+env_path = os.path.join(project_root, ".env")
 if os.path.exists(env_path):
     load_dotenv(env_path, override=True)
     logger.info(f"{SUCCESS_ICON} 已加载环境变量: {env_path}")
 else:
-    logger.warning(f"{ERROR_ICON} 未找到环境变量文件: {env_path}")
+    # 回退到 load_dotenv() 默认行为（从 cwd 查找 .env）
+    load_dotenv(override=True)
+    logger.warning(
+        f"{ERROR_ICON} 项目根目录未找到 .env ({env_path})，"
+        f"尝试从 cwd 加载"
+    )
 
 # 验证环境变量
 api_key = os.getenv("GEMINI_API_KEY")
@@ -92,7 +97,7 @@ def generate_content_with_retry(model, contents, config=None):
 
 
 def get_chat_completion(messages, model=None, max_retries=3, initial_retry_delay=1,
-                        client_type="auto", api_key=None, base_url=None):
+                        client_type="auto", api_key=None, base_url=None, **kwargs):
     """
     获取聊天完成结果，包含重试逻辑
 
@@ -104,6 +109,7 @@ def get_chat_completion(messages, model=None, max_retries=3, initial_retry_delay
         client_type: 客户端类型 ("auto", "gemini", "openai_compatible")
         api_key: API 密钥（可选，仅用于 OpenAI Compatible API）
         base_url: API 基础 URL（可选，仅用于 OpenAI Compatible API）
+        **kwargs: 透传 — response_format, tools, extra_body 等
 
     Returns:
         str: 模型回答内容或 None（如果出错）
@@ -121,7 +127,8 @@ def get_chat_completion(messages, model=None, max_retries=3, initial_retry_delay
         return client.get_completion(
             messages=messages,
             max_retries=max_retries,
-            initial_retry_delay=initial_retry_delay
+            initial_retry_delay=initial_retry_delay,
+            **kwargs
         )
     except Exception as e:
         logger.error(f"{ERROR_ICON} get_chat_completion 发生错误: {str(e)}")

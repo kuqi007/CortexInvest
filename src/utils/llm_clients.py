@@ -19,6 +19,31 @@ class LLMClient(ABC):
         """获取模型回答"""
         pass
 
+    @abstractmethod
+    def get_completion_with_tools(
+        self, messages, tools, tool_handlers, **kwargs
+    ):
+        """带 function calling 的多轮对话
+
+        Returns:
+            str: 最终文本回答
+        """
+        pass
+
+    @abstractmethod
+    def get_completion_stream(self, messages, on_chunk=None, **kwargs):
+        """流式获取模型回答
+
+        Args:
+            messages: 消息列表
+            on_chunk: callback(token: str) — 每收到一个 token 调用一次
+            **kwargs: 透传到 API 的其他参数
+
+        Returns:
+            str: 完整回答文本
+        """
+        pass
+
 
 class GeminiClient(LLMClient):
     """Google Gemini API 客户端"""
@@ -182,9 +207,36 @@ class GeminiClient(LLMClient):
             logger.error(f"{ERROR_ICON} get_completion 发生总错误: {str(e)}")
             return None
 
+    def get_completion_with_tools(
+        self, messages, tools, tool_handlers, **kwargs
+    ):
+        """Gemini 不支持原生 function calling loop，降级为普通调用"""
+        logger.warning(
+            f"{WAIT_ICON} GeminiClient 不支持 function calling，降级为普通调用"
+        )
+        return self.get_completion(messages, **kwargs)
+
+    def get_completion_stream(self, messages, on_chunk=None, **kwargs):
+        """Gemini 不支持 SSE streaming，降级为普通调用"""
+        logger.warning(
+            f"{WAIT_ICON} GeminiClient 不支持 streaming，降级为普通调用"
+        )
+        result = self.get_completion(messages, **kwargs)
+        if result and on_chunk:
+            on_chunk(result)
+        return result
+
 
 class OpenAICompatibleClient(LLMClient):
-    """OpenAI 兼容 API 客户端"""
+    """OpenAI 兼容 API 客户端（含 Kimi K2.6 高级能力）。
+
+    支持:
+    - json_schema 结构化输出 (response_format)
+    - function calling (tools + tool_choice)
+    - thinking 推理链 (extra_body.thinking)
+    - prompt 缓存 (extra_body.prompt_cache_key)
+    - SSE streaming (stream=True)
+    """
 
     def __init__(self, api_key=None, base_url=None, model=None):
         self.api_key = api_key or os.getenv("OPENAI_COMPATIBLE_API_KEY")
@@ -206,31 +258,50 @@ class OpenAICompatibleClient(LLMClient):
             raise ValueError(
                 "OPENAI_COMPATIBLE_MODEL not found in environment variables")
 
-        # 初始化 OpenAI 客户端
         self.client = OpenAI(
             base_url=self.base_url,
             api_key=self.api_key
         )
-        logger.info(f"{SUCCESS_ICON} OpenAI Compatible 客户端初始化成功")
+        logger.info(f"{SUCCESS_ICON} OpenAI Compatible 客户端初始化成功 "
+                    f"(model={self.model}, base_url={self.base_url})")
 
     @backoff.on_exception(
         backoff.expo,
         (Exception),
         max_tries=5,
-        max_time=300
+        max_time=300,
+        base=4,  # 起始4秒（Kimi 429 要求等1s）
+        jitter=None,  # 避免惊群
     )
-    def call_api_with_retry(self, messages, stream=False):
-        """带重试机制的 API 调用函数"""
+    def call_api_with_retry(
+        self,
+        messages,
+        stream=False,
+        response_format=None,
+        tools=None,
+        tool_choice=None,
+        extra_body=None,
+    ):
+        """带重试机制的 API 调用函数，透传所有高级参数"""
         try:
             logger.info(f"{WAIT_ICON} 正在调用 OpenAI Compatible API...")
-            logger.debug(f"请求内容: {messages}")
             logger.debug(f"模型: {self.model}, 流式: {stream}")
 
-            response = self.client.chat.completions.create(
+            kwargs = dict(
                 model=self.model,
                 messages=messages,
-                stream=stream
+                stream=stream,
             )
+            if response_format is not None:
+                kwargs["response_format"] = response_format
+            if tools is not None:
+                kwargs["tools"] = tools
+            if tool_choice is not None:
+                kwargs["tool_choice"] = tool_choice
+            if extra_body is not None:
+                kwargs["extra_body"] = extra_body
+
+            response = self.client.chat.completions.create(**kwargs)
 
             logger.info(f"{SUCCESS_ICON} API 调用成功")
             return response
@@ -239,34 +310,63 @@ class OpenAICompatibleClient(LLMClient):
             logger.error(f"{ERROR_ICON} API 调用失败: {error_msg}")
             raise e
 
-    def get_completion(self, messages, max_retries=3, initial_retry_delay=1, **kwargs):
-        """获取聊天完成结果，包含重试逻辑"""
+    def get_completion(self, messages, max_retries=3, initial_retry_delay=1,
+                         return_extra=False, **kwargs):
+        """获取聊天完成结果，包含重试逻辑。
+
+        Args:
+            messages: OpenAI 格式消息列表
+            max_retries: 最大重试次数
+            initial_retry_delay: 初始重试延迟（秒）
+            return_extra: 如果 True，返回 {"content": str, "reasoning": str|None}
+            **kwargs: 透传参数 — response_format, tools, tool_choice, extra_body
+
+        Returns:
+            str | dict | None: 模型回答内容
+        """
         try:
             logger.info(f"{WAIT_ICON} 使用 OpenAI Compatible 模型: {self.model}")
-            logger.debug(f"消息内容: {messages}")
 
             for attempt in range(max_retries):
                 try:
-                    # 调用 API
-                    response = self.call_api_with_retry(messages)
+                    response = self.call_api_with_retry(messages, **kwargs)
 
                     if response is None:
                         logger.warning(
                             f"{ERROR_ICON} 尝试 {attempt + 1}/{max_retries}: API 返回空值")
                         if attempt < max_retries - 1:
                             retry_delay = initial_retry_delay * (2 ** attempt)
-                            logger.info(
-                                f"{WAIT_ICON} 等待 {retry_delay} 秒后重试...")
+                            logger.info(f"{WAIT_ICON} 等待 {retry_delay} 秒后重试...")
                             time.sleep(retry_delay)
                             continue
                         return None
 
-                    # 打印调试信息
-                    content = response.choices[0].message.content
-                    logger.debug(f"API 原始响应: {content[:500]}...")
+                    choice = response.choices[0]
+                    msg = choice.message
+                    content = msg.content
+                    reasoning = getattr(msg, "reasoning_content", None)
+                    logger.debug(f"API 原始响应: {content[:500] if content else '(no content)'}...")
+                    if reasoning:
+                        logger.info(
+                            f"{SUCCESS_ICON} 获取到思考链 ({len(reasoning)} 字符)"
+                        )
+                    # 如果有 tool_calls，记录但不返回（get_completion 不处理 tool_calls）
+                    if msg.tool_calls:
+                        logger.info(
+                            f"{WAIT_ICON} 模型请求 tool_calls: "
+                            f"{[tc.function.name for tc in msg.tool_calls]} "
+                            f"(使用 get_completion_with_tools 处理)"
+                        )
                     logger.info(f"{SUCCESS_ICON} 成功获取 OpenAI Compatible 响应")
 
-                    # 直接返回文本内容
+                    if return_extra:
+                        # content=None 时返回 None 而非 {"content": None}
+                        if content is None:
+                            return None
+                        return {
+                            "content": content,
+                            "reasoning": reasoning,
+                        }
                     return content
 
                 except Exception as e:
@@ -282,6 +382,185 @@ class OpenAICompatibleClient(LLMClient):
 
         except Exception as e:
             logger.error(f"{ERROR_ICON} get_completion 发生错误: {str(e)}")
+            return None
+
+    def get_completion_with_tools(
+        self,
+        messages,
+        tools,
+        tool_handlers,
+        max_tool_rounds=5,
+        max_retries=3,
+        initial_retry_delay=1,
+        **kwargs,
+    ):
+        """带 function calling 的多轮对话循环。
+
+        Args:
+            messages: 消息列表（会被原地修改，追加 assistant/tool 消息）
+            tools: ToolDefinition 列表
+            tool_handlers: {tool_name: callable(arguments) -> str} 映射
+            max_tool_rounds: 最大工具调用轮数，防止死循环
+            max_retries: 最大重试次数
+            initial_retry_delay: 初始重试延迟
+            **kwargs: 透传到 API 的额外参数
+
+        Returns:
+            str | None: 最终文本回答
+        """
+        try:
+            logger.info(
+                f"{WAIT_ICON} 开始 function calling 对话 "
+                f"(tools={list(tool_handlers.keys())}, max_rounds={max_tool_rounds})"
+            )
+
+            for round_idx in range(max_tool_rounds):
+                response = None
+                for attempt in range(max_retries):
+                    try:
+                        response = self.call_api_with_retry(
+                            messages,
+                            tools=tools,
+                            tool_choice="auto",
+                            **kwargs,
+                        )
+                        break
+                    except Exception as e:
+                        logger.error(
+                            f"{ERROR_ICON} Round {round_idx + 1}, "
+                            f"attempt {attempt + 1} 失败: {str(e)}"
+                        )
+                        if attempt < max_retries - 1:
+                            time.sleep(initial_retry_delay * (2 ** attempt))
+                        else:
+                            return None
+
+                if response is None:
+                    return None
+
+                choice = response.choices[0]
+                msg = choice.message
+
+                # 如果没有 tool_calls，说明模型已给出最终回答
+                if not msg.tool_calls:
+                    logger.info(f"{SUCCESS_ICON} function calling 完成，返回文本回答")
+                    return msg.content
+
+                # 处理 tool_calls
+                logger.info(
+                    f"{WAIT_ICON} Round {round_idx + 1}: "
+                    f"模型请求 {len(msg.tool_calls)} 个工具调用"
+                )
+
+                # 追加 assistant 消息（含 tool_calls）
+                messages.append({
+                    "role": "assistant",
+                    "content": msg.content,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in msg.tool_calls
+                    ],
+                })
+
+                # 执行每个 tool call 并追加结果
+                for tc in msg.tool_calls:
+                    tool_name = tc.function.name
+                    handler = tool_handlers.get(tool_name)
+                    if handler is None:
+                        tool_result = f"Error: unknown tool '{tool_name}'"
+                        logger.warning(f"{ERROR_ICON} 未知工具: {tool_name}")
+                    else:
+                        try:
+                            import json as _json
+
+                            args = _json.loads(tc.function.arguments)
+                            logger.info(
+                                f"  → 调用 {tool_name}({_json.dumps(args, ensure_ascii=False)[:200]})"
+                            )
+                            tool_result = handler(args)
+                            logger.info(
+                                f"  ← {tool_name} 返回 {len(tool_result)} 字符"
+                            )
+                        except Exception as e:
+                            tool_result = f"Error: {str(e)}"
+                            logger.error(f"{ERROR_ICON} 工具执行失败: {e}")
+
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": tool_result,
+                    })
+
+            logger.warning(
+                f"{ERROR_ICON} 达到最大工具调用轮数 {max_tool_rounds}，强制返回"
+            )
+            return None
+
+        except Exception as e:
+            logger.error(f"{ERROR_ICON} get_completion_with_tools 发生错误: {str(e)}")
+            return None
+
+    def get_completion_stream(self, messages, on_chunk=None, max_retries=3,
+                               initial_retry_delay=1, **kwargs):
+        """流式获取模型回答。
+
+        Args:
+            messages: 消息列表
+            on_chunk: callback(token_text: str) — 每收到一个 content token 调用
+            max_retries: 最大重试次数
+            initial_retry_delay: 初始重试延迟
+            **kwargs: 透传到 API 的额外参数
+
+        Returns:
+            str | None: 完整回答文本
+        """
+        try:
+            logger.info(f"{WAIT_ICON} 开始流式调用 {self.model}")
+
+            for attempt in range(max_retries):
+                try:
+                    stream = self.call_api_with_retry(
+                        messages, stream=True, **kwargs
+                    )
+                    if stream is None:
+                        if attempt < max_retries - 1:
+                            time.sleep(initial_retry_delay * (2 ** attempt))
+                            continue
+                        return None
+
+                    full_text = ""
+                    for chunk in stream:
+                        if chunk.choices and chunk.choices[0].delta:
+                            delta = chunk.choices[0].delta
+                            token = delta.content
+                            if token:
+                                full_text += token
+                                if on_chunk:
+                                    on_chunk(token)
+
+                    logger.info(
+                        f"{SUCCESS_ICON} 流式调用完成，共 {len(full_text)} 字符"
+                    )
+                    return full_text
+
+                except Exception as e:
+                    logger.error(
+                        f"{ERROR_ICON} 流式调用 attempt {attempt + 1} 失败: {str(e)}"
+                    )
+                    if attempt < max_retries - 1:
+                        time.sleep(initial_retry_delay * (2 ** attempt))
+                    else:
+                        return None
+
+        except Exception as e:
+            logger.error(f"{ERROR_ICON} get_completion_stream 发生错误: {str(e)}")
             return None
 
 
@@ -302,14 +581,31 @@ class LLMClientFactory:
         """
         # 如果设置为 auto，自动检测可用的客户端
         if client_type == "auto":
-            # 检查是否提供了 OpenAI Compatible API 相关配置
-            if (kwargs.get("api_key") and kwargs.get("base_url") and kwargs.get("model")) or \
-               (os.getenv("OPENAI_COMPATIBLE_API_KEY") and os.getenv("OPENAI_COMPATIBLE_BASE_URL") and os.getenv("OPENAI_COMPATIBLE_MODEL")):
+            # 优先级：KIMI_* > OPENAI_COMPATIBLE_* > Gemini
+            kimi_key = os.getenv("KIMI_API_KEY", "")
+            openai_key = os.getenv("OPENAI_COMPATIBLE_API_KEY", "")
+            gemini_key = os.getenv("GEMINI_API_KEY", "")
+
+            # Kimi: 如果 KIMI_API_KEY 存在且不是占位符文本
+            is_placeholder = lambda s: s.startswith("your_") or s.startswith("sk-your")
+            if kimi_key and not is_placeholder(kimi_key):
+                client_type = "openai_compatible"
+                kwargs.setdefault("api_key", kimi_key)
+                kwargs.setdefault("base_url", os.getenv("KIMI_BASE_URL"))
+                kwargs.setdefault("model", os.getenv("KIMI_MODEL"))
+                logger.info(f"{WAIT_ICON} 自动选择 Kimi API (OpenAI Compatible)")
+            elif openai_key and not is_placeholder(openai_key):
                 client_type = "openai_compatible"
                 logger.info(f"{WAIT_ICON} 自动选择 OpenAI Compatible API")
-            else:
+            elif gemini_key and not is_placeholder(gemini_key):
                 client_type = "gemini"
                 logger.info(f"{WAIT_ICON} 自动选择 Gemini API")
+            else:
+                # 没有任何有效 key，报错而非静默降级
+                raise ValueError(
+                    "No valid LLM API key found. Set one of: "
+                    "KIMI_API_KEY, OPENAI_COMPATIBLE_API_KEY, GEMINI_API_KEY"
+                )
 
         if client_type == "gemini":
             return GeminiClient(

@@ -1487,9 +1487,17 @@ def stealth_dispatch(alerts: list[dict], *, sound: str = ""):
     - 3+ alerts: 1 notification, top 2 + "+N more"
     - Portfolio summary is always a separate notification
     - No sound by default (discreet); sound="default" for critical only
+    - Alerts are clustered via AlertClusterer to reduce noise
     """
     if not alerts:
         return 0
+
+    # ── 智能聚类降噪 ──
+    try:
+        clusterer = AlertClusterer()
+        alerts = clusterer.cluster(alerts)
+    except Exception as e:
+        logger.warning(f"AlertClusterer failed, using raw alerts: {e}")
 
     # Separate portfolio-level from per-stock alerts
     portfolio_alerts = [a for a in alerts if a.get("_kind") == "portfolio"]
@@ -3025,6 +3033,198 @@ def run():
 
     # ── Shutdown ──
     print(f"\n\nNotifier stopped. Total alerts today: {daily_alerts}")
+
+
+# ══════════════════════════════════════════
+# AlertClusterer — Kimi 智能告警聚类降噪
+# ══════════════════════════════════════════
+
+
+class AlertClusterer:
+    """用 LLM 对告警事件做语义聚类，合并同类告警减少飞书轰炸。
+
+    不替代现有的 (code, message) dedup 和 cooldown 机制，
+    而是在 stealth_dispatch 前对已去重的告警做二次聚类。
+
+    使用方式:
+        clusterer = AlertClusterer()
+        clusters = clusterer.cluster(alerts)
+        # clusters 是合并后的告警列表，可直接传给 stealth_dispatch
+    """
+
+    def __init__(self, config_path: Path | None = None):
+        self._enabled = True
+        self._min_count = 3  # 最少告警数才触发聚类（太少没必要）
+
+        if config_path and config_path.exists():
+            try:
+                import json as _j
+                cfg = _j.loads(config_path.read_text("utf-8"))
+                self._enabled = cfg.get("cluster_enabled", self._enabled)
+                self._min_count = cfg.get("cluster_min_count", self._min_count)
+            except Exception:
+                pass
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    def cluster(self, alerts: list[dict]) -> list[dict]:
+        """对告警列表做语义聚类，返回合并后的告警列表。
+
+        当告警数 < min_count 时不聚类，直接返回原列表。
+        """
+        if not self._enabled:
+            return alerts
+        if len(alerts) < self._min_count:
+            return alerts
+
+        try:
+            clustered = self._cluster_via_llm(alerts)
+            if clustered is None:
+                return alerts
+            return clustered
+        except Exception as e:
+            logger.warning(f"AlertClusterer 聚类失败，fallback 到原始告警: {e}")
+            return alerts
+
+    def _cluster_via_llm(self, alerts: list[dict]) -> list[dict] | None:
+        """调用 LLM 做语义聚类。
+
+        将告警列表发给 LLM，要求合并同类告警并输出聚类结果。
+        使用 json_schema 保证输出格式。
+        """
+        # 构建告警列表文本
+        alert_lines = []
+        for i, a in enumerate(alerts):
+            symbol = a.get("symbol", "?")
+            title = a.get("title", "")
+            message = a.get("message", "")
+            name = a.get("_name", symbol)
+            alert_lines.append(f"[{i}] {symbol} {name} | {title} | {message}")
+
+        alert_text = "\n".join(alert_lines)
+
+        system_msg = {
+            "role": "system",
+            "content": (
+                "你是告警降噪专家。给定一组股票监控告警事件，请将属于同一只股票、"
+                "同一类事件（如同一资金行为导致的大单翻转+量价背离）的告警合并为"
+                "一条摘要。\n\n"
+                "合并规则：\n"
+                "1. 同股票 + 语义相关的告警合并为一条（如大单翻转3次+量价背离→主力分歧）\n"
+                "2. 不同股票的告警保持独立\n"
+                "3. 无法归类的告警保留原文\n"
+                "4. 合并后每条告警标题概括核心问题，正文包含原始告警数量\n"
+                "5. L1 高优告警（含 [L1] 标记）不得被合并到普通告警中"
+            ),
+        }
+
+        user_msg = {
+            "role": "user",
+            "content": (
+                f"请对以下 {len(alerts)} 条告警做语义聚类，合并同类告警：\n\n{alert_text}"
+            ),
+        }
+
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "alert_clusters",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "clusters": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "symbol": {"type": "string"},
+                                    "title": {
+                                        "type": "string",
+                                        "description": "合并后的告警标题",
+                                    },
+                                    "message": {
+                                        "type": "string",
+                                        "description": "合并后的告警正文",
+                                    },
+                                    "original_count": {
+                                        "type": "integer",
+                                        "description": "包含的原始告警数",
+                                    },
+                                    "original_indices": {
+                                        "type": "array",
+                                        "items": {"type": "integer"},
+                                        "description": "原始告警的索引列表",
+                                    },
+                                    "is_l1": {
+                                        "type": "boolean",
+                                        "description": "是否包含L1高优告警",
+                                    },
+                                },
+                                "required": ["symbol", "title", "message",
+                                             "original_count", "is_l1"],
+                                "additionalProperties": False,
+                            },
+                        }
+                    },
+                    "required": ["clusters"],
+                    "additionalProperties": False,
+                },
+            },
+        }
+
+        try:
+            from src.utils.llm_clients import LLMClientFactory
+            import json as _json
+
+            client = LLMClientFactory.create_client()
+            result = client.get_completion(
+                [system_msg, user_msg],
+                response_format=response_format,
+            )
+            if not result:
+                return None
+
+            parsed = _json.loads(result)
+            raw_clusters = parsed.get("clusters", [])
+            if not raw_clusters:
+                return alerts
+
+            # 构建合并后的告警列表
+            merged_alerts = []
+            seen_indices = set()
+
+            for c in raw_clusters:
+                indices = c.get("original_indices", [])
+                seen_indices.update(indices)
+                merged_alerts.append({
+                    "symbol": c["symbol"],
+                    "title": f"[聚合] {c['title']}",
+                    "message": c["message"],
+                    "_kind": "alert_cluster",
+                    "_change_pct": 0,
+                    "_name": c["symbol"],
+                    "_stealth": c["message"],
+                    "_notify": c.get("is_l1", False),
+                    "_cluster_size": c.get("original_count", 0),
+                })
+
+            # 保留未被聚类的告警
+            for i, a in enumerate(alerts):
+                if i not in seen_indices:
+                    merged_alerts.append(a)
+
+            logger.info(
+                f"AlertClusterer: {len(alerts)} → {len(merged_alerts)} "
+                f"(合并 {len(alerts) - len(merged_alerts)} 条)"
+            )
+            return merged_alerts
+
+        except Exception as e:
+            logger.error(f"AlertClusterer LLM 调用失败: {e}")
+            return None
 
 
 if __name__ == "__main__":
