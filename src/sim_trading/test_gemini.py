@@ -1,19 +1,26 @@
 import os
-from dotenv import load_dotenv
-from google import genai
-import json
+import pytest
+
+# Skip entire module if optional dependencies are missing
+dotenv = pytest.importorskip("dotenv")
+genai = pytest.importorskip("google.genai")
 
 # 加载环境变量
 env_path = os.path.join(os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__)))), '.env')
-load_dotenv(env_path)
+dotenv.load_dotenv(env_path)
 
 # 获取配置
 api_key = os.getenv("GEMINI_API_KEY")
 model_name = "gemini-1.5-flash-latest"
 
 
+_HAS_VALID_KEY = api_key and api_key.strip() and not api_key.strip().startswith("your_")
+
+
+@pytest.mark.skipif(not _HAS_VALID_KEY, reason="GEMINI_API_KEY not set or is a placeholder")
 def test_simple_prompt():
+    import json
     """测试简单的提示词生成"""
     print(f"Using model: {model_name}")
 
@@ -36,6 +43,7 @@ def test_simple_prompt():
     print(json.dumps(response.dict(), indent=2))
 
 
+@pytest.mark.skipif(not _HAS_VALID_KEY, reason="GEMINI_API_KEY not set or is a placeholder")
 def test_chat_format():
     """测试聊天格式的提示词"""
     client = genai.Client(api_key=api_key)
@@ -55,6 +63,7 @@ def test_chat_format():
     print("\nResponse text:", response.text)
 
 
+@pytest.mark.skipif(not _HAS_VALID_KEY, reason="GEMINI_API_KEY not set or is a placeholder")
 def test_list_models():
     """列出可用模型"""
     client = genai.Client(api_key=api_key)

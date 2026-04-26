@@ -1,16 +1,25 @@
-from src.tools.news_crawler import get_stock_news
 import os
 import sys
-import json
-from datetime import datetime
+import pytest
 
 # 添加项目根目录到 Python 路径
 project_root = os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 
+# Skip if news_crawler is unavailable or network-dependent
+try:
+    from src.tools.news_crawler import get_stock_news
+except Exception as exc:
+    pytest.skip(f"news_crawler unavailable: {exc}", allow_module_level=True)
 
+import json
+from datetime import datetime
+
+
+@pytest.mark.skip(reason="Network-dependent integration test (47s); run manually with: pytest -s src/sim_trading/test_news_crawler.py")
 def test_news_crawler():
+    """测试新闻爬取和保存功能（集成测试，依赖外部网络）"""
     """测试新闻爬取和保存功能"""
     # 测试参数
     test_symbols = ["600519", "300750", "000001"]  # 测试不同的股票代码

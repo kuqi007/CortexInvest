@@ -92,7 +92,7 @@ class RealtimeSimEngine:
         self._futu = None
         self._futu_sync = None
         futu_cfg = rules.get("futu_trade", {})
-        if futu_trade or futu_cfg.get("enabled", False):
+        if futu_trade and futu_cfg.get("enabled", False):
             try:
                 from .futu_trade_adapter import FutuTradeAdapter
                 from .futu_position_sync import FutuPositionSync
