@@ -453,6 +453,8 @@ export default function ManagePage() {
         l2_delta_pct: String(s.l2_delta_pct ?? 5),
         l2_cooldown_min: String(s.l2_cooldown_min ?? 15),
         l3_cooldown_min: String(s.l3_cooldown_min ?? 30),
+        available_balance_hkd: String(s.available_balance_hkd ?? 0),
+        available_balance_rmb: String(s.available_balance_rmb ?? 0),
       });
     } catch {
       showToast("Failed to load config", "err");
@@ -552,7 +554,7 @@ export default function ManagePage() {
     const settings: Record<string, number> = {};
     for (const [k, v] of Object.entries(settingsDraft)) {
       const n = Number(v);
-      if (!isNaN(n) && n > 0) settings[k] = n;
+      if (!isNaN(n) && n >= 0) settings[k] = n;
     }
     await apiPost({ action: "settings", settings });
   }
@@ -750,6 +752,31 @@ export default function ManagePage() {
         <div style={{ padding: "4px 0" }}>
           <button style={{ ...btnStyle, fontSize: 12, padding: "3px 12px" }} onClick={handleSaveSettings}>
             Save Levels
+          </button>
+        </div>
+
+        {/* ── balance ── */}
+        <SectionHeader># -- balance --</SectionHeader>
+        <div style={{ display: "flex", gap: 16, alignItems: "center", padding: "4px 0", flexWrap: "wrap" }}>
+          {([
+            { key: "available_balance_hkd", label: "HKD 可用余额" },
+            { key: "available_balance_rmb", label: "RMB 可用余额" },
+          ] as const).map(({ key, label }) => (
+            <label key={key} style={{ display: "flex", alignItems: "center", gap: 6, color: D.comment }}>
+              <span>{label}:</span>
+              <input
+                style={{ ...inputStyle, width: 100 }}
+                type="number"
+                step="any"
+                min={0}
+                value={settingsDraft[key] ?? ""}
+                onChange={(e) => setSettingsDraft((prev) => ({ ...prev, [key]: e.target.value }))}
+                onKeyDown={(e) => { if (e.key === "Enter") handleSaveSettings(); }}
+              />
+            </label>
+          ))}
+          <button style={{ ...btnStyle, fontSize: 12, padding: "3px 12px" }} onClick={handleSaveSettings}>
+            Save Balance
           </button>
         </div>
         </>)}

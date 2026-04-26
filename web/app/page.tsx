@@ -174,6 +174,8 @@ function Home() {
   const tabPosition = tabHoldings.reduce((sum, s) => sum + s.price * s.shares!, 0);
   const tabCostBasis = tabHoldings.reduce((sum, s) => sum + s.cost! * s.shares!, 0);
   const tabReturnPct = tabCostBasis > 0 ? (tabPnl / tabCostBasis) * 100 : 0;
+  const avail = activeTab === "HK" ? (settings.available_balance_hkd ?? 0) : (settings.available_balance_rmb ?? 0);
+  const totalAssets = avail + tabPosition;
 
   /* ── sort header helpers (per-section) ── */
   const mkArrow = (st: SortState) => (k: SortKey) =>
@@ -265,6 +267,9 @@ function Home() {
         </span>
         <span style={{ color: D.fg, width: "10ch", textAlign: "right" }}>
           {pad(mktVal != null ? fmtAmt(mktVal) : "-", 9, true)}
+        </span>
+        <span style={{ color: D.fg, width: "8ch", textAlign: "right" }}>
+          {pad(s.position_pct != null ? `${(s.position_pct * 100).toFixed(1)}%` : "-", 7, true)}
         </span>
         <span style={{ color: totalPnlRaw !== null ? chgColor(totalPnlRaw) : D.comment, width: "10ch", textAlign: "right", fontWeight: 500 }}>
           {pad(totalPnlRaw !== null ? fmtMoney(totalPnlRaw) : "-", 9, true)}
@@ -381,7 +386,7 @@ function Home() {
 
         {loading && (
           <div style={{ color: D.comment, padding: "16px 0" }}>
-            <span style={{ color: D.green }}>info</span> Loading metrics
+            <span style={{ color: D.green }}>info</span> 正在加载数据...
             <span style={{ animation: "blink 1s step-end infinite" }}>...</span>
           </div>
         )}
@@ -396,24 +401,24 @@ function Home() {
         )}
         {/* watch header */}
         <div style={{ color: D.comment, marginBottom: 6 }}>
-          <span>Every {pollMs / 1000}.0s: svc-monitor --format table</span>
+          <span>每 {pollMs / 1000} 秒轮询一次</span>
           <span style={{ float: "right" }}>
             {isStale && (
-              <span style={{ color: D.red, fontWeight: 500, marginRight: 8 }}>STALE</span>
+              <span style={{ color: D.red, fontWeight: 500, marginRight: 8 }}>过期</span>
             )}
             {tradingStatus?.trading ? "交易中" : "休市"}
             {" | "}
-            devbox: <span style={{ color: isStale ? D.red : D.comment }}>{now}</span> &nbsp; refresh #{tick}
+            时间: <span style={{ color: isStale ? D.red : D.comment }}>{now}</span> &nbsp; 刷新 #{tick}
           </span>
         </div>
 
         {/* error banner */}
         {fetchError && (
           <div style={{ color: D.red, marginBottom: 6, fontWeight: 500 }}>
-            [ERROR] metrics fetch failed: {fetchError}
+            [错误] 数据获取失败: {fetchError}
             {ts > 0 && (
               <span style={{ color: D.comment, fontWeight: 400 }}>
-                {" "}— showing stale data (last update: {new Date(ts).toLocaleTimeString("zh-CN", { hour12: false })})
+                {" "}— 显示过期数据 (上次更新: {new Date(ts).toLocaleTimeString("zh-CN", { hour12: false })})
               </span>
             )}
           </div>
@@ -422,37 +427,43 @@ function Home() {
         {/* summary bar — current tab */}
         <div style={{ color: D.comment, marginBottom: 6 }}>
           <span style={{ color: D.fg }}>
-            Nodes: <span style={{ color: D.purple }}>{tabHoldingAll.length}</span>
+            节点:<span style={{ color: D.purple }}>{tabHoldingAll.length}</span>
           </span>
           {"  "}
-          holdings:<span style={{ color: D.orange }}>{tabHoldCount}</span>
+          持仓:<span style={{ color: D.orange }}>{tabHoldCount}</span>
           {tabHoldingAll.length > tabHoldCount && (
-            <span style={{ color: D.comment, fontSize: 11 }}>(+{tabHoldingAll.length - tabHoldCount} hidden)</span>
+            <span style={{ color: D.comment, fontSize: 11 }}>(+{tabHoldingAll.length - tabHoldCount} 隐藏)</span>
           )}
           {"  "}
-          up:<span style={{ color: D.red }}>{tabUp}</span>
-          {" "}down:<span style={{ color: D.green }}>{tabDn}</span>
+          涨:<span style={{ color: D.red }}>{tabUp}</span>
+          {" "}跌:<span style={{ color: D.green }}>{tabDn}</span>
           {"  "}
-          throughput:<span style={{ color: D.fg }}>{fmtAmt(tabAmt)}</span>
+          成交额:<span style={{ color: D.fg }}>{fmtAmt(tabAmt)}</span>
           {"  "}
-          avg_delta:
+          平均涨跌:
           <span style={{ color: chgColor(tabAvgChg) }}>
             {tabAvgChg >= 0 ? "+" : ""}{tabAvgChg.toFixed(2)}%
           </span>
-          {"  "}alerts:<span style={{ color: isStale ? D.red : D.green }}>{isStale ? "stale" : "on"}</span>
+          {"  "}告警:<span style={{ color: isStale ? D.red : D.green }}>{isStale ? "过期" : "正常"}</span>
         </div>
         {/* tab portfolio summary */}
         {tabHoldings.length > 0 && (
           <div style={{ color: D.comment, marginBottom: 6 }}>
-            position:<span style={{ color: D.fg }}>{fmtMoney(tabPosition).replace("+", "")}</span>
+            可用:<span style={{ color: D.fg }}>{fmtMoney(avail).replace("+", "")}</span>
             <span style={{ color: D.comment }}>{activeTab === "HK" ? "HK$" : "¥"}</span>
             {"  "}
-            yield:<span style={{ color: chgColor(tabPnl) }}>{fmtMoney(tabPnl)}</span>
+            总市值:<span style={{ color: D.fg }}>{fmtMoney(tabPosition).replace("+", "")}</span>
             <span style={{ color: D.comment }}>{activeTab === "HK" ? "HK$" : "¥"}</span>
             {"  "}
-            return:<span style={{ color: chgColor(tabReturnPct) }}>{tabReturnPct >= 0 ? "+" : ""}{tabReturnPct.toFixed(1)}%</span>
+            总资产:<span style={{ color: D.fg }}>{fmtMoney(totalAssets).replace("+", "")}</span>
+            <span style={{ color: D.comment }}>{activeTab === "HK" ? "HK$" : "¥"}</span>
             {"  "}
-            today:<span style={{ color: chgColor(tabTodayPnl) }}>{fmtMoney(tabTodayPnl)}</span>
+            盈亏:<span style={{ color: chgColor(tabPnl) }}>{fmtMoney(tabPnl)}</span>
+            <span style={{ color: D.comment }}>{activeTab === "HK" ? "HK$" : "¥"}</span>
+            {"  "}
+            收益率:<span style={{ color: chgColor(tabReturnPct) }}>{tabReturnPct >= 0 ? "+" : ""}{tabReturnPct.toFixed(1)}%</span>
+            {"  "}
+            今日:<span style={{ color: chgColor(tabTodayPnl) }}>{fmtMoney(tabTodayPnl)}</span>
             <span style={{ color: D.comment }}>{activeTab === "HK" ? "HK$" : "¥"}</span>
           </div>
         )}
@@ -474,6 +485,7 @@ function Home() {
               <span style={{ width: "7ch", textAlign: "right" }}>{pad("股数", 6, true)}</span>
               <span style={hs("10ch", "pnl", true)} onClick={() => ht("pnl")}>{pad("盈亏%" + ha("pnl"), 9, true)}</span>
               <span style={hs("10ch", "mktVal", true)} onClick={() => ht("mktVal")}>{pad("市值" + ha("mktVal"), 9, true)}</span>
+              <span style={hs("8ch", "position_pct", true)} onClick={() => ht("position_pct")}>{pad("仓位" + ha("position_pct"), 7, true)}</span>
               <span style={hs("10ch", "totalPnl", true)} onClick={() => ht("totalPnl")}>{pad("盈亏额" + ha("totalPnl"), 9, true)}</span>
               <span style={hs("9ch", "dayPnl", true)} onClick={() => ht("dayPnl")}>{pad("今日" + ha("dayPnl"), 8, true)}</span>
               <span style={hs("7ch", "volRatio", true)} onClick={() => ht("volRatio")}>{pad("量比" + ha("volRatio"), 6, true)}</span>
@@ -544,7 +556,7 @@ function Home() {
 
               {prodStock.length === 0 && prodETF.length === 0 && hiddenList.length === 0 && (
                 <div style={{ color: D.comment, padding: "8px 0" }}>
-                  # no holdings in {activeTab === "HK" ? "HK" : "A-share"} tab
+                  # 当前市场无持仓
                 </div>
               )}
             </>
@@ -554,12 +566,12 @@ function Home() {
         {/* log tail */}
         <div style={{ height: 16 }} />
         <div style={{ color: D.comment, fontSize: 12 }}>
-          [{now}] <span style={{ color: D.green }}>info</span> metrics-collector: polled{" "}
-          {services.length} endpoints ({(tick * 7 + 23) % 50 + 15}ms)
+          [{now}] <span style={{ color: D.green }}>info</span> 行情收集: 已轮询{" "}
+          {services.length} 个端点 ({(tick * 7 + 23) % 50 + 15}ms)
         </div>
         <div style={{ color: D.comment, fontSize: 12 }}>
-          [{now}] <span style={{ color: D.green }}>info</span> scheduler: next poll in{" "}
-          {pollMs / 1000}s
+          [{now}] <span style={{ color: D.green }}>info</span> 调度器: 下次轮询{" "}
+          {pollMs / 1000}秒
         </div>
 
         </>)}

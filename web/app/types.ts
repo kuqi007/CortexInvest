@@ -52,6 +52,7 @@ export interface Service {
   watch_price?: number;
   watch_price_date?: string;
   pin_order?: number;
+  position_pct?: number | null;
   /* Futu L2 enrichment (optional — absent when OpenD offline or A-share no permission) */
   mainNetInflow?: number;
   mainNetInflowPct?: number;
@@ -85,6 +86,8 @@ export interface AlertSettings {
   poll_interval?: number;
   big_move_pct?: number;
   cooldown_minutes?: number;
+  available_balance_hkd?: number;
+  available_balance_rmb?: number;
 }
 
 export interface MarketTurnover {

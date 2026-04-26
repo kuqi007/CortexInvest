@@ -1,17 +1,7 @@
 import { NextResponse } from "next/server";
-import { readFileSync } from "fs";
-import { join } from "path";
 import { openConfigDb, openTradingDb } from "../../lib/db";
 
-const DATA_PATH = join(process.cwd(), "..", "src", "data", "market_data.json");
-const CONFIG_PATH = join(process.cwd(), "..", "src", "data", "monitor_config.json");
-const ALERT_PATH = join(process.cwd(), "..", "src", "data", "alert_config.json");
-
 const EMPTY = { services: [], ts: 0, settings: {} };
-
-function getConfigSource(): "db" | "json" {
-  return process.env.CONFIG_SOURCE === "json" ? "json" : "db";
-}
 
 type DbWatchRow = {
   symbol: string;
@@ -29,36 +19,48 @@ type DbWatchRow = {
   pin_order: number;
 };
 
-function mergeSplitLists(
-  holdings: Record<string, Record<string, unknown>>,
-  watching: Record<string, Record<string, unknown>>,
-): Record<string, Record<string, unknown>> {
-  const merged: Record<string, Record<string, unknown>> = {};
-  for (const [code, entry] of Object.entries(holdings || {})) {
-    merged[code] = { ...entry, type: "holding" };
-  }
-  for (const [code, entry] of Object.entries(watching || {})) {
-    if (!merged[code]) merged[code] = { ...entry, type: "watching" };
-  }
-  return merged;
-}
+type PriceSnapshot = {
+  ts: number;
+  code: string;
+  name: string;
+  price: number;
+  volume: number;
+  amount: number;
+  change_pct: number;
+  chg_amt: number;
+  amp: number;
+  turnover: number;
+  vol_ratio: number;
+  high: number;
+  low: number;
+  open: number;
+  prev_close: number;
+  amo1: number;
+  amo2: number;
+};
 
-function parseJsonConfig(raw: string): {
-  watchlist: Record<string, Record<string, unknown>>;
-  settings: Record<string, number>;
-} {
-  const cfg = JSON.parse(raw) as {
-    watchlist?: Record<string, Record<string, unknown>>;
-    holdings?: Record<string, Record<string, unknown>>;
-    watching?: Record<string, Record<string, unknown>>;
-    settings?: Record<string, number>;
-  };
-  const watchlist =
-    cfg.watchlist && Object.keys(cfg.watchlist).length > 0
-      ? cfg.watchlist
-      : mergeSplitLists(cfg.holdings || {}, cfg.watching || {});
-  return { watchlist, settings: cfg.settings || {} };
-}
+type MarketTurnover = {
+  ts: number;
+  sh: number;
+  sz: number;
+  total: number;
+  sh_index: number;
+  sz_index: number;
+  sh_pct: number;
+  sz_pct: number;
+  verdict: string;
+  chi_next: number;
+  chi_next_pct: number;
+  kc50: number;
+  kc50_pct: number;
+  hk_index: number;
+  hk_index_pct: number;
+  hk_tech: number;
+  hk_tech_pct: number;
+  hk_turnover: number;
+  amo1: number;
+  amo2: number;
+};
 
 function readMonitorConfigFromDb(): {
   watchlist: Record<string, Record<string, unknown>>;
@@ -114,143 +116,300 @@ function readMonitorConfigFromDb(): {
   }
 }
 
+function readLatestPriceSnapshots(): { snapshots: PriceSnapshot[]; ts: number } {
+  const db = openTradingDb(true);
+  try {
+    const rows = db
+      .prepare(
+        `SELECT ts, code, name, price, volume, amount, change_pct, chg_amt, amp, turnover, vol_ratio, high, low, open, prev_close, amo1, amo2
+         FROM price_snapshots
+         WHERE (code, ts) IN (
+           SELECT code, MAX(ts) FROM price_snapshots GROUP BY code
+         )`,
+      )
+      .all() as PriceSnapshot[];
+
+    let ts = 0;
+    for (const r of rows) {
+      if (r.ts > ts) ts = r.ts;
+    }
+    return { snapshots: rows, ts };
+  } finally {
+    db.close();
+  }
+}
+
+function readLatestMarketTurnover(): MarketTurnover | null {
+  const db = openTradingDb(true);
+  try {
+    const row = db
+      .prepare(
+        `SELECT ts, sh, sz, total, sh_index, sz_index, sh_pct, sz_pct, verdict,
+                chi_next, chi_next_pct, kc50, kc50_pct, hk_index, hk_index_pct,
+                hk_tech, hk_tech_pct, hk_turnover, amo1, amo2
+         FROM market_turnover
+         ORDER BY ts DESC
+         LIMIT 1`,
+      )
+      .get() as MarketTurnover | undefined;
+    return row ?? null;
+  } finally {
+    db.close();
+  }
+}
+
+function readAlertRules(): Record<string, { above: number | null; below: number | null }> {
+  const db = openConfigDb(true);
+  try {
+    const rows = db
+      .prepare("SELECT symbol, above, below FROM alert_rules")
+      .all() as { symbol: string; above: number | null; below: number | null }[];
+
+    const alerts: Record<string, { above: number | null; below: number | null }> = {};
+    for (const r of rows) {
+      alerts[r.symbol] = { above: r.above ?? null, below: r.below ?? null };
+    }
+    return alerts;
+  } finally {
+    db.close();
+  }
+}
+
 /**
  * GET /api/metrics
  *
- * 三源合并:
- * - market_data.json  (poller 写): 纯行情数据
- * - monitor_config.json (UI 写):   持仓配置 (type/cost/shares/hidden)
- * - alert_config.json   (UI 写):   告警规则 (above/below)
+ * 三源合并（全部来自 SQLite DB）:
+ * - price_snapshots (trading.db): 纯行情数据
+ * - monitor_watchlist (config.db): 持仓配置 (type/cost/shares/hidden)
+ * - alert_rules (config.db): 告警规则 (above/below)
  */
 export async function GET() {
   try {
-    const raw = readFileSync(DATA_PATH, "utf-8");
-    const data = JSON.parse(raw);
+    // 1. 读 watchlist + settings
+    const { watchlist, settings } = readMonitorConfigFromDb();
 
-    // 读 config（CONFIG_SOURCE=json 时强制文件源）
-    let watchlist: Record<string, Record<string, unknown>> = {};
-    let settings: Record<string, number> = {};
-    try {
-      if (getConfigSource() === "json") {
-        const cfgRaw = readFileSync(CONFIG_PATH, "utf-8");
-        const cfg = parseJsonConfig(cfgRaw);
-        watchlist = cfg.watchlist;
-        settings = cfg.settings;
-      } else {
-        const dbCfg = readMonitorConfigFromDb();
-        if (!dbCfg.empty) {
-          watchlist = dbCfg.watchlist;
-          settings = dbCfg.settings;
-        } else {
-          const cfgRaw = readFileSync(CONFIG_PATH, "utf-8");
-          const cfg = parseJsonConfig(cfgRaw);
-          watchlist = cfg.watchlist;
-          settings = cfg.settings;
-        }
+    // 2. 读最新行情快照
+    const { snapshots, ts } = readLatestPriceSnapshots();
+
+    // 3. 读 alert rules
+    const alerts = readAlertRules();
+
+    // 4. 读 market turnover
+    const turnover = readLatestMarketTurnover();
+
+    // 5. 构建 services 数组
+    const services: Record<string, unknown>[] = [];
+    const existingIds = new Set<string>();
+
+    for (const s of snapshots) {
+      const id = s.code;
+      const entry = watchlist[id];
+      if (!entry) continue; // 不在 watchlist 里的股票不返回
+      existingIds.add(id);
+      const alert = alerts[id];
+
+      const price = Number(s.price) || 0;
+      const cost = entry.cost != null ? Number(entry.cost) : null;
+      const shares = entry.shares != null ? Number(entry.shares) : null;
+      const type = (entry.type as string) || "watching";
+      const isHolding = type === "holding";
+
+      let pnl: number | null = null;
+      if (isHolding && cost != null && cost !== 0 && price > 0) {
+        pnl = Math.round(((price - cost) / Math.abs(cost)) * 10000) / 100;
       }
-    } catch {
-      // DB/read error fallback: never return empty watchlist silently.
-      try {
-        const cfgRaw = readFileSync(CONFIG_PATH, "utf-8");
-        const cfg = parseJsonConfig(cfgRaw);
-        watchlist = cfg.watchlist;
-        settings = cfg.settings;
-      } catch { /* */ }
+
+      services.push({
+        id,
+        name: (entry.name as string) || s.name || id,
+        price,
+        change: s.change_pct ?? 0,
+        chgAmt: s.chg_amt ?? 0,
+        vol: s.volume ?? 0,
+        amount: s.amount ?? 0,
+        amp: s.amp ?? 0,
+        turnover: s.turnover ?? 0,
+        volRatio: s.vol_ratio ?? 0,
+        high: s.high ?? 0,
+        low: s.low ?? 0,
+        open: s.open ?? 0,
+        prevClose: s.prev_close ?? 0,
+        amo1: s.amo1 ?? 0,
+        amo2: s.amo2 ?? 0,
+        type,
+        cost,
+        shares,
+        pnl,
+        above: alert?.above ?? null,
+        below: alert?.below ?? null,
+        hidden: Boolean(entry.hidden),
+        star: Boolean(entry.star),
+        ...(entry.dip_buy ? { dip_buy: true } : {}),
+        ...(entry.alias ? { alias: entry.alias } : {}),
+        ...(entry.tags ? { tags: entry.tags } : {}),
+        ...(entry.watch_price != null ? { watch_price: Number(entry.watch_price) } : {}),
+        ...(entry.watch_price_date ? { watch_price_date: entry.watch_price_date } : {}),
+        ...((entry as Record<string, unknown>).pin_order != null ? { pin_order: (entry as Record<string, unknown>).pin_order } : {}),
+      });
     }
 
-    // 读 alert config
-    let alerts: Record<string, Record<string, number>> = {};
-    try {
-      const alertRaw = readFileSync(ALERT_PATH, "utf-8");
-      const alertCfg = JSON.parse(alertRaw);
-      alerts = alertCfg.alerts || {};
-    } catch { /* */ }
+    // 补充 watchlist 中有但 price_snapshots 里没有的条目（新加持仓/自选立即显示）
+    for (const [id, entry] of Object.entries(watchlist)) {
+      if (existingIds.has(id)) continue;
+      const alert = alerts[id];
+      const type = (entry.type as string) || "watching";
+      const cost = entry.cost != null ? Number(entry.cost) : null;
+      const shares = entry.shares != null ? Number(entry.shares) : null;
 
-    // 校验 services 是数组
-    if (!Array.isArray(data.services)) {
-      return NextResponse.json({ ...EMPTY, error: "invalid data: services is not an array" });
+      services.push({
+        id,
+        name: (entry.name as string) || id,
+        price: 0,
+        change: 0,
+        chgAmt: 0,
+        vol: 0,
+        amount: 0,
+        amp: 0,
+        turnover: 0,
+        volRatio: 0,
+        high: 0,
+        low: 0,
+        open: 0,
+        prevClose: 0,
+        amo1: 0,
+        amo2: 0,
+        type,
+        cost,
+        shares,
+        pnl: null,
+        above: alert?.above ?? null,
+        below: alert?.below ?? null,
+        hidden: Boolean(entry.hidden),
+        star: Boolean(entry.star),
+        ...(entry.dip_buy ? { dip_buy: true } : {}),
+        ...(entry.alias ? { alias: entry.alias } : {}),
+        ...(entry.tags ? { tags: entry.tags } : {}),
+        ...(entry.watch_price != null ? { watch_price: Number(entry.watch_price) } : {}),
+        ...(entry.watch_price_date ? { watch_price_date: entry.watch_price_date } : {}),
+        ...((entry as Record<string, unknown>).pin_order != null ? { pin_order: (entry as Record<string, unknown>).pin_order } : {}),
+      });
     }
 
-    // 合并到每条 service
-    if (Array.isArray(data.services)) {
-      data.services = data.services.map((s: Record<string, unknown>) => {
-        const id = s.id as string;
-        const entry = watchlist[id];
-        if (!entry) return null;  // 不在 watchlist 里的股票不返回
-        const alert = alerts[id];
-
-        const price = Number(s.price) || 0;
-        const cost = entry.cost != null ? Number(entry.cost) : null;
-        const shares = entry.shares != null ? Number(entry.shares) : null;
-        const type = (entry.type as string) || "watching";
-        const isHolding = type === "holding";
-
-        let pnl: number | null = null;
-        if (isHolding && cost != null && cost !== 0 && price > 0) {
-          pnl = Math.round(((price - cost) / Math.abs(cost)) * 10000) / 100;
+    // 6. 构建 marketTurnover
+    const marketTurnover = turnover
+      ? {
+          sh: turnover.sh ?? 0,
+          sz: turnover.sz ?? 0,
+          total: turnover.total ?? 0,
+          shIndex: turnover.sh_index ?? 0,
+          szIndex: turnover.sz_index ?? 0,
+          shPct: turnover.sh_pct ?? 0,
+          szPct: turnover.sz_pct ?? 0,
+          verdict: turnover.verdict ?? "",
+          chiNext: turnover.chi_next ?? 0,
+          chiNextPct: turnover.chi_next_pct ?? 0,
+          kc50: turnover.kc50 ?? 0,
+          kc50Pct: turnover.kc50_pct ?? 0,
+          hkIndex: turnover.hk_index ?? 0,
+          hkIndexPct: turnover.hk_index_pct ?? 0,
+          hkTech: turnover.hk_tech ?? 0,
+          hkTechPct: turnover.hk_tech_pct ?? 0,
+          hkTurnover: turnover.hk_turnover ?? 0,
+          amo1: turnover.amo1 ?? 0,
+          amo2: turnover.amo2 ?? 0,
         }
+      : undefined;
 
-        return {
-          ...s,
-          // 优先使用 config 中的名称（用户可能修改过）
-          ...(entry.name ? { name: entry.name as string } : {}),
-          type,
-          cost,
-          shares,
-          pnl,
-          above: alert?.above ?? null,
-          below: alert?.below ?? null,
-          hidden: Boolean(entry.hidden),
-          star: Boolean(entry.star),
-          ...(entry.dip_buy ? { dip_buy: true } : {}),
-          ...(entry.alias ? { alias: entry.alias } : {}),
-          ...(entry.tags ? { tags: entry.tags } : {}),
-          ...(entry.watch_price != null ? { watch_price: Number(entry.watch_price) } : {}),
-          ...(entry.watch_price_date ? { watch_price_date: entry.watch_price_date } : {}),
-          ...((entry as Record<string, unknown>).pin_order != null ? { pin_order: (entry as Record<string, unknown>).pin_order } : {}),
-        };
-      }).filter(Boolean);
-    }
-
-    data.settings = settings;
-
-    // 读 alert events - 直接使用本地 SQLite（Turso 用于 Python 端双写）
+    // 7. 读 alert events + indicator_cache
+    let alertEvents: unknown[] = [];
+    let indicatorMap: Record<string, unknown> = {};
     try {
       const now = new Date();
       const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 
       const db = openTradingDb(true);
       try {
-        data.alertEvents = db
+        alertEvents = db
           .prepare(
             "SELECT ts, time, symbol, kind, level, message, display, change_pct " +
             "FROM alert_events WHERE date = ? ORDER BY ts",
           )
           .all(today);
-        // 读 indicator_cache 并附到 services
+
         try {
           const indRows = db.prepare(
             "SELECT symbol, data_json FROM indicator_cache WHERE date = ?"
           ).all(today) as { symbol: string; data_json: string }[];
-          const indMap: Record<string, unknown> = {};
           for (const r of indRows) {
-            try { indMap[r.symbol] = JSON.parse(r.data_json); } catch { /* skip */ }
-          }
-          if (Object.keys(indMap).length > 0) {
-            for (const svc of data.services) {
-              const ind = indMap[svc.id];
-              if (ind) (svc as Record<string, unknown>).indicators = ind;
-            }
+            try { indicatorMap[r.symbol] = JSON.parse(r.data_json); } catch { /* skip */ }
           }
         } catch { /* indicator_cache table may not exist yet */ }
       } finally {
         db.close();
       }
-    } catch {
-      data.alertEvents = [];
+    } catch { /* alert_events read failure is non-fatal */ }
+
+    // 8. 附加 indicators 到 services
+    if (Object.keys(indicatorMap).length > 0) {
+      for (const svc of services) {
+        const ind = indicatorMap[svc.id as string];
+        if (ind) svc.indicators = ind;
+      }
     }
 
-    return NextResponse.json(data);
+    // ── 按市场计算持仓市值、总资产、仓位比例 ──
+    const availHkd = Number(settings.available_balance_hkd) || 0;
+    const availRmb = Number(settings.available_balance_rmb) || 0;
+
+    let posValHkd = 0;
+    let posValRmb = 0;
+    for (const svc of services) {
+      if (svc.type === "holding" && svc.shares != null && svc.price > 0) {
+        const mktVal = svc.price * svc.shares;
+        if (svc.id.startsWith("HK")) posValHkd += mktVal;
+        else posValRmb += mktVal;
+      }
+    }
+
+    const totalAssetsHkd = availHkd + posValHkd;
+    const totalAssetsRmb = availRmb + posValRmb;
+
+    for (const svc of services) {
+      if (svc.type !== "holding" || svc.shares == null || svc.price <= 0) {
+        (svc as Record<string, unknown>).position_pct = null;
+        continue;
+      }
+      const mktVal = svc.price * svc.shares;
+      const total = svc.id.startsWith("HK") ? totalAssetsHkd : totalAssetsRmb;
+      (svc as Record<string, unknown>).position_pct = total > 0
+        ? Math.round((mktVal / total) * 10000) / 10000
+        : 0;
+    }
+
+    const response: Record<string, unknown> = {
+      services,
+      ts,
+      settings,
+      alertEvents,
+      portfolio: {
+        hkd: {
+          available_balance: availHkd,
+          position_value: posValHkd,
+          total_assets: totalAssetsHkd,
+        },
+        rmb: {
+          available_balance: availRmb,
+          position_value: posValRmb,
+          total_assets: totalAssetsRmb,
+        },
+      },
+    };
+
+    if (marketTurnover) {
+      response.marketTurnover = marketTurnover;
+    }
+
+    return NextResponse.json(response);
   } catch (e) {
     return NextResponse.json({ ...EMPTY, error: String(e) });
   }

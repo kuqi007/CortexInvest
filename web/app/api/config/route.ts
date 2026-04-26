@@ -1,29 +1,24 @@
 import { NextResponse } from "next/server";
-import { readFileSync, writeFileSync, renameSync } from "fs";
-import { join } from "path";
 import Database from "better-sqlite3";
-import { openConfigDb } from "../../lib/db";
-
-const CONFIG_PATH = join(process.cwd(), "..", "src", "data", "monitor_config.json");
-const ALERT_PATH = join(process.cwd(), "..", "src", "data", "alert_config.json");
+import { openConfigDb, openTradingDb } from "../../lib/db";
 
 import type { WatchEntry, MonitorConfig } from "../../types";
 import { EM_UT } from "../../theme";
 
-const MARKET_DATA_PATH = join(process.cwd(), "..", "src", "data", "market_data.json");
 const EM_API = "https://push2.eastmoney.com/api/qt/ulist.np/get";
 
-/** Read current price for a stock from market_data.json (poller output). Returns null if unavailable. */
+/** Read current price for a stock from price_snapshots DB. Returns null if unavailable. */
 function readMarketPrice(code: string): number | null {
+  const db = openTradingDb(true);
   try {
-    const raw = readFileSync(MARKET_DATA_PATH, "utf-8");
-    const md = JSON.parse(raw);
-    const services = md?.services;
-    if (!Array.isArray(services)) return null;
-    const svc = services.find((s: { id?: string }) => s.id === code);
-    return svc?.price != null ? Number(svc.price) : null;
+    const row = db
+      .prepare("SELECT price FROM price_snapshots WHERE code = ? ORDER BY ts DESC LIMIT 1")
+      .get(code) as { price: number } | undefined;
+    return row?.price != null ? Number(row.price) : null;
   } catch {
     return null;
+  } finally {
+    db.close();
   }
 }
 
@@ -32,7 +27,7 @@ function todayStr(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-// ── Config (monitor_config.json) ──
+// ── Config (monitor_config.json snapshot only) ──
 
 type NormalizedMonitorConfig = MonitorConfig & {
   holdings: Record<string, WatchEntry>;
@@ -83,38 +78,6 @@ function normalizeConfig(raw: unknown): NormalizedMonitorConfig {
   }
   const { holdings, watching } = splitWatchlist(watchlist);
   return { watchlist, holdings, watching, settings };
-}
-
-function readConfig(): MonitorConfig {
-  const raw = readFileSync(CONFIG_PATH, "utf-8");
-  return normalizeConfig(JSON.parse(raw));
-}
-
-function getConfigSource(): "db" | "json" {
-  return process.env.CONFIG_SOURCE === "json" ? "json" : "db";
-}
-
-function writeConfigSnapshot(config: MonitorConfig) {
-  const normalized = normalizeConfig(config);
-  const holdings: Record<string, WatchEntry> = {};
-  const watching: Record<string, WatchEntry> = {};
-  for (const [code, entry] of Object.entries(normalized.holdings)) {
-    const { type: _type, ...rest } = entry;
-    holdings[code] = rest;
-  }
-  for (const [code, entry] of Object.entries(normalized.watching)) {
-    const { type: _type, ...rest } = entry;
-    watching[code] = rest;
-  }
-  const snapshot: MonitorConfig = {
-    watchlist: normalized.watchlist,
-    holdings,
-    watching,
-    settings: normalized.settings,
-  };
-  const tmp = CONFIG_PATH + ".tmp";
-  writeFileSync(tmp, JSON.stringify(snapshot, null, 2) + "\n", "utf-8");
-  renameSync(tmp, CONFIG_PATH);
 }
 
 // ── Config DB helpers (monitor_* tables) ──
@@ -222,6 +185,16 @@ function ensureMonitorTables(db: MonitorDb) {
   `);
   try { db.exec(`ALTER TABLE position_change_log ADD COLUMN type_from TEXT`); } catch {}
   try { db.exec(`ALTER TABLE position_change_log ADD COLUMN type_to TEXT`); } catch {}
+
+  // alert_rules table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS alert_rules (
+      symbol TEXT PRIMARY KEY,
+      above REAL,
+      below REAL,
+      updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+    );
+  `);
 }
 
 function readConfigFromDb(db: MonitorDb, ensureSchema = true): MonitorConfig {
@@ -283,14 +256,9 @@ function readConfigFromDb(db: MonitorDb, ensureSchema = true): MonitorConfig {
   return { watchlist, holdings, watching, settings };
 }
 
-function exportMonitorSnapshotFromDb(db: MonitorDb): string | null {
-  try {
-    const config = readConfigFromDb(db);
-    writeConfigSnapshot(config);
-    return null;
-  } catch (e) {
-    return String(e);
-  }
+function exportMonitorSnapshotFromDb(_db: MonitorDb): string | null {
+  // JSON snapshot export removed — DB is the single source of truth
+  return null;
 }
 
 function readWatchRow(db: MonitorDb, symbol: string): WatchRow | undefined {
@@ -311,228 +279,55 @@ function isConfigEmpty(config: MonitorConfig): boolean {
   );
 }
 
-async function handleJsonPost(body: unknown) {
-  const { action } = body as { action?: string };
-  const config = readConfig();
-
-  switch (action) {
-    case "add": {
-      const { code, data } = body as {
-        code: string;
-        data?: Partial<WatchEntry> & { above?: number; below?: number };
-      };
-      if (!code) {
-        return NextResponse.json({ success: false, message: "Missing code" }, { status: 400 });
-      }
-
-      let name = data?.name || "";
-      if (!name) {
-        name = await fetchStockName(code);
-      }
-
-      const entry: WatchEntry = { name };
-      if (data?.type === "holding" || data?.cost != null || data?.shares != null) {
-        entry.type = "holding";
-        entry.cost = data?.cost ?? null;
-        entry.shares = data?.shares ?? null;
-      }
-      if (data?.hidden !== undefined) entry.hidden = data.hidden;
-      if (data?.star !== undefined) entry.star = data.star;
-      if ((data as WatchEntry & { lot?: number | null } | undefined)?.lot !== undefined) {
-        (entry as WatchEntry & { lot?: number | null }).lot =
-          (data as WatchEntry & { lot?: number | null }).lot ?? null;
-      }
-
-      config.watchlist[code] = entry;
-      writeConfigSnapshot(config);
-
-      if (data?.above != null || data?.below != null) {
-        const alertCfg = readAlerts();
-        const alertEntry: AlertEntry = {};
-        if (data.above != null) alertEntry.above = data.above;
-        if (data.below != null) alertEntry.below = data.below;
-        alertCfg.alerts[code] = alertEntry;
-        writeAlerts(alertCfg);
-      }
-
-      const env = entry.type === "holding" ? "PROD" : "DEV";
-      const extras: string[] = [];
-      if (entry.cost != null) extras.push(`cost:${entry.cost.toFixed(2)}`);
-      if (entry.shares != null) extras.push(`shares:${entry.shares}`);
-      if (data?.above != null) extras.push(`above:${data.above}`);
-      if (data?.below != null) extras.push(`below:${data.below}`);
-      const extStr = extras.length > 0 ? ` | ${extras.join(" ")}` : "";
-
-      return NextResponse.json({
-        success: true,
-        message: `Added ${code} (${name}) → ${env}${extStr}`,
-      });
-    }
-
-    case "update": {
-      const { code, data } = body as {
-        code: string;
-        data?: Partial<WatchEntry> & { above?: number; below?: number };
-      };
-      if (!code || !config.watchlist[code]) {
-        return NextResponse.json(
-          { success: false, message: `${code || "?"} not in watchlist` },
-          { status: 400 }
-        );
-      }
-
-      const existing = config.watchlist[code];
-      if (data?.type !== undefined) existing.type = data.type;
-      if (data?.cost !== undefined) existing.cost = data.cost;
-      if (data?.shares !== undefined) existing.shares = data.shares;
-      if (data?.hidden !== undefined) existing.hidden = data.hidden;
-      if (data?.star !== undefined) existing.star = data.star;
-      if ((data as WatchEntry & { lot?: number | null } | undefined)?.lot !== undefined) {
-        (existing as WatchEntry & { lot?: number | null }).lot =
-          (data as WatchEntry & { lot?: number | null }).lot ?? null;
-      }
-
-      if (data?.type === undefined && (data?.cost != null || data?.shares != null)) {
-        if ((existing.cost != null || existing.shares != null) && existing.type !== "holding") {
-          existing.type = "holding";
-        }
-      }
-
-      config.watchlist[code] = existing;
-      writeConfigSnapshot(config);
-
-      if (data?.above !== undefined || data?.below !== undefined) {
-        const alertCfg = readAlerts();
-        if (!alertCfg.alerts[code]) alertCfg.alerts[code] = {};
-        if (data.above !== undefined) {
-          if (data.above === null) delete alertCfg.alerts[code].above;
-          else alertCfg.alerts[code].above = data.above;
-        }
-        if (data.below !== undefined) {
-          if (data.below === null) delete alertCfg.alerts[code].below;
-          else alertCfg.alerts[code].below = data.below;
-        }
-        if (Object.keys(alertCfg.alerts[code]).length === 0) {
-          delete alertCfg.alerts[code];
-        }
-        writeAlerts(alertCfg);
-      }
-
-      const changed: string[] = [];
-      if (data?.type !== undefined) changed.push(`type:${data.type}`);
-      if (data?.cost !== undefined) changed.push(`cost:${data.cost}`);
-      if (data?.shares !== undefined) changed.push(`shares:${data.shares}`);
-      if (data?.above !== undefined) changed.push(`above:${data.above}`);
-      if (data?.below !== undefined) changed.push(`below:${data.below}`);
-      if (data?.hidden !== undefined) changed.push(`hidden:${data.hidden}`);
-      if (data?.star !== undefined) changed.push(`star:${data.star}`);
-      if ((data as WatchEntry & { lot?: number | null } | undefined)?.lot !== undefined) {
-        changed.push(`lot:${(data as WatchEntry & { lot?: number | null }).lot}`);
-      }
-
-      return NextResponse.json({
-        success: true,
-        message: `Updated ${code} (${existing.name}) → ${changed.join(" ")}`,
-      });
-    }
-
-    case "remove": {
-      const { code, codes } = body as { code?: string; codes?: string[] };
-      const toRemove = codes || (code ? [code] : []);
-      if (toRemove.length === 0) {
-        return NextResponse.json({ success: false, message: "Missing code(s)" }, { status: 400 });
-      }
-
-      const removed: string[] = [];
-      const notFound: string[] = [];
-      const alertCfg = readAlerts();
-      for (const c of toRemove) {
-        if (config.watchlist[c]) {
-          removed.push(`${c} (${config.watchlist[c].name})`);
-          delete config.watchlist[c];
-          delete alertCfg.alerts[c];
-        } else {
-          notFound.push(c);
-        }
-      }
-
-      writeConfigSnapshot(config);
-      writeAlerts(alertCfg);
-      let msg = removed.length > 0 ? `Removed ${removed.join(", ")}` : "";
-      if (notFound.length > 0) {
-        msg += (msg ? "; " : "") + `Not found: ${notFound.join(", ")}`;
-      }
-      return NextResponse.json({ success: removed.length > 0, message: msg });
-    }
-
-    case "settings": {
-      const { settings } = body as { settings: Record<string, number> };
-      if (!settings) {
-        return NextResponse.json({ success: false, message: "Missing settings" }, { status: 400 });
-      }
-
-      const ALLOWED: Record<string, [number, number]> = {
-        poll_interval: [5, 300],
-        big_move_pct: [0.5, 20],
-        cooldown_minutes: [1, 120],
-        l1_trigger_pct: [1, 20],
-        l1_delta_pct: [1, 20],
-        l1_cooldown_min: [0, 60],
-        l2_trigger_pct: [1, 20],
-        l2_delta_pct: [1, 20],
-        l2_cooldown_min: [1, 120],
-        l3_cooldown_min: [1, 120],
-      };
-
-      const rejected: string[] = [];
-      const applied: string[] = [];
-      for (const [key, val] of Object.entries(settings)) {
-        const range = ALLOWED[key];
-        if (!range) { rejected.push(`${key} (unknown)`); continue; }
-        const n = Number(val);
-        if (isNaN(n) || n < range[0] || n > range[1]) {
-          rejected.push(`${key}=${val} (must be ${range[0]}-${range[1]})`);
-          continue;
-        }
-        config.settings[key] = n;
-        applied.push(`${key}=${n}`);
-      }
-      writeConfigSnapshot(config);
-
-      const msg = applied.length > 0 ? `Updated: ${applied.join(" ")}` : "No changes";
-      const warn = rejected.length > 0 ? ` | Rejected: ${rejected.join(", ")}` : "";
-      return NextResponse.json({
-        success: applied.length > 0,
-        message: msg + warn,
-      });
-    }
-
-    default:
-      return NextResponse.json(
-        { success: false, message: `Unknown action: ${action}` },
-        { status: 400 }
-      );
-  }
-}
-
-// ── Alerts (alert_config.json) ──
+// ── Alerts (alert_rules table in config.db) ──
 
 interface AlertEntry { above?: number; below?: number; }
 interface AlertConfig { alerts: Record<string, AlertEntry>; }
 
-function readAlerts(): AlertConfig {
-  try {
-    const raw = readFileSync(ALERT_PATH, "utf-8");
-    return JSON.parse(raw);
-  } catch {
-    return { alerts: {} };
+function readAlertsFromDb(db: MonitorDb): AlertConfig {
+  const rows = db
+    .prepare("SELECT symbol, above, below FROM alert_rules")
+    .all() as { symbol: string; above: number | null; below: number | null }[];
+
+  const alerts: Record<string, AlertEntry> = {};
+  for (const r of rows) {
+    const entry: AlertEntry = {};
+    if (r.above != null) entry.above = Number(r.above);
+    if (r.below != null) entry.below = Number(r.below);
+    if (Object.keys(entry).length > 0) {
+      alerts[r.symbol] = entry;
+    }
   }
+  return { alerts };
 }
 
-function writeAlerts(cfg: AlertConfig) {
-  const tmp = ALERT_PATH + ".tmp";
-  writeFileSync(tmp, JSON.stringify(cfg, null, 2) + "\n", "utf-8");
-  renameSync(tmp, ALERT_PATH);
+function writeAlertToDb(
+  db: MonitorDb,
+  symbol: string,
+  entry: AlertEntry | null,
+) {
+  if (!entry || (entry.above == null && entry.below == null)) {
+    db.prepare("DELETE FROM alert_rules WHERE symbol = ?").run(symbol);
+    return;
+  }
+  const nowTs = Math.floor(Date.now() / 1000);
+  db.prepare(
+    `INSERT INTO alert_rules(symbol, above, below, updated_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(symbol) DO UPDATE SET
+       above = excluded.above,
+       below = excluded.below,
+       updated_at = excluded.updated_at`
+  ).run(
+    symbol,
+    entry.above != null ? Number(entry.above) : null,
+    entry.below != null ? Number(entry.below) : null,
+    nowTs,
+  );
+}
+
+function deleteAlertFromDb(db: MonitorDb, symbol: string) {
+  db.prepare("DELETE FROM alert_rules WHERE symbol = ?").run(symbol);
 }
 
 // ── Helpers ──
@@ -567,26 +362,15 @@ async function fetchStockName(code: string): Promise<string> {
 export async function GET() {
   let db: MonitorDb | null = null;
   try {
-    let config: MonitorConfig;
-    if (getConfigSource() === "json") {
-      config = readConfig();
-    } else {
-      try {
-        db = openMonitorDb(true);
-        config = readConfigFromDb(db, false);
-        if (isConfigEmpty(config)) {
-          config = readConfig();
-        }
-      } catch {
-        config = readConfig();
-      } finally {
-        db?.close();
-      }
-    }
-    const alertCfg = readAlerts();
+    db = openMonitorDb(true);
+    ensureMonitorTables(db);
+    const config = readConfigFromDb(db, false);
+    const alertCfg = readAlertsFromDb(db);
     return NextResponse.json({ ...config, alerts: alertCfg.alerts });
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
+  } finally {
+    db?.close();
   }
 }
 
@@ -595,9 +379,6 @@ export async function POST(request: Request) {
   let db: MonitorDb | null = null;
   try {
     const body = await request.json();
-    if (getConfigSource() === "json") {
-      return await handleJsonPost(body);
-    }
     const { action } = body;
     db = openMonitorDb(false);
     ensureMonitorTables(db);
@@ -688,14 +469,12 @@ export async function POST(request: Request) {
             created_at = monitor_watchlist.created_at`
         ).run(code, name, listType, cost, shares, lot, hidden, star, 0, tagsJson, watchPrice, watchPriceDate, 0, nowTs, nowTs);
 
-        // 告警写到 alert_config
+        // 告警写到 alert_rules
         if (data?.above != null || data?.below != null) {
-          const alertCfg = readAlerts();
           const alertEntry: AlertEntry = {};
           if (data.above != null) alertEntry.above = data.above;
           if (data.below != null) alertEntry.below = data.below;
-          alertCfg.alerts[code] = alertEntry;
-          writeAlerts(alertCfg);
+          writeAlertToDb(db, code, alertEntry);
         }
 
         const env = listType === "holding" ? "PROD" : "DEV";
@@ -806,23 +585,24 @@ export async function POST(request: Request) {
            WHERE symbol = ?`
         ).run(listType, cost, shares, lot, hidden ? 1 : 0, star ? 1 : 0, dipBuy ? 1 : 0, alias, tagsJson, watchPrice, watchPriceDate, existing.pin_order, nowTs, code);
 
-        // 告警写到 alert_config
+        // 告警写到 alert_rules
         if (data?.above !== undefined || data?.below !== undefined) {
-          const alertCfg = readAlerts();
-          if (!alertCfg.alerts[code]) alertCfg.alerts[code] = {};
+          const currentAlert = db
+            .prepare("SELECT above, below FROM alert_rules WHERE symbol = ?")
+            .get(code) as { above: number | null; below: number | null } | undefined;
+          const alertEntry: AlertEntry = {};
+          if (currentAlert?.above != null) alertEntry.above = currentAlert.above;
+          if (currentAlert?.below != null) alertEntry.below = currentAlert.below;
+
           if (data.above !== undefined) {
-            if (data.above === null) delete alertCfg.alerts[code].above;
-            else alertCfg.alerts[code].above = data.above;
+            if (data.above === null) delete alertEntry.above;
+            else alertEntry.above = data.above;
           }
           if (data.below !== undefined) {
-            if (data.below === null) delete alertCfg.alerts[code].below;
-            else alertCfg.alerts[code].below = data.below;
+            if (data.below === null) delete alertEntry.below;
+            else alertEntry.below = data.below;
           }
-          // 如果告警为空则删除条目
-          if (Object.keys(alertCfg.alerts[code]).length === 0) {
-            delete alertCfg.alerts[code];
-          }
-          writeAlerts(alertCfg);
+          writeAlertToDb(db, code, alertEntry);
         }
         const snapshotWarn = exportMonitorSnapshotFromDb(db);
 
@@ -880,19 +660,17 @@ export async function POST(request: Request) {
 
         const removed: string[] = [];
         const notFound: string[] = [];
-        const alertCfg = readAlerts();
         for (const c of toRemove) {
           const row = readWatchRow(db, c);
           if (row) {
             removed.push(`${c} (${row.name})`);
             db.prepare("DELETE FROM monitor_watchlist WHERE symbol = ?").run(c);
-            delete alertCfg.alerts[c]; // 同步清理告警
+            deleteAlertFromDb(db, c); // 同步清理告警
           } else {
             notFound.push(c);
           }
         }
 
-        writeAlerts(alertCfg);
         const snapshotWarn = exportMonitorSnapshotFromDb(db);
         let msg = removed.length > 0 ? `Removed ${removed.join(", ")}` : "";
         if (notFound.length > 0) {
@@ -920,6 +698,8 @@ export async function POST(request: Request) {
           l2_delta_pct: [1, 20],
           l2_cooldown_min: [1, 120],
           l3_cooldown_min: [1, 120],
+          available_balance_hkd: [0, 1e9],
+          available_balance_rmb: [0, 1e9],
         };
 
         const rejected: string[] = [];
