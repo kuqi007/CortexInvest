@@ -3094,14 +3094,16 @@ class AlertClusterer:
         将告警列表发给 LLM，要求合并同类告警并输出聚类结果。
         使用 json_schema 保证输出格式。
         """
-        # 构建告警列表文本
+        # 构建告警列表文本（包含 _level 供 LLM 判断 L1）
         alert_lines = []
         for i, a in enumerate(alerts):
             symbol = a.get("symbol", "?")
             title = a.get("title", "")
             message = a.get("message", "")
             name = a.get("_name", symbol)
-            alert_lines.append(f"[{i}] {symbol} {name} | {title} | {message}")
+            lvl = a.get("_level", "")
+            lvl_tag = f" L{lvl}" if lvl else ""
+            alert_lines.append(f"[{i}] {symbol} {name}{lvl_tag} | {title} | {message}")
 
         alert_text = "\n".join(alert_lines)
 
@@ -3116,7 +3118,7 @@ class AlertClusterer:
                 "2. 不同股票的告警保持独立\n"
                 "3. 无法归类的告警保留原文\n"
                 "4. 合并后每条告警标题概括核心问题，正文包含原始告警数量\n"
-                "5. L1 高优告警（含 [L1] 标记）不得被合并到普通告警中"
+                "5. L1 高优告警（标记为 L1）不得被合并到普通告警中，保持独立发送"
             ),
         }
 
@@ -3198,16 +3200,27 @@ class AlertClusterer:
 
             for c in raw_clusters:
                 indices = c.get("original_indices", [])
-                seen_indices.update(indices)
+                # 过滤越界索引
+                valid_indices = [i for i in indices if 0 <= i < len(alerts)]
+                seen_indices.update(valid_indices)
+
+                # 从原始告警聚合关键字段
+                orig_alerts = [alerts[i] for i in valid_indices]
+                cluster_levels = {a.get("_level") for a in orig_alerts}
+                effective_level = 1 if 1 in cluster_levels else (min(cluster_levels) if cluster_levels else 2)
+                max_change = max((a.get("_change_pct", 0) for a in orig_alerts), default=0)
+                first = orig_alerts[0] if orig_alerts else {}
+
                 merged_alerts.append({
                     "symbol": c["symbol"],
                     "title": f"[聚合] {c['title']}",
                     "message": c["message"],
-                    "_kind": "alert_cluster",
-                    "_change_pct": 0,
-                    "_name": c["symbol"],
+                    "_kind": first.get("_kind", "alert_cluster"),
+                    "_level": effective_level,
+                    "_change_pct": max_change,
+                    "_price": first.get("_price", ""),
+                    "_name": first.get("_name", c["symbol"]),
                     "_stealth": c["message"],
-                    "_notify": c.get("is_l1", False),
                     "_cluster_size": c.get("original_count", 0),
                 })
 
