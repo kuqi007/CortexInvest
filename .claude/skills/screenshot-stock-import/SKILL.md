@@ -14,31 +14,65 @@ user-invocable: true
 识别股票代码、名称、成本价、持仓股数，更新系统中的持仓数据。
 
 ### 2. 自选截图
-识别股票代码和名称，添加为特别关注（starred）。
+识别股票代码和名称，添加为自选。
 
 ## 处理流程
 
-1. 读取用户提供的截图文件
-2. 使用 OCR 提取文本信息
-3. 解析股票代码（支持 A股、港股、美股格式）
-4. 识别成本和股数（持仓截图）
-5. 更新 SQLite 数据库
-6. 导出 JSON 备份
+1. **查询系统已有股票** — 调用 `GET /api/config` 获取所有持仓和自选股列表
+2. **并行读取截图** — 启动 3 个子 agent，各用 Read 工具读取**所有**截图（增强识别准确率）：
+   - 每个 agent 必须读取**全部**截图文件
+   - 不得只读部分截图
+3. **合并识别结果** — 汇总3个 agent 的识别结果，取并集（去重），匹配系统已有股票：
+   - **系统已有股票**：调用 `POST /api/config` 更新持仓（cost、shares）
+   - **系统没有的股票**：调用 `POST /api/config` 添加为自选
+4. **比对持仓差异** — 截图处理完成后，比对系统持仓与截图：
+   - 如果系统有某持仓但截图未出现，询问用户："{股票名}持仓在截图中未出现，是否已卖出？"
+   - 若用户确认卖出，调用 API 删除或转为自选
+   - 若用户确认未卖出，提醒是否加入自选监控
+5. **导出 JSON 备份** — API 自动导出
+
+### 并行读取指令（给子 agent）
+
+**重要：每个 agent 必须读取完整截图并独立识别，不得依赖其他 agent 的结果**
+
+```
+用 Read 工具读取截图文件，从截图中识别所有股票信息：
+- 股票代码（A 股 6 位、港股 HK 前缀、美股字母）
+- 持仓的 cost 和 shares
+- 自选的 star 标记
+输出格式：列出每个识别到的股票及其信息
+
+**注意**：必须读取完整截图，独立验证每个识别结果，确保不遗漏、不读错。
+```
 
 ## 使用方法
 
+### 第一步：读取截图
+```
+用 Read 工具打开截图文件路径，Claude 会自动用多模态能力识别内容
+```
+
+### 第二步：分析并更新
+根据识别结果，直接调用 API 更新系统：
+
 ```bash
-# 基本用法 - 自动识别截图类型
-uv run python -m src.tools.screenshot_stock_import /path/to/screenshot.png
+# 持仓截图 - 更新成本和股数
+curl -X POST localhost:3120/api/config \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"update","code":"HK03317","cost":275.00,"shares":1000}'
 
-# 指定为持仓类型
-uv run python -m src.tools.screenshot_stock_import /path/to/screenshot.png --type holding
-
-# 指定为自选类型
-uv run python -m src.tools.screenshot_stock_import /path/to/screenshot.png --type watchlist
+# 自选截图 - 添加特别关注
+curl -X POST localhost:3120/api/config \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"add","code":"HK09903","name":"天数智芯","type":"watching","star":true}'
 ```
 
 ## 识别规则
+
+### 匹配优先级（重要）
+1. **先用代码匹配** — 截图中的股票代码优先匹配系统已有股票
+2. **无代码用名称匹配** — 如果截图无法识别代码，再用股票名称匹配系统已有股票
+3. **匹配成功用系统信息** — 匹配成功后使用系统中的名称、类型等信息
 
 ### 股票代码格式
 - A股: 6位数字 (000001, 600519)
@@ -54,20 +88,16 @@ uv run python -m src.tools.screenshot_stock_import /path/to/screenshot.png --typ
 - 股票代码: 如上格式
 - 特别关注标记: 截图中的星标/收藏标识
 
-## 示例输出
+## 示例对话
 
 ```
-识别到 8 只股票:
-✅ HK09903 (天数智芯) -> 添加特别关注
-✅ HK01729 (汇聚科技) -> 添加特别关注
-✅ HK00100 (MINIMAX-W) -> 添加特别关注
-✅ HK02513 (智谱) -> 添加特别关注
-✅ HK03317 (迅策) -> 更新持仓: 成本 275.00, 股数 1000
-✅ HK02648 (安井食品) -> 添加特别关注
-✅ HK06831 (绿茶集团) -> 添加特别关注
-✅ HK06088 (鸿腾精密) -> 添加特别关注
-
-共处理 8 只股票，更新成功
+用户: 帮我导入这个截图 [截图路径]
+AI: 查询系统已有股票列表
+    启动3个agent并行读取截图
+    汇总识别结果，匹配系统已有股票
+    调用 API 更新持仓/添加自选
+    比对持仓差异，询问未出现的持仓
+    输出处理结果
 ```
 
 ## 注意事项
@@ -76,3 +106,4 @@ uv run python -m src.tools.screenshot_stock_import /path/to/screenshot.png --typ
 - 持仓截图需要包含成本价和股数列
 - 自选截图需要包含股票代码和名称
 - 识别失败的股票会显示在错误列表中
+- **必须走 API 更新**，禁止直接改 JSON 或 DB
