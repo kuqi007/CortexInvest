@@ -1,10 +1,6 @@
 import { NextResponse } from "next/server";
 import Database from "better-sqlite3";
-import { readFileSync } from "fs";
-import { join } from "path";
 import { openConfigDb } from "../../../lib/db";
-
-const ALERT_PATH = join(process.cwd(), "..", "src", "data", "alert_config.json");
 
 type WatchRow = {
   symbol: string;
@@ -74,12 +70,17 @@ export async function GET(
     }
     const entry = rowToEntry(row);
 
-    // Also check alerts
+    // Also check alerts from alert_rules table
     let alerts: { above?: number; below?: number } | undefined;
     try {
-      const raw = readFileSync(ALERT_PATH, "utf-8");
-      const alertCfg = JSON.parse(raw);
-      if (alertCfg?.alerts?.[symbol]) alerts = alertCfg.alerts[symbol];
+      const alertRow = db
+        .prepare("SELECT above, below FROM alert_rules WHERE symbol = ?")
+        .get(symbol) as { above: number | null; below: number | null } | undefined;
+      if (alertRow) {
+        alerts = {};
+        if (alertRow.above != null) alerts.above = Number(alertRow.above);
+        if (alertRow.below != null) alerts.below = Number(alertRow.below);
+      }
     } catch { /* no alerts */ }
 
     return NextResponse.json({ found: true, ...entry, alerts });

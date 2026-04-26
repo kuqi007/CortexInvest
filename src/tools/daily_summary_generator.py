@@ -13,11 +13,13 @@ Usage:
 
 import json
 import os
+import sqlite3
 import time
 import requests
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 from dotenv import load_dotenv
 
 # ── Project root & import path ──
@@ -31,20 +33,20 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.utils.llm_clients import LLMClientFactory
 from src.utils.logging_config import setup_logger
+from src.sim_trading.db import TRADING_DB_PATH
 
 logger = setup_logger("daily_summary")
 
 # ── Data file paths ──
 DATA_DIR = PROJECT_ROOT / "src" / "data"
-MARKET_DATA_PATH = DATA_DIR / "market_data.json"
 # Config read from DB (primary) or JSON (backup)
 from src.utils.config_reader import read_monitor_config
 
-ALERT_CONFIG_PATH = DATA_DIR / "alert_config.json"
 L2_SIGNALS_PATH = DATA_DIR / "l2_strategy_signals.json"
-DAILY_SUMMARY_PATH = DATA_DIR / "daily_summary.json"
 TRADE_PLANS_PATH = DATA_DIR / "trade_plans.json"
-MORNING_BRIEFING_PATH = DATA_DIR / "morning_briefing.json"
+
+CONFIG_DB_PATH = DATA_DIR / "config.db"
+TRADING_DB_PATH = DATA_DIR / "trading.db"
 
 # Rate limiting flag - set to True when API daily limit is reached
 _morning_api_rate_limited = False
@@ -56,6 +58,71 @@ def _read_json(path: Path) -> dict | None:
             return json.load(f)
     except Exception:
         return None
+
+
+def _read_market_data_from_db() -> dict:
+    """Read latest price snapshots from trading.db.
+
+    Returns dict compatible with old market_data.json format:
+    {"services": [{"id": code, "name": ..., "price": ..., "change": ...}]}
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(TRADING_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT code, name, price, change_pct, volume, amount FROM price_snapshots "
+            "WHERE (code, ts) IN ("
+            "  SELECT code, MAX(ts) FROM price_snapshots GROUP BY code"
+            ")"
+        ).fetchall()
+        services = []
+        for r in rows:
+            services.append({
+                "id": r["code"],
+                "name": r["name"] or r["code"],
+                "price": r["price"] or 0,
+                "change": r["change_pct"] or 0,
+                "volume": r["volume"] or 0,
+                "amount": r["amount"] or 0,
+            })
+        return {"services": services}
+    except Exception as e:
+        logger.warning(f"读取 price_snapshots 失败: {e}")
+        return {"services": []}
+    finally:
+        if conn:
+            conn.close()
+
+
+def _read_alert_rules_from_db() -> dict:
+    """Read alert rules from config.db.
+
+    Returns dict compatible with old alert_config.json format:
+    {"rules": [{"symbol": ..., "above": ..., "below": ...}]}
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(CONFIG_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT symbol, above, below FROM alert_rules"
+        ).fetchall()
+        rules = []
+        for r in rows:
+            rule: dict[str, Any] = {"symbol": r["symbol"]}
+            if r["above"] is not None:
+                rule["above"] = r["above"]
+            if r["below"] is not None:
+                rule["below"] = r["below"]
+            rules.append(rule)
+        return {"rules": rules}
+    except Exception as e:
+        logger.warning(f"读取 alert_rules 失败: {e}")
+        return {"rules": []}
+    finally:
+        if conn:
+            conn.close()
 
 
 # ── Morning Briefing Functions ──
@@ -302,26 +369,40 @@ def _search_global_news() -> list[dict]:
     return unique_news
 
 
+def _read_morning_briefing() -> dict | None:
+    """Read morning briefing from trading.db."""
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    try:
+        conn = sqlite3.connect(TRADING_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT content_json FROM morning_briefings WHERE date = ?",
+            (today_str,),
+        ).fetchone()
+        conn.close()
+        if row:
+            return json.loads(row["content_json"])
+    except Exception:
+        pass
+    return None
+
+
 def generate_morning_briefing() -> dict | None:
     """Generate morning briefing with overnight US/Asia market movements.
 
-    Output: src/data/morning_briefing.json
+    Output: trading.db:morning_briefings
     Skips generation if already generated today.
 
     Returns:
         The generated briefing dict, or None on failure/already exists.
     """
     today_str = datetime.now().strftime("%Y-%m-%d")
-    if MORNING_BRIEFING_PATH.exists():
-        try:
-            data = _read_json(MORNING_BRIEFING_PATH)
-            if data and data.get("generated_at", "").startswith(today_str):
-                logger.info(
-                    f"Morning briefing already generated today ({today_str}), skipping"
-                )
-                return data
-        except Exception:
-            pass
+    existing = _read_morning_briefing()
+    if existing and existing.get("generated_at", "").startswith(today_str):
+        logger.info(
+            f"Morning briefing already generated today ({today_str}), skipping"
+        )
+        return existing
     logger.info("Generating morning briefing...")
 
     try:
@@ -342,23 +423,21 @@ def generate_morning_briefing() -> dict | None:
             "global_news": global_news,
         }
 
-        # 5. 写入文件 (原子写入)
-        tmp = MORNING_BRIEFING_PATH.with_suffix(".tmp")
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(briefing, f, ensure_ascii=False, indent=2)
-        tmp.replace(MORNING_BRIEFING_PATH)
+        # 5. 写入 DB
+        conn = sqlite3.connect(TRADING_DB_PATH)
+        conn.execute(
+            "INSERT OR REPLACE INTO morning_briefings (date, generated_at, content_json) VALUES (?, ?, ?)",
+            (today_str, briefing["generated_at"], json.dumps(briefing, ensure_ascii=False)),
+        )
+        conn.commit()
+        conn.close()
 
-        logger.info(f"Morning briefing written to {MORNING_BRIEFING_PATH.name}")
+        logger.info("Morning briefing written to trading.db:morning_briefings")
         return briefing
 
     except Exception as e:
         logger.error(f"Morning briefing generation failed: {e}")
         return None
-
-
-def _read_morning_briefing() -> dict | None:
-    """Read morning briefing from file."""
-    return _read_json(MORNING_BRIEFING_PATH)
 
 
 def _detect_market(signals: list[dict], watchlist: dict) -> str:
@@ -1229,7 +1308,7 @@ def generate_daily_summary(date_str: str | None = None) -> dict | None:
     logger.info(f"Generating daily summary for {today}...")
 
     # ── Read data sources ──
-    market_data = _read_json(MARKET_DATA_PATH) or {"services": []}
+    market_data = _read_market_data_from_db()
     config = read_monitor_config()
     if not config.get("watchlist"):
         config = {"watchlist": {}, "settings": {}}
@@ -1443,14 +1522,23 @@ def generate_daily_summary(date_str: str | None = None) -> dict | None:
         summary["report_chain"] = reasoning
         logger.info(f"Thinking chain saved ({len(reasoning)} chars)")
 
-    # ── Atomic write ──
-    tmp = DAILY_SUMMARY_PATH.with_suffix(".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(summary, f, ensure_ascii=False, indent=2)
-    tmp.replace(DAILY_SUMMARY_PATH)
+    # ── Write to trading.db ──
+    conn = sqlite3.connect(TRADING_DB_PATH)
+    conn.execute(
+        "INSERT OR REPLACE INTO daily_summaries (date, market, stats_json, per_stock_json, generated_at) VALUES (?, ?, ?, ?, ?)",
+        (
+            today,
+            market,
+            json.dumps(stats, ensure_ascii=False),
+            json.dumps(summary.get("perStock", []), ensure_ascii=False),
+            summary["generatedAt"],
+        ),
+    )
+    conn.commit()
+    conn.close()
 
     logger.info(
-        f"Daily summary written to {DAILY_SUMMARY_PATH.name} "
+        f"Daily summary written to trading.db:daily_summaries "
         f"({stats['totalSignals']} signals, {len(per_stock)} stocks)"
     )
     return summary

@@ -100,13 +100,35 @@ CREATE TABLE IF NOT EXISTS price_snapshots (
     ts INTEGER NOT NULL,
     date TEXT NOT NULL,
     code TEXT NOT NULL,
+    name TEXT,
     price REAL,
     volume REAL,
     amount REAL,
     change_pct REAL,
+    chg_amt REAL,
+    amp REAL,
+    turnover REAL,
+    vol_ratio REAL,
+    high REAL,
+    low REAL,
+    open REAL,
+    prev_close REAL,
+    amo1 REAL,
+    amo2 REAL,
     UNIQUE(ts, code)
 );
 CREATE INDEX IF NOT EXISTS idx_price_date_code ON price_snapshots(date, code);
+
+-- 大盘成交额与指数快照
+CREATE TABLE IF NOT EXISTS market_turnover (
+    ts INTEGER PRIMARY KEY,
+    date TEXT NOT NULL,
+    sh REAL, sz REAL, total REAL,
+    sh_index REAL, sz_index REAL, sh_pct REAL, sz_pct REAL, verdict TEXT,
+    chi_next REAL, chi_next_pct REAL, kc50 REAL, kc50_pct REAL,
+    hk_index REAL, hk_index_pct REAL, hk_tech REAL, hk_tech_pct REAL, hk_turnover REAL,
+    amo1 REAL, amo2 REAL
+);
 
 -- 模拟交易
 CREATE TABLE IF NOT EXISTS trades (

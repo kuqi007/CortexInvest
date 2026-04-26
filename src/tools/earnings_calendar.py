@@ -25,8 +25,8 @@ Usage:
 """
 
 import fcntl
-import json
 import os
+import sqlite3
 import sys
 import time
 from datetime import datetime, timedelta
@@ -48,9 +48,7 @@ LOCK_FILE = PROJECT_ROOT / "data" / ".earnings_calendar.lock"
 
 # ── 数据缓存路径 ──
 DATA_DIR = PROJECT_ROOT / "src" / "data"
-EARNINGS_CACHE_FILE = DATA_DIR / "earnings_calendar_cache.json"
-EARNINGS_HISTORY_FILE = DATA_DIR / "earnings_history.json"
-ANALYSIS_CACHE_FILE = DATA_DIR / "earnings_analysis_cache.json"
+TRADING_DB = PROJECT_ROOT / "src" / "data" / "trading.db"
 
 # ── 飞书推送阈值 ──
 ALERT_BEFORE_DAYS = 3   # 提前 N 天预警
@@ -562,81 +560,117 @@ def send_feishu_alert(title: str, body: str, symbol: str = "", change_pct: float
 # 4. 缓存管理
 # ═══════════════════════════════════════════════════════
 
-def _load_json(path: Path) -> dict:
-    try:
-        if path.exists():
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-    except Exception:
-        pass
-    return {}
-
-
-def _save_json(path: Path, data: dict):
-    try:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        tmp.rename(path)
-    except Exception as e:
-        logger.warning(f"保存缓存失败 {path}: {e}")
+def _get_db_connection() -> sqlite3.Connection:
+    """获取 trading.db 连接"""
+    TRADING_DB.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(TRADING_DB))
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
 def _get_cached_earnings(days: int = 7) -> list:
     """获取缓存的财报日历，返回指定天数内即将发布的"""
-    cache = _load_json(EARNINGS_CACHE_FILE)
-    cached = cache.get("upcoming", [])
     today = datetime.now().strftime("%Y-%m-%d")
     cutoff = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
     result = []
-    for e in cached:
-        # 字段名兼容：akshare 返回中文 key，缓存中可能用英文或中文
-        report_date = (e.get("report_date") or e.get("公告时间") or "")[:10]
-        if today <= report_date <= cutoff:
-            # 标准化字段名
-            e["report_date"] = report_date
-            result.append(e)
+    try:
+        with _get_db_connection() as conn:
+            cursor = conn.execute(
+                "SELECT symbol, report_date, name, source FROM earnings_calendar WHERE report_date >= ? AND report_date <= ?",
+                (today, cutoff),
+            )
+            for row in cursor.fetchall():
+                result.append({
+                    "symbol": row["symbol"],
+                    "report_date": row["report_date"],
+                    "name": row["name"],
+                    "source": row["source"],
+                })
+    except Exception as e:
+        logger.warning(f"读取 earnings_calendar 缓存失败: {e}")
     return result
 
 
 def _update_cached_earnings(new_earnings: list):
-    """更新即将发布的财报缓存"""
-    cache = _load_json(EARNINGS_CACHE_FILE)
-    cache["upcoming"] = new_earnings
-    cache["last_updated"] = datetime.now().isoformat()
-    _save_json(EARNINGS_CACHE_FILE, cache)
+    """更新即将发布的财报缓存到 earnings_calendar 表"""
+    now = datetime.now().isoformat()
+    try:
+        with _get_db_connection() as conn:
+            for e in new_earnings:
+                symbol = e.get("symbol") or e.get("code", "")
+                report_date = e.get("report_date", "")[:10] if e.get("report_date") else ""
+                name = e.get("name") or e.get("简称", "")
+                if not symbol or not report_date:
+                    continue
+                conn.execute(
+                    """
+                    INSERT INTO earnings_calendar (symbol, report_date, name, source, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(symbol, report_date) DO UPDATE SET
+                        name=excluded.name,
+                        source=excluded.source,
+                        updated_at=excluded.updated_at
+                    """,
+                    (symbol, report_date, name, "akshare", now),
+                )
+            conn.commit()
+        logger.info(f"财报日历缓存已更新: {len(new_earnings)} 条记录")
+    except Exception as e:
+        logger.warning(f"更新 earnings_calendar 缓存失败: {e}")
 
 
 def _mark_as_analyzed(symbol: str, period: str):
     """标记为已分析，避免重复推送"""
-    history = _load_json(EARNINGS_HISTORY_FILE)
-    key = f"{symbol}_{period}"
-    history[key] = {
-        "analyzed_at": datetime.now().isoformat(),
-        "verdict": None,  # 后续填充
-    }
-    _save_json(EARNINGS_HISTORY_FILE, history)
+    now = datetime.now().isoformat()
+    try:
+        with _get_db_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO earnings_history (symbol, report_date, created_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(symbol, report_date) DO UPDATE SET
+                    created_at=excluded.created_at
+                """,
+                (symbol, period, now),
+            )
+            conn.commit()
+    except Exception as e:
+        logger.warning(f"标记已分析失败: {e}")
 
 
 def _is_already_alerted(symbol: str, period: str, alert_type: str) -> bool:
     """检查是否已发送过该类型的预警"""
-    history = _load_json(EARNINGS_HISTORY_FILE)
-    key = f"{symbol}_{period}"
-    entry = history.get(key, {})
-    return entry.get(f"alerted_{alert_type}", False)
+    try:
+        with _get_db_connection() as conn:
+            cursor = conn.execute(
+                "SELECT 1 FROM earnings_history WHERE symbol = ? AND report_date = ?",
+                (symbol, period),
+            )
+            return cursor.fetchone() is not None
+    except Exception as e:
+        logger.warning(f"检查预警状态失败: {e}")
+        return False
 
 
 def _mark_alerted(symbol: str, period: str, alert_type: str, verdict: str = ""):
     """标记为已发送预警"""
-    history = _load_json(EARNINGS_HISTORY_FILE)
-    key = f"{symbol}_{period}"
-    if key not in history:
-        history[key] = {"analyzed_at": datetime.now().isoformat()}
-    history[key][f"alerted_{alert_type}"] = True
-    history[key]["verdict"] = verdict
-    history[key]["alerted_at"] = datetime.now().isoformat()
-    _save_json(EARNINGS_HISTORY_FILE, history)
+    now = datetime.now().isoformat()
+    try:
+        with _get_db_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO earnings_history (symbol, report_date, eps, revenue, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(symbol, report_date) DO UPDATE SET
+                    eps=excluded.eps,
+                    revenue=excluded.revenue,
+                    created_at=excluded.created_at
+                """,
+                (symbol, period, None, None, now),
+            )
+            conn.commit()
+    except Exception as e:
+        logger.warning(f"标记预警失败: {e}")
 
 
 # ═══════════════════════════════════════════════════════
@@ -858,14 +892,14 @@ class EarningsCalendar:
             return
 
         print(f"\n📅 未来 {days_ahead} 天待发布财报 ({len(upcoming)} 条):")
-        print(f"{'代码':<8} {'名称':<10} {'预计日期':<12} {'公告标题':<30}")
-        print("-" * 70)
+        print(f"{'代码':<10} {'名称':<12} {'预计日期':<12} {'来源':<10}")
+        print("-" * 50)
         for e in upcoming:
             print(
-                f"{e.get('代码', ''):<8} "
-                f"{e.get('简称', ''):<10} "
-                f"{e.get('公告时间', '')[:10]:<12} "
-                f"{e.get('公告标题', '')[:30]}"
+                f"{e.get('symbol', ''):<10} "
+                f"{e.get('name', ''):<12} "
+                f"{e.get('report_date', ''):<12} "
+                f"{e.get('source', ''):<10}"
             )
 
 

@@ -82,6 +82,33 @@ function StarredPage() {
 
   const { planMap, refresh: refreshPlans } = useTradePlans();
   const [drawerSymbol, setDrawerSymbol] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [addCode, setAddCode] = useState("");
+  const [addType, setAddType] = useState<"watching" | "holding">("watching");
+  const [addCost, setAddCost] = useState("");
+  const [addShares, setAddShares] = useState("");
+
+  async function handleAdd() {
+    const code = addCode.trim();
+    if (!code) return;
+    const data: Record<string, unknown> = { star: true, type: addType };
+    if (addType === "holding") {
+      if (addCost) data.cost = Number(addCost);
+      if (addShares) data.shares = Number(addShares);
+    }
+    try {
+      const resp = await fetch("/api/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "add", code, data }),
+      });
+      const result = await resp.json();
+      if (result?.success) {
+        setAddCode(""); setAddCost(""); setAddShares(""); setAddType("watching");
+        refresh();
+      }
+    } catch { /* ignore */ }
+  }
 
   function switchTab(tab: MarketTab) {
     setActiveTab(tab);
@@ -154,14 +181,21 @@ function StarredPage() {
   const tagFiltered = useMemo(() => filterTag
     ? tabStarred.filter((s) => s.tags?.includes(filterTag))
     : tabStarred, [tabStarred, filterTag]);
+  const searchFiltered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return tagFiltered;
+    return tagFiltered.filter((s) =>
+      s.id.toLowerCase().includes(q) || (s.alias || s.name).toLowerCase().includes(q)
+    );
+  }, [tagFiltered, search]);
 
   // Sections: 置顶(pin_order>0) -> holdings -> stocks -> ETFs -> hidden
-  const pinnedList = useMemo(() => applySort(tagFiltered.filter((s) => !s.hidden && (s.pin_order ?? 0) > 0), sortState), [tagFiltered, sortState]);
+  const pinnedList = useMemo(() => applySort(searchFiltered.filter((s) => !s.hidden && (s.pin_order ?? 0) > 0), sortState), [searchFiltered, sortState]);
   const pinnedIds = useMemo(() => new Set(pinnedList.map((s) => s.id)), [pinnedList]);
-  const holdList = useMemo(() => applySort(tagFiltered.filter((s) => s.type === "holding" && !s.hidden && !pinnedIds.has(s.id)), sortState), [tagFiltered, sortState, pinnedIds]);
-  const stockList = useMemo(() => applySort(tagFiltered.filter((s) => s.type === "watching" && !s.hidden && !isETF(s) && !pinnedIds.has(s.id)), sortState), [tagFiltered, sortState, pinnedIds]);
-  const etfList = useMemo(() => applySort(tagFiltered.filter((s) => s.type === "watching" && !s.hidden && isETF(s) && !pinnedIds.has(s.id)), sortState), [tagFiltered, sortState, pinnedIds]);
-  const hiddenList = useMemo(() => applySort(tagFiltered.filter((s) => s.hidden), sortState), [tagFiltered, sortState]);
+  const holdList = useMemo(() => applySort(searchFiltered.filter((s) => s.type === "holding" && !s.hidden && !pinnedIds.has(s.id)), sortState), [searchFiltered, sortState, pinnedIds]);
+  const stockList = useMemo(() => applySort(searchFiltered.filter((s) => s.type === "watching" && !s.hidden && !isETF(s) && !pinnedIds.has(s.id)), sortState), [searchFiltered, sortState, pinnedIds]);
+  const etfList = useMemo(() => applySort(searchFiltered.filter((s) => s.type === "watching" && !s.hidden && isETF(s) && !pinnedIds.has(s.id)), sortState), [searchFiltered, sortState, pinnedIds]);
+  const hiddenList = useMemo(() => applySort(searchFiltered.filter((s) => s.hidden), sortState), [searchFiltered, sortState]);
 
   const allTags = useMemo(
     () => [...new Set(services.flatMap((s) => s.tags ?? []))],
@@ -291,6 +325,10 @@ function StarredPage() {
         <span style={{ color: D.fg, width: "10ch", textAlign: "right" }}>
           {pad(mktVal != null ? fmtAmt(mktVal) : "-", 9, true)}
         </span>
+        {/* 仓位 */}
+        <span style={{ color: D.fg, width: "8ch", textAlign: "right" }}>
+          {pad(s.position_pct != null ? `${(s.position_pct * 100).toFixed(1)}%` : "-", 7, true)}
+        </span>
         {/* 盈亏额 */}
         <span style={{ color: totalPnlRaw !== null ? chgColor(totalPnlRaw) : D.comment, width: "10ch", textAlign: "right", fontWeight: 500 }}>
           {pad(totalPnlRaw !== null ? fmtMoney(totalPnlRaw) : "-", 9, true)}
@@ -345,6 +383,7 @@ function StarredPage() {
       <span style={{ width: "7ch", textAlign: "right" }}>{pad("股数", 6, true)}</span>
       <span style={mkHStyle("10ch", "pnl", true)} onClick={() => toggleSort("pnl")}>{pad("盈亏%" + mkArrow("pnl"), 9, true)}</span>
       <span style={mkHStyle("10ch", "mktVal", true)} onClick={() => toggleSort("mktVal")}>{pad("市值" + mkArrow("mktVal"), 9, true)}</span>
+      <span style={mkHStyle("8ch", "position_pct", true)} onClick={() => toggleSort("position_pct")}>{pad("仓位" + mkArrow("position_pct"), 7, true)}</span>
       <span style={mkHStyle("10ch", "totalPnl", true)} onClick={() => toggleSort("totalPnl")}>{pad("盈亏额" + mkArrow("totalPnl"), 9, true)}</span>
       <span style={mkHStyle("9ch", "dayPnl", true)} onClick={() => toggleSort("dayPnl")}>{pad("今日" + mkArrow("dayPnl"), 8, true)}</span>
       <span style={mkHStyle("7ch", "volRatio", true)} onClick={() => toggleSort("volRatio")}>{pad("量比" + mkArrow("volRatio"), 6, true)}</span>
@@ -387,6 +426,123 @@ function StarredPage() {
                 <span style={{ cursor: "pointer", color: D.red, fontWeight: 500 }} onClick={() => setFilterTag(null)}>x</span>
               </div>
             )}
+
+            {/* search + add */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+              <span style={{ color: D.comment }}>搜索:</span>
+              <input
+                placeholder="代码或名称..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                style={{
+                  background: D.currentLine,
+                  border: `1px solid ${D.comment}`,
+                  color: D.fg,
+                  fontFamily: "JetBrains Mono, monospace",
+                  fontSize: 12,
+                  padding: "2px 8px",
+                  outline: "none",
+                  borderRadius: 2,
+                  width: 140,
+                }}
+              />
+              {search && (
+                <span style={{ color: D.comment, fontSize: 11 }}>
+                  {searchFiltered.length}/{tabStarred.length} 匹配
+                </span>
+              )}
+              <div style={{ flex: 1 }} />
+              <input
+                placeholder="代码"
+                value={addCode}
+                onChange={(e) => setAddCode(e.target.value.toUpperCase())}
+                style={{
+                  background: D.currentLine,
+                  border: `1px solid ${D.comment}`,
+                  color: D.fg,
+                  fontFamily: "JetBrains Mono, monospace",
+                  fontSize: 12,
+                  padding: "2px 8px",
+                  outline: "none",
+                  borderRadius: 2,
+                  width: 90,
+                }}
+                onKeyDown={(e) => { if (e.key === "Enter") handleAdd(); }}
+              />
+              <select
+                value={addType}
+                onChange={(e) => setAddType(e.target.value as "watching" | "holding")}
+                style={{
+                  background: D.currentLine,
+                  border: `1px solid ${D.comment}`,
+                  color: D.fg,
+                  fontFamily: "JetBrains Mono, monospace",
+                  fontSize: 12,
+                  padding: "2px 8px",
+                  outline: "none",
+                  borderRadius: 2,
+                }}
+              >
+                <option value="watching">自选</option>
+                <option value="holding">持仓</option>
+              </select>
+              <input
+                placeholder="成本"
+                type="number"
+                step="any"
+                value={addCost}
+                onChange={(e) => setAddCost(e.target.value)}
+                disabled={addType !== "holding"}
+                style={{
+                  background: D.currentLine,
+                  border: `1px solid ${D.comment}`,
+                  color: D.fg,
+                  fontFamily: "JetBrains Mono, monospace",
+                  fontSize: 12,
+                  padding: "2px 8px",
+                  outline: "none",
+                  borderRadius: 2,
+                  width: 70,
+                  opacity: addType !== "holding" ? 0.5 : 1,
+                }}
+              />
+              <input
+                placeholder="股数"
+                type="number"
+                step={100}
+                value={addShares}
+                onChange={(e) => setAddShares(e.target.value)}
+                disabled={addType !== "holding"}
+                style={{
+                  background: D.currentLine,
+                  border: `1px solid ${D.comment}`,
+                  color: D.fg,
+                  fontFamily: "JetBrains Mono, monospace",
+                  fontSize: 12,
+                  padding: "2px 8px",
+                  outline: "none",
+                  borderRadius: 2,
+                  width: 70,
+                  opacity: addType !== "holding" ? 0.5 : 1,
+                }}
+              />
+              <button
+                onClick={handleAdd}
+                style={{
+                  background: D.purple,
+                  color: D.bg,
+                  border: "none",
+                  fontFamily: "JetBrains Mono, monospace",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  padding: "3px 12px",
+                  borderRadius: 3,
+                  cursor: "pointer",
+                }}
+              >
+                添加关注
+              </button>
+            </div>
 
             {/* 状态行 */}
             <div style={{ color: D.comment, marginBottom: 6 }}>

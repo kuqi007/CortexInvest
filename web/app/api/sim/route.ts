@@ -1,12 +1,6 @@
 import { NextResponse } from "next/server";
-import { join } from "path";
 
-import { readFileSync } from "fs";
-import { openTradingDb } from "../../lib/db";
-
-const MARKET_DATA_PATH = join(process.cwd(), "..", "src", "data", "market_data.json");
-const CONFIG_PATH = join(process.cwd(), "..", "src", "data", "monitor_config.json");
-const TRADE_PLANS_PATH = join(process.cwd(), "..", "src", "data", "trade_plans.json");
+import { openTradingDb, openConfigDb } from "../../lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -190,6 +184,7 @@ function round(n: number, d: number): number {
 
 export async function GET() {
   const db = openTradingDb(true);
+  let cfgDb: ReturnType<typeof openConfigDb> | null = null;
   try {
 
     const trades = db
@@ -236,19 +231,32 @@ export async function GET() {
         .all() as TradeRow[];
     } catch { /* */ }
 
-    // Enrich live positions with name + change% from market_data + config
+    // Enrich live positions with name + change% from price_snapshots + monitor_watchlist
     let marketLookup: Record<string, { name: string; change: number; chgAmt: number; price: number }> = {};
     try {
-      const md = JSON.parse(readFileSync(MARKET_DATA_PATH, "utf-8"));
-      const cfg = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
-      const wl = cfg.watchlist || {};
-      for (const svc of md.services || []) {
-        const id = svc.id as string;
-        marketLookup[id] = {
-          name: (wl[id]?.name as string) || (svc.name as string) || id,
-          change: Number(svc.change) || 0,
-          chgAmt: Number(svc.chgAmt) || 0,
-          price: Number(svc.price) || 0,
+      cfgDb = openConfigDb(true);
+      const wlRows = cfgDb
+        .prepare("SELECT symbol, name FROM monitor_watchlist")
+        .all() as { symbol: string; name: string }[];
+      const wlMap: Record<string, string> = {};
+      for (const r of wlRows) wlMap[r.symbol] = r.name;
+
+      const priceRows = db
+        .prepare(`
+          SELECT code, name, price, change_pct, chg_amt
+          FROM price_snapshots
+          WHERE (code, ts) IN (
+            SELECT code, MAX(ts) FROM price_snapshots GROUP BY code
+          )
+        `)
+        .all() as { code: string; name: string | null; price: number | null; change_pct: number | null; chg_amt: number | null }[];
+
+      for (const r of priceRows) {
+        marketLookup[r.code] = {
+          name: wlMap[r.code] || r.name || r.code,
+          change: Number(r.change_pct) || 0,
+          chgAmt: Number(r.chg_amt) || 0,
+          price: Number(r.price) || 0,
         };
       }
     } catch { /* market data unavailable — positions still work without names */ }
@@ -360,36 +368,39 @@ export async function GET() {
     const yesterdayEquity = currentEquity - todayPnl;
     const todayReturn = yesterdayEquity > 0 ? todayPnl / yesterdayEquity : 0;
 
-    // Trade plans — read config + enrich with current prices
+    // Trade plans — read from trading.db + enrich with current prices
     let tradePlans: Record<string, unknown>[] = [];
     try {
-      const plansData = JSON.parse(readFileSync(TRADE_PLANS_PATH, "utf-8"));
-      const plans = plansData.plans || {};
-      tradePlans = Object.entries(plans).map(([id, p]: [string, unknown]) => {
-        const plan = p as Record<string, unknown>;
-        const sym = plan.symbol as string;
-        const info = marketLookup[sym];
+      const planRows = db
+        .prepare("SELECT id, name, symbol, status, created_at, orders_json FROM trade_plans ORDER BY created_at DESC")
+        .all() as { id: string; name: string; symbol: string; status: string; created_at: string; orders_json: string }[];
+
+      tradePlans = planRows.map((row) => {
+        const info = marketLookup[row.symbol];
+        let parsedOrders: unknown = [];
+        try {
+          parsedOrders = JSON.parse(row.orders_json);
+        } catch { /* keep default */ }
         return {
-          id,
-          ...plan,
+          id: row.id,
+          name: row.name,
+          symbol: row.symbol,
+          status: row.status,
+          created_at: row.created_at,
+          orders: parsedOrders,
           current_price: info?.price || 0,
-          current_name: info?.name || sym,
+          current_name: info?.name || row.symbol,
           current_change: info?.change || 0,
         };
       });
-    } catch { /* trade_plans.json may not exist yet */ }
+    } catch { /* trade_plans table may not exist yet */ }
 
     // Trade plan events from SQLite
     let planEvents: Record<string, unknown>[] = [];
     try {
-      const evDb = openTradingDb(true);
-      try {
-        planEvents = evDb
-          .prepare("SELECT * FROM trade_plan_events ORDER BY ts DESC LIMIT 50")
-          .all() as Record<string, unknown>[];
-      } finally {
-        evDb.close();
-      }
+      planEvents = db
+        .prepare("SELECT * FROM trade_plan_events ORDER BY ts DESC LIMIT 50")
+        .all() as Record<string, unknown>[];
     } catch { /* table may not exist yet */ }
 
     return NextResponse.json({
@@ -427,6 +438,7 @@ export async function GET() {
       { status: 500 },
     );
   } finally {
-    db.close();
+    try { db.close(); } catch { /* ignore */ }
+    try { cfgDb?.close(); } catch { /* ignore */ }
   }
 }

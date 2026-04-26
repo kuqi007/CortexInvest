@@ -16,6 +16,7 @@ import fcntl
 import json
 import os
 import signal
+import sqlite3
 import sys
 import time
 from datetime import datetime, timedelta
@@ -268,6 +269,59 @@ def get_mtime(path: Path) -> float:
         return 0.0
 
 
+def _get_latest_db_ts() -> int:
+    """Get latest timestamp from price_snapshots."""
+    try:
+        from src.sim_trading.db import get_connection
+
+        conn = get_connection()
+        row = conn.execute("SELECT MAX(ts) FROM price_snapshots").fetchone()
+        conn.close()
+        return row[0] or 0
+    except Exception:
+        return 0
+
+
+def _read_market_snapshot_from_db() -> dict | None:
+    """Build market snapshot dict from DB for watchdog compatibility."""
+    try:
+        from src.sim_trading.db import get_connection
+
+        conn = get_connection()
+        rows = conn.execute(
+            "SELECT code, name, price, change_pct, chg_amt, volume, amount, amp, turnover, vol_ratio, high, low, open, prev_close, amo1, amo2 "
+            "FROM price_snapshots WHERE (code, ts) IN (SELECT code, MAX(ts) FROM price_snapshots GROUP BY code)"
+        ).fetchall()
+        services = []
+        for row in rows:
+            services.append(
+                {
+                    "id": row["code"],
+                    "name": row["name"],
+                    "price": row["price"],
+                    "change": row["change_pct"],
+                    "chgAmt": row["chg_amt"],
+                    "vol": row["volume"],
+                    "amount": row["amount"],
+                    "amp": row["amp"],
+                    "turnover": row["turnover"],
+                    "volRatio": row["vol_ratio"],
+                    "high": row["high"],
+                    "low": row["low"],
+                    "open": row["open"],
+                    "prevClose": row["prev_close"],
+                    "amo1": row["amo1"],
+                    "amo2": row["amo2"],
+                }
+            )
+        ts = _get_latest_db_ts()
+        conn.close()
+        return {"services": services, "ts": ts}
+    except Exception as e:
+        logger.warning(f"Failed to read market snapshot from DB: {e}")
+        return None
+
+
 def _read_l2_indicators() -> dict:
     """Read indicators snapshot from l2_strategy_signals.json.
 
@@ -285,47 +339,54 @@ def _read_l2_indicators() -> dict:
 
 
 def merge_data(market: dict, config: dict) -> dict:
-    """Build quotes dict from market_data + config.
+    """Build quotes dict from DB price_snapshots + config.
 
     Returns: {symbol: {name, price, change_pct, chg_amt}} keyed by stock
     id/code.  The ``chg_amt`` field (absolute price change today) is carried
     through so DeltaAlertEngine can compute daily P&L.
     """
     watchlist = config.get("watchlist", {})
-    services = market.get("services", [])
 
     quotes = {}
-    for svc in services:
-        sid = svc.get("id", "")
-        if not sid:
-            continue
-        price = svc.get("price", 0)
-        # "change" in market_data.json is the percentage (涨跌幅%)
-        change_pct = svc.get("change", 0)
-        # "chgAmt" is absolute price change (涨跌额)
-        chg_amt = svc.get("chgAmt", 0)
-        name = svc.get("name", sid)
+    conn = None
+    try:
+        from src.sim_trading.db import get_connection
 
-        # Only alert on stocks that exist in the watchlist
-        if sid not in watchlist:
-            continue
+        conn = get_connection()
+        rows = conn.execute(
+            "SELECT code, name, price, change_pct, chg_amt, volume, amount, amp, turnover, vol_ratio, high, low, open, prev_close, amo1, amo2 "
+            "FROM price_snapshots WHERE (code, ts) IN (SELECT code, MAX(ts) FROM price_snapshots GROUP BY code)"
+        ).fetchall()
+        for row in rows:
+            sid = row["code"]
+            if not sid:
+                continue
 
-        # Skip hidden stocks
-        if watchlist[sid].get("hidden", False):
-            continue
+            # Only alert on stocks that exist in the watchlist
+            if sid not in watchlist:
+                continue
 
-        quotes[sid] = {
-            "name": name,
-            "price": price,
-            "change_pct": change_pct,
-            "chg_amt": chg_amt,
-            "amount": svc.get("amount", 0),
-            "open": svc.get("open", 0),
-            "prev_close": svc.get("prevClose", 0),
-            "high": svc.get("high", 0),
-            "low": svc.get("low", 0),
-            "amo1": svc.get("amo1"),
-        }
+            # Skip hidden stocks
+            if watchlist[sid].get("hidden", False):
+                continue
+
+            quotes[sid] = {
+                "name": row["name"] or sid,
+                "price": row["price"] or 0,
+                "change_pct": row["change_pct"] or 0,
+                "chg_amt": row["chg_amt"] or 0,
+                "amount": row["amount"] or 0,
+                "open": row["open"] or 0,
+                "prev_close": row["prev_close"] or 0,
+                "high": row["high"] or 0,
+                "low": row["low"] or 0,
+                "amo1": row["amo1"],
+            }
+    except Exception as e:
+        logger.warning(f"merge_data: failed to read price_snapshots from DB: {e}")
+    finally:
+        if conn:
+            conn.close()
 
     # Inject technical indicators from L2 daemon
     indicators = _read_l2_indicators()
@@ -453,13 +514,25 @@ class DeltaAlertEngine:
         self._last_portfolio_pnl: float | None = None
 
     def _reload_alerts(self):
-        """从 alert_config.json 加载告警规则"""
+        """从 config.db alert_rules 加载告警规则"""
+        conn = None
         try:
-            with open(ALERT_CONFIG_PATH, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            self._alerts = data.get("alerts", {})
+            from src.sim_trading.db import get_config_connection
+
+            conn = get_config_connection()
+            rows = conn.execute("SELECT symbol, above, below FROM alert_rules").fetchall()
+            self._alerts = {
+                row["symbol"]: {
+                    "above": row["above"],
+                    "below": row["below"],
+                }
+                for row in rows
+            }
         except Exception:
             self._alerts = {}
+        finally:
+            if conn:
+                conn.close()
 
     def reset(self):
         """Midnight reset — clear all tracking state."""
@@ -704,7 +777,7 @@ class DataFreshnessWatchdog:
     def update_poll_interval(self, interval: int):
         self._poll_interval = interval
 
-    def check(self, market_data_path, market: dict | None, has_hk: bool) -> list[dict]:
+    def check(self, db_ts: int, market: dict | None, has_hk: bool) -> list[dict]:
         """Run all staleness checks. Called every loop iteration."""
         if not is_any_market_open(has_hk):
             return []
@@ -712,8 +785,8 @@ class DataFreshnessWatchdog:
         now = time.time()
         alerts: list[dict] = []
 
-        # Layer 1: file staleness
-        alerts.extend(self._check_file_staleness(market_data_path, now))
+        # Layer 1: DB staleness
+        alerts.extend(self._check_db_staleness(db_ts, now))
 
         if market and not self._file_stale_alerted:
             # Layer 2: price freeze
@@ -750,42 +823,42 @@ class DataFreshnessWatchdog:
 
     # ── Layer 1: file staleness ──
 
-    def _check_file_staleness(self, path, now: float) -> list[dict]:
-        current_mtime = get_mtime(path)
+    def _check_db_staleness(self, db_ts: int, now: float) -> list[dict]:
+        db_mtime = db_ts / 1000.0  # ts is milliseconds
         threshold = self._poll_interval * 3
 
-        if current_mtime <= 0:
+        if db_mtime <= 0:
             return []
 
-        if current_mtime != self._last_seen_mtime:
-            self._last_seen_mtime = current_mtime
+        if db_mtime != self._last_seen_mtime:
+            self._last_seen_mtime = db_mtime
             self._mtime_unchanged_since = None
             if self._file_stale_alerted:
                 self._file_stale_alerted = False
                 return [
                     self._make_alert(
-                        "file_stale_recovery",
-                        "数据恢复: Poller 已恢复写入",
+                        "db_stale_recovery",
+                        "数据恢复: Poller 已恢复写入 DB",
                         level=3,
                         is_recovery=True,
                     )
                 ]
             return []
 
-        # mtime unchanged
+        # timestamp unchanged
         if self._mtime_unchanged_since is None:
             self._mtime_unchanged_since = now
 
         elapsed = now - self._mtime_unchanged_since
         if elapsed >= threshold and not self._file_stale_alerted:
-            if self._cooled("file_stale", now):
-                self._fire("file_stale", now)
+            if self._cooled("db_stale", now):
+                self._fire("db_stale", now)
                 self._file_stale_alerted = True
                 mins = int(elapsed // 60) or 1
                 return [
                     self._make_alert(
-                        "file_stale",
-                        f"Poller 可能挂起: market_data.json 已 {mins} 分钟未更新",
+                        "db_stale",
+                        f"Poller 可能挂起: DB 行情数据已 {mins} 分钟未更新",
                         level=1,
                     )
                 ]
@@ -1682,13 +1755,28 @@ def _build_close_summary(
             }
         )
 
-    # ── Threshold hits (from alert_config.json) ──
+    # ── Threshold hits (from config.db alert_rules) ──
     threshold_hits: list[str] = []
+    _alert_data: dict[str, dict] = {}
+    conn = None
     try:
-        with open(ALERT_CONFIG_PATH, "r", encoding="utf-8") as _af:
-            _alert_data = json.load(_af).get("alerts", {})
+        from src.sim_trading.db import get_config_connection
+
+        conn = get_config_connection()
+        rows = conn.execute("SELECT symbol, above, below FROM alert_rules").fetchall()
+        _alert_data = {
+            row["symbol"]: {
+                "above": row["above"],
+                "below": row["below"],
+            }
+            for row in rows
+        }
     except Exception:
         _alert_data = {}
+    finally:
+        if conn:
+            conn.close()
+
     for symbol, quote in quotes.items():
         price = quote.get("price", 0)
         name = quote.get("name", symbol)
@@ -1794,14 +1882,14 @@ def check_market_open_close(
 # 6. Trade Plan Engine
 # ══════════════════════════════════════════
 
-TRADE_PLANS_PATH = PROJECT_ROOT / "src" / "data" / "trade_plans.json"
+TRADING_DB_PATH = PROJECT_ROOT / "src" / "data" / "trading.db"
 
 
 class TradePlanEngine:
     """检查交易计划条件，触发通知 + 模拟执行。
 
     每 tick 调用 check()，返回触发的告警列表（格式兼容 write_alert_events）。
-    触发后自动更新 trade_plans.json（标记 triggered=True）并写入 trade_plan_events 表。
+    触发后自动更新 trading.db trade_plans 表（标记 triggered=True）并写入 trade_plan_events 表。
 
     A 股指标条件单: order 中含 "indicators" 字段时，自动从 akshare 拉取日线计算指标。
     每日每只 A 股最多拉取一次 kline（缓存到 _ashare_ind_cache）。
@@ -1823,27 +1911,66 @@ class TradePlanEngine:
         self._reload_plans()
 
     def _reload_plans(self):
-        """Load or reload plans from JSON (checks mtime for hot-reload)."""
+        """Load or reload plans from trading.db (checks updated_at for hot-reload)."""
         try:
-            mtime = TRADE_PLANS_PATH.stat().st_mtime
-        except FileNotFoundError:
+            conn = sqlite3.connect(str(TRADING_DB_PATH))
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT id, name, symbol, status, created_at, orders_json, updated_at "
+                "FROM trade_plans"
+            ).fetchall()
+            conn.close()
+        except Exception as e:
+            logger.warning(f"TradePlan: failed to load from DB: {e}")
             self._plans = {}
             return
+
+        # Use max updated_at as mtime proxy
+        mtime = max((r["updated_at"] for r in rows), default=0)
         if mtime == self._last_mtime:
             return
         self._last_mtime = mtime
-        data = read_json_safe(TRADE_PLANS_PATH)
-        if data:
-            self._plans = data.get("plans", {})
+
+        plans: dict = {}
+        for r in rows:
+            plan_id = r["id"]
+            try:
+                orders = json.loads(r["orders_json"]) if r["orders_json"] else []
+            except json.JSONDecodeError:
+                orders = []
+            plans[plan_id] = {
+                "name": r["name"],
+                "symbol": r["symbol"],
+                "status": r["status"],
+                "created_at": r["created_at"],
+                "orders": orders,
+            }
+        self._plans = plans
 
     def _save_plans(self):
-        """Atomic write back to trade_plans.json."""
-        tmp = TRADE_PLANS_PATH.with_suffix(".tmp")
-        data = {"plans": self._plans}
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        tmp.rename(TRADE_PLANS_PATH)
-        self._last_mtime = TRADE_PLANS_PATH.stat().st_mtime
+        """Write plans back to trading.db trade_plans table."""
+        try:
+            conn = sqlite3.connect(str(TRADING_DB_PATH))
+            now_ts = int(time.time())
+            for plan_id, plan in self._plans.items():
+                conn.execute(
+                    "INSERT OR REPLACE INTO trade_plans (id, name, symbol, status, created_at, orders_json, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        plan_id,
+                        plan.get("name", ""),
+                        plan.get("symbol", ""),
+                        plan.get("status", "active"),
+                        plan.get("created_at", ""),
+                        json.dumps(plan.get("orders", []), ensure_ascii=False),
+                        now_ts,
+                    ),
+                )
+            conn.commit()
+            conn.close()
+            self._last_mtime = now_ts
+        except Exception as e:
+            logger.error(f"TradePlan: failed to save to DB: {e}")
 
     def _get_ashare_indicators(
         self, symbol: str, live_price: float = 0, live_volume: float = 0
@@ -2406,12 +2533,22 @@ class WatchDriftTracker:
 
     def _get_step(self, key):
         """Get drift step % for a key (stock code or tag:name)."""
-        cfg = read_json_safe(self._alert_config_path) or {}
-        alerts = cfg.get("alerts", {})
-        if key in alerts and "watch_drift_pct" in alerts[key]:
-            return alerts[key]["watch_drift_pct"]
-        defaults = cfg.get("defaults", {})
-        return defaults.get("watch_drift_pct", self._defaults["watch_drift_pct"])
+        conn = None
+        try:
+            from src.sim_trading.db import get_config_connection
+
+            conn = get_config_connection()
+            row = conn.execute(
+                "SELECT value FROM monitor_settings WHERE key = ?", ("watch_drift_pct",)
+            ).fetchone()
+            if row:
+                return row["value"]
+        except Exception:
+            pass
+        finally:
+            if conn:
+                conn.close()
+        return self._defaults["watch_drift_pct"]
 
     def _calc_tier(self, drift_pct, step):
         """Return the tier value if drift crosses a new step boundary, else None.
@@ -2566,19 +2703,27 @@ class PanicSellEngine(PatternEngine):
         pass
 
     def _load_market_amo(self) -> tuple[float | None, float | None, float, float]:
-        """读取 marketTurnover 的 AMO 值和指数涨跌幅。
+        """读取 market_turnover DB 的 AMO 值和指数涨跌幅。
 
         Returns: (market_amo1, market_amo2, sh_pct, sz_pct)
         """
-        market = read_json_safe(MARKET_DATA_PATH)
-        if market is None:
+        conn = None
+        try:
+            from src.sim_trading.db import get_connection
+
+            conn = get_connection()
+            row = conn.execute(
+                "SELECT amo1, amo2, sh_pct, sz_pct FROM market_turnover ORDER BY ts DESC LIMIT 1"
+            ).fetchone()
+            if row is None:
+                return None, None, 0.0, 0.0
+            return row["amo1"], row["amo2"], row["sh_pct"] or 0.0, row["sz_pct"] or 0.0
+        except Exception as e:
+            logger.warning(f"PanicSellEngine: failed to read market_turnover from DB: {e}")
             return None, None, 0.0, 0.0
-        mt = market.get("marketTurnover") or {}
-        amo1 = mt.get("amo1")
-        amo2 = mt.get("amo2")
-        sh_pct = mt.get("shPct", 0.0) or 0.0
-        sz_pct = mt.get("szPct", 0.0) or 0.0
-        return amo1, amo2, sh_pct, sz_pct
+        finally:
+            if conn:
+                conn.close()
 
     def _is_cooldown(self, symbol: str) -> bool:
         today = datetime.now().strftime("%Y-%m-%d")
@@ -2630,13 +2775,20 @@ class PanicSellEngine(PatternEngine):
             # 但 merge_data 构建 quotes 时可能没有带 amo1
             amo1 = q.get("amo1")
             if amo1 is None:
-                # fallback：从 market_data.json 直接读
-                market = read_json_safe(MARKET_DATA_PATH)
-                if market:
-                    for svc in market.get("services", []):
-                        if svc.get("id") == symbol:
-                            amo1 = svc.get("amo1")
-                            break
+                # fallback：从 price_snapshots 直接读
+                try:
+                    from src.sim_trading.db import get_connection
+
+                    conn = get_connection()
+                    row = conn.execute(
+                        "SELECT amo1 FROM price_snapshots WHERE code = ? ORDER BY ts DESC LIMIT 1",
+                        (symbol,),
+                    ).fetchone()
+                    conn.close()
+                    if row:
+                        amo1 = row["amo1"]
+                except Exception:
+                    pass
             if amo1 is None or amo1 < self._stock_amo1_min:
                 continue
 
@@ -2802,8 +2954,8 @@ def run():
         trading = is_any_market_open(has_hk)
         check_interval = TRADING_CHECK_SEC if trading else NON_TRADING_CHECK_SEC
 
-        # Check mtime
-        current_mtime = get_mtime(MARKET_DATA_PATH)
+        # Check DB timestamp
+        current_mtime = _get_latest_db_ts()
 
         if current_mtime > 0 and current_mtime != last_mtime:
             last_mtime = current_mtime
@@ -2819,7 +2971,7 @@ def run():
                 for _eng in _pattern_engines:
                     _eng.update_config(config)
 
-            market = read_json_safe(MARKET_DATA_PATH)
+            market = _read_market_snapshot_from_db()
             if market is not None:
                 market_snapshot = market  # keep for watchdog
                 quotes = merge_data(market, config)
@@ -2914,7 +3066,7 @@ def run():
             print_status(last_checked_count, daily_alerts, check_interval, trading)
 
         # ── Data Freshness Watchdog (runs every iteration, not just on mtime change) ──
-        wd_alerts = watchdog.check(MARKET_DATA_PATH, market_snapshot, has_hk)
+        wd_alerts = watchdog.check(_get_latest_db_ts(), market_snapshot, has_hk)
         if wd_alerts:
             print()
             write_alert_events(wd_alerts)

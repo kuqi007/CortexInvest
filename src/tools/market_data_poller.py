@@ -2,8 +2,8 @@
 """
 Market data poller — 轻量守护脚本
 
-定时从东方财富 API 抓取实时行情，写入 src/data/market_data.json，
-供 Next.js 前端直接读取展示。
+定时从东方财富 API 抓取实时行情，写入 trading.db (price_snapshots + market_turnover)，
+供 Next.js 前端通过 /api/metrics 读取展示。
 
 用法:
     poetry run python src/tools/market_data_poller.py
@@ -43,10 +43,138 @@ logger = setup_logger("market_data_poller")
 _futu_enricher = FutuL2Enricher()
 
 CONFIG_PATH = PROJECT_ROOT / "src" / "data" / "monitor_config.json"
-OUTPUT_PATH = PROJECT_ROOT / "src" / "data" / "market_data.json"
 
 # 确保数据库 schema 包含所有表（包括新增的 market_amo_history）
 init_db()
+
+
+def _write_price_snapshots(services: list[dict], ts: int, date_str: str) -> None:
+    """将个股行情写入 price_snapshots 表（UPSERT）。"""
+    if not services:
+        return
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        for svc in services:
+            code = svc.get("id", "")
+            if not code:
+                continue
+            cur.execute(
+                """
+                INSERT OR REPLACE INTO price_snapshots
+                (ts, date, code, name, price, volume, amount, change_pct,
+                 chg_amt, amp, turnover, vol_ratio, high, low, open, prev_close, amo1, amo2)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    ts,
+                    date_str,
+                    code,
+                    svc.get("name", ""),
+                    svc.get("price"),
+                    svc.get("vol"),
+                    svc.get("amount"),
+                    svc.get("change"),
+                    svc.get("chgAmt"),
+                    svc.get("amp"),
+                    svc.get("turnover"),
+                    svc.get("volRatio"),
+                    svc.get("high"),
+                    svc.get("low"),
+                    svc.get("open"),
+                    svc.get("prevClose"),
+                    svc.get("amo1"),
+                    svc.get("amo2"),
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _write_market_turnover(turnover: dict, ts: int, date_str: str) -> None:
+    """将大盘数据写入 market_turnover 表（UPSERT）。"""
+    if not turnover:
+        return
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO market_turnover
+            (ts, date, sh, sz, total, sh_index, sz_index, sh_pct, sz_pct, verdict,
+             chi_next, chi_next_pct, kc50, kc50_pct,
+             hk_index, hk_index_pct, hk_tech, hk_tech_pct, hk_turnover, amo1, amo2)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                ts,
+                date_str,
+                turnover.get("sh"),
+                turnover.get("sz"),
+                turnover.get("total"),
+                turnover.get("shIndex"),
+                turnover.get("szIndex"),
+                turnover.get("shPct"),
+                turnover.get("szPct"),
+                turnover.get("verdict"),
+                turnover.get("chiNext"),
+                turnover.get("chiNextPct"),
+                turnover.get("kc50"),
+                turnover.get("kc50Pct"),
+                turnover.get("hkIndex"),
+                turnover.get("hkIndexPct"),
+                turnover.get("hkTech"),
+                turnover.get("hkTechPct"),
+                turnover.get("hkTurnover"),
+                turnover.get("amo1"),
+                turnover.get("amo2"),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _get_latest_services_from_db(codes: list[str]) -> list[dict]:
+    """从 DB 读取指定 code 的最新价格快照，重建 service 格式。"""
+    if not codes:
+        return []
+    conn = get_connection()
+    placeholders = ",".join("?" * len(codes))
+    rows = conn.execute(
+        f"""
+        SELECT code, name, price, volume, amount, change_pct,
+               chg_amt, amp, turnover, vol_ratio, high, low, open, prev_close, amo1, amo2
+        FROM price_snapshots
+        WHERE code IN ({placeholders})
+          AND ts = (SELECT MAX(ts) FROM price_snapshots)
+        """,
+        codes,
+    ).fetchall()
+    conn.close()
+    services = []
+    for row in rows:
+        services.append(
+            {
+                "id": row["code"],
+                "name": row["name"] or "",
+                "price": row["price"] or 0,
+                "change": row["change_pct"] or 0,
+                "chgAmt": row["chg_amt"] or 0,
+                "vol": row["volume"] or 0,
+                "amount": row["amount"] or 0,
+                "amp": row["amp"] or 0,
+                "turnover": row["turnover"] or 0,
+                "volRatio": row["vol_ratio"] or 0,
+                "high": row["high"] or 0,
+                "low": row["low"] or 0,
+                "open": row["open"] or 0,
+                "prevClose": row["prev_close"] or 0,
+                "amo1": row["amo1"] or 1.0,
+                "amo2": row["amo2"] or 1.0,
+            }
+        )
+    return services
 
 # ── AMO History (模块级状态，poll_once 之间保持) ──
 # _amo_history[code] = [amount_n, ..., amount_1]  # 最近的 N 天成交额(元)，最多12天
@@ -571,21 +699,13 @@ def poll_once() -> bool:
     # 两市成交额（新浪源，独立于东方财富，不受其故障影响）
     turnover = fetch_market_turnover()
 
+    ts = int(time.time() * 1000)
+    date_str = datetime.now().strftime("%Y-%m-%d")
+
     if not stocks:
-        # 个股数据失败，但尝试 partial update（保留旧 services，更新成交额）
+        # 个股数据失败，但尝试更新大盘数据
         logger.warning("个股行情获取失败（东方财富不可达），尝试更新大盘数据")
         index_results = []  # fetch_realtime_with_fallback 返回空，没有指数数据
-        try:
-            existing = json.loads(OUTPUT_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            existing = {"services": []}
-        existing["ts"] = int(time.time() * 1000)
-        existing["settings"] = settings
-        existing["_source"] = {
-            "primary": "unavailable",
-            "is_fallback": True,
-            "futu_connected": False,
-        }
         if turnover:
             # 市场 AMO 计算：成交额(亿元) × 1e8 = 元
             total_yi = float(turnover.get("total", 0))
@@ -596,12 +716,7 @@ def poll_once() -> bool:
             hk_idx = fetch_hk_index_data()
             if hk_idx:
                 turnover.update(hk_idx)
-            existing["marketTurnover"] = turnover
-        tmp = OUTPUT_PATH.with_suffix(".tmp")
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(existing, f, ensure_ascii=False, indent=2)
-        tmp.replace(OUTPUT_PATH)
-        if turnover:
+            _write_market_turnover(turnover, ts, date_str)
             logger.info(
                 f"大盘数据已更新: 两市 {turnover['total']:,}亿 ({turnover['verdict']})"
             )
@@ -635,8 +750,8 @@ def poll_once() -> bool:
     # 新浪降级时继承旧数据中的量比/换手率（新浪不提供这两个字段）
     if is_sina_fallback:
         try:
-            old_data = json.loads(OUTPUT_PATH.read_text(encoding="utf-8"))
-            old_map = {s["id"]: s for s in old_data.get("services", []) if s.get("id")}
+            old_services = _get_latest_services_from_db([s["id"] for s in services])
+            old_map = {s["id"]: s for s in old_services if s.get("id")}
             carried = 0
             for svc in services:
                 old = old_map.get(svc["id"])
@@ -680,13 +795,15 @@ def poll_once() -> bool:
 
     # 合并旧数据中缺失的 service（盘前 price=0 被跳过的股票保留昨日收盘价）
     new_ids = {s["id"] for s in services}
-    try:
-        old_data = json.loads(OUTPUT_PATH.read_text(encoding="utf-8"))
-        for old_svc in old_data.get("services", []):
-            if old_svc.get("id") and old_svc["id"] not in new_ids:
-                services.append(old_svc)
-    except Exception:
-        pass
+    missing_codes = [code for code in watchlist if code not in new_ids]
+    if missing_codes:
+        try:
+            old_services = _get_latest_services_from_db(missing_codes)
+            for old_svc in old_services:
+                if old_svc.get("id") and old_svc["id"] not in new_ids:
+                    services.append(old_svc)
+        except Exception:
+            pass
 
     # ── 市场 AMO：成交额(亿元) × 1e8 = 元 ──
     if turnover:
@@ -708,28 +825,13 @@ def poll_once() -> bool:
                 turnover["kc50"] = round(price, 2) if price else 0
                 turnover["kc50Pct"] = round(pct, 2) if pct else 0
 
-    payload = {
-        "services": services,
-        "ts": int(time.time() * 1000),
-        "_updated_by": socket.gethostname(),
-        "settings": settings,
-        "marketTurnover": turnover,
-        # 数据源元数据，供 Data Freshness Watchdog 检测降级
-        "_source": {
-            "primary": "sina" if is_sina_fallback else "eastmoney",
-            "is_fallback": is_sina_fallback,
-            "futu_connected": bool(l2_data),
-        },
-    }
-
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = OUTPUT_PATH.with_suffix(".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-    tmp.replace(OUTPUT_PATH)
+    # 写入 SQLite（单一数据源）
+    _write_price_snapshots(services, ts, date_str)
+    if turnover:
+        _write_market_turnover(turnover, ts, date_str)
 
     now = datetime.now().strftime("%H:%M:%S")
-    logger.info(f"[{now}] 已更新 {len(services)} 只标的 -> {OUTPUT_PATH.name}")
+    logger.info(f"[{now}] 已更新 {len(services)} 只标的 -> trading.db")
     return True
 
 
@@ -758,7 +860,7 @@ def main():
     print(f"  标的数: {len(watchlist)}")
     print(f"  港股: {'是' if has_hk else '否'}")
     print(f"  轮询间隔: {interval}s (休市 {IDLE_INTERVAL}s)")
-    print(f"  输出文件: {OUTPUT_PATH}")
+    print(f"  输出: trading.db (price_snapshots + market_turnover)")
     print("  按 Ctrl+C 退出\n")
 
     # 启动时立即执行一次（确保有初始数据）

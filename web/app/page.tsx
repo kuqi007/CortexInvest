@@ -79,6 +79,31 @@ function Home() {
   const { logs, addLogs, clearLogs } = useLogEntries();
   const { planMap, refresh: refreshPlans } = useTradePlans();
   const [drawerSymbol, setDrawerSymbol] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [addCode, setAddCode] = useState("");
+  const [addCost, setAddCost] = useState("");
+  const [addShares, setAddShares] = useState("");
+
+  async function handleAdd() {
+    const code = addCode.trim();
+    if (!code) return;
+    const data: Record<string, unknown> = { type: "holding" };
+    if (addCost) data.cost = Number(addCost);
+    if (addShares) data.shares = Number(addShares);
+    try {
+      const resp = await fetch("/api/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "add", code, data }),
+      });
+      const result = await resp.json();
+      if (result?.success) {
+        setAddCode(""); setAddCost(""); setAddShares("");
+        refresh();
+      }
+    } catch { /* ignore */ }
+  }
+
   // Filter alerts by active market tab (HK symbols start with "HK", rest are A-share)
   // Portfolio-level alerts (empty symbol) show in both tabs
   const tabAlertEvents = alertEvents.filter(
@@ -142,11 +167,18 @@ function Home() {
   const tagFiltered = useMemo(() => filterTag
     ? tabServices.filter((s) => s.tags?.includes(filterTag))
     : tabServices, [tabServices, filterTag]);
-  const pinnedList = useMemo(() => applySortList(tagFiltered.filter((s) => s.type === "holding" && !s.hidden && (s.star || (s.pin_order ?? 0) > 0)), holdSort), [tagFiltered, holdSort]);
+  const searchFiltered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return tagFiltered;
+    return tagFiltered.filter((s) =>
+      s.id.toLowerCase().includes(q) || (s.alias || s.name).toLowerCase().includes(q)
+    );
+  }, [tagFiltered, search]);
+  const pinnedList = useMemo(() => applySortList(searchFiltered.filter((s) => s.type === "holding" && !s.hidden && (s.star || (s.pin_order ?? 0) > 0)), holdSort), [searchFiltered, holdSort]);
   const pinnedIds = useMemo(() => new Set(pinnedList.map((s) => s.id)), [pinnedList]);
-  const prodStock = useMemo(() => applySortList(tagFiltered.filter((s) => s.type === "holding" && !s.hidden && !isETF(s) && !pinnedIds.has(s.id)), holdSort), [tagFiltered, holdSort, pinnedIds]);
-  const prodETF = useMemo(() => applySortList(tagFiltered.filter((s) => s.type === "holding" && !s.hidden && isETF(s) && !pinnedIds.has(s.id)), holdSort), [tagFiltered, holdSort, pinnedIds]);
-  const hiddenList = useMemo(() => applySortList(tagFiltered.filter((s) => s.hidden && s.type === "holding"), holdSort), [tagFiltered, holdSort]);
+  const prodStock = useMemo(() => applySortList(searchFiltered.filter((s) => s.type === "holding" && !s.hidden && !isETF(s) && !pinnedIds.has(s.id)), holdSort), [searchFiltered, holdSort, pinnedIds]);
+  const prodETF = useMemo(() => applySortList(searchFiltered.filter((s) => s.type === "holding" && !s.hidden && isETF(s) && !pinnedIds.has(s.id)), holdSort), [searchFiltered, holdSort, pinnedIds]);
+  const hiddenList = useMemo(() => applySortList(searchFiltered.filter((s) => s.hidden && s.type === "holding"), holdSort), [searchFiltered, holdSort]);
   const hasHold = pinnedList.length > 0 || prodStock.length > 0 || prodETF.length > 0;
   const allTags = useMemo(
     () => [...new Set(services.flatMap((s) => s.tags ?? []))],
@@ -399,6 +431,103 @@ function Home() {
             <span style={{ cursor: "pointer", color: D.red, fontWeight: 500 }} onClick={() => setFilterTag(null)}>x</span>
           </div>
         )}
+
+        {/* search + add */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+          <span style={{ color: D.comment }}>搜索:</span>
+          <input
+            placeholder="代码或名称..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{
+              background: D.currentLine,
+              border: `1px solid ${D.comment}`,
+              color: D.fg,
+              fontFamily: "JetBrains Mono, monospace",
+              fontSize: 12,
+              padding: "2px 8px",
+              outline: "none",
+              borderRadius: 2,
+              width: 140,
+            }}
+          />
+          {search && (
+            <span style={{ color: D.comment, fontSize: 11 }}>
+              {searchFiltered.length}/{tabServices.length} 匹配
+            </span>
+          )}
+          <div style={{ flex: 1 }} />
+          <input
+            placeholder="代码"
+            value={addCode}
+            onChange={(e) => setAddCode(e.target.value.toUpperCase())}
+            style={{
+              background: D.currentLine,
+              border: `1px solid ${D.comment}`,
+              color: D.fg,
+              fontFamily: "JetBrains Mono, monospace",
+              fontSize: 12,
+              padding: "2px 8px",
+              outline: "none",
+              borderRadius: 2,
+              width: 90,
+            }}
+            onKeyDown={(e) => { if (e.key === "Enter") handleAdd(); }}
+          />
+          <input
+            placeholder="成本"
+            type="number"
+            step="any"
+            value={addCost}
+            onChange={(e) => setAddCost(e.target.value)}
+            style={{
+              background: D.currentLine,
+              border: `1px solid ${D.comment}`,
+              color: D.fg,
+              fontFamily: "JetBrains Mono, monospace",
+              fontSize: 12,
+              padding: "2px 8px",
+              outline: "none",
+              borderRadius: 2,
+              width: 70,
+            }}
+          />
+          <input
+            placeholder="股数"
+            type="number"
+            step={100}
+            value={addShares}
+            onChange={(e) => setAddShares(e.target.value)}
+            style={{
+              background: D.currentLine,
+              border: `1px solid ${D.comment}`,
+              color: D.fg,
+              fontFamily: "JetBrains Mono, monospace",
+              fontSize: 12,
+              padding: "2px 8px",
+              outline: "none",
+              borderRadius: 2,
+              width: 70,
+            }}
+          />
+          <button
+            onClick={handleAdd}
+            style={{
+              background: D.purple,
+              color: D.bg,
+              border: "none",
+              fontFamily: "JetBrains Mono, monospace",
+              fontSize: 12,
+              fontWeight: 700,
+              padding: "3px 12px",
+              borderRadius: 3,
+              cursor: "pointer",
+            }}
+          >
+            添加持仓
+          </button>
+        </div>
+
         {/* watch header */}
         <div style={{ color: D.comment, marginBottom: 6 }}>
           <span>每 {pollMs / 1000} 秒轮询一次</span>

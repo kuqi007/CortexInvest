@@ -1,26 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import Database from "better-sqlite3";
-import { readFileSync, writeFileSync, renameSync, existsSync } from "fs";
-import { join } from "path";
 
 import { openConfigDb, openTradingDb } from "../../lib/db";
 
 export const dynamic = "force-dynamic";
-
-const MARKET_DATA_PATH = join(
-  process.cwd(),
-  "..",
-  "src",
-  "data",
-  "market_data.json",
-);
-const SECTOR_CONFIG_PATH = join(
-  process.cwd(),
-  "..",
-  "src",
-  "data",
-  "sector_config.json",
-);
 
 /* ── Types ── */
 
@@ -92,48 +75,52 @@ function round(n: number, d: number): number {
   return Math.round(n * f) / f;
 }
 
-/** Read alert_rules + rotation from sector_config.json (minimal reader, no indices) */
-function readSectorConfigMeta(): {
+/** Read alert_rules + rotation from portfolio_config table in trading.db */
+function readSectorConfigMeta(tradingDb: InstanceType<typeof Database>): {
   alertRules: Record<string, unknown>;
   rotation: Record<string, unknown>;
 } {
   try {
-    if (!existsSync(SECTOR_CONFIG_PATH)) return { alertRules: {}, rotation: {} };
-    const raw = JSON.parse(readFileSync(SECTOR_CONFIG_PATH, "utf-8"));
+    const alertRow = tradingDb
+      .prepare("SELECT value FROM portfolio_config WHERE key = ?")
+      .get("sector_config.alert_rules") as { value: string } | undefined;
+    const rotationRow = tradingDb
+      .prepare("SELECT value FROM portfolio_config WHERE key = ?")
+      .get("sector_config.rotation") as { value: string } | undefined;
     return {
-      alertRules: raw.alert_rules || raw.alertRules || {},
-      rotation: raw.rotation || {},
+      alertRules: alertRow ? JSON.parse(alertRow.value) : {},
+      rotation: rotationRow ? JSON.parse(rotationRow.value) : {},
     };
   } catch {
     return { alertRules: {}, rotation: {} };
   }
 }
 
-/** Read market_data.json once, return {nameMap, changeMap} */
-function readMarketData(): {
+/** Read latest price_snapshots from trading.db, return {nameMap, changeMap} */
+function readMarketData(tradingDb: InstanceType<typeof Database>): {
   nameMap: Record<string, string>;
   changeMap: Record<string, number>;
 } {
   const nameMap: Record<string, string> = {};
   const changeMap: Record<string, number> = {};
   try {
-    if (existsSync(MARKET_DATA_PATH)) {
-      const md = JSON.parse(readFileSync(MARKET_DATA_PATH, "utf-8"));
-      const services = md.services;
-      if (Array.isArray(services)) {
-        for (const s of services) {
-          if (s.id && s.name && !nameMap[s.id]) nameMap[s.id] = s.name;
-          if (s.id && s.change != null) changeMap[s.id] = s.change;
-        }
-      }
+    const rows = tradingDb
+      .prepare(
+        `SELECT code, name, change_pct FROM price_snapshots
+         WHERE (code, ts) IN (SELECT code, MAX(ts) FROM price_snapshots GROUP BY code)`,
+      )
+      .all() as Array<{ code: string; name: string; change_pct: number }>;
+    for (const row of rows) {
+      if (row.code && row.name && !nameMap[row.code]) nameMap[row.code] = row.name;
+      if (row.code && row.change_pct != null) changeMap[row.code] = row.change_pct;
     }
   } catch { /* ignore */ }
   return { nameMap, changeMap };
 }
 
-/** Build code→name map from market_data.json (best effort) */
-function buildStockNameMap(): Record<string, string> {
-  return readMarketData().nameMap;
+/** Build code→name map from price_snapshots (best effort) */
+function buildStockNameMap(tradingDb: InstanceType<typeof Database>): Record<string, string> {
+  return readMarketData(tradingDb).nameMap;
 }
 
 /** Compute equal-weight average change% for a list of stock codes */
@@ -456,7 +443,7 @@ export async function GET(request: NextRequest) {
       } catch { /* invalid json */ }
     }
 
-    const { nameMap: stockNameMap, changeMap: liveChangeMap } = readMarketData();
+    const { nameMap: stockNameMap, changeMap: liveChangeMap } = readMarketData(tradingDb);
 
     // Build parent→children mapping
     const parentChildren: Record<string, string[]> = {};
@@ -702,13 +689,13 @@ export async function GET(request: NextRequest) {
         .all() as AlertRow[];
     } catch { /* table may not exist */ }
 
+    // Read config meta (alert_rules, rotation) from portfolio_config
+    const configMeta = readSectorConfigMeta(tradingDb);
+
     configDb.close();
     tradingDb.close();
     configDb = null;
     tradingDb = null;
-
-    // Read config meta (alert_rules, rotation) from sector_config.json
-    const configMeta = readSectorConfigMeta();
 
     return NextResponse.json({
       rotation: { dates, rows: rotationRows },
@@ -1009,33 +996,38 @@ export async function POST(request: NextRequest) {
       }
 
       case "config": {
-        // Keep config action for alert_rules / rotation updates via sector_config.json
+        // Write alert_rules / rotation to portfolio_config in trading.db
         const { alertRules, rotation } = body as {
           alertRules?: Record<string, unknown>;
           rotation?: Record<string, unknown>;
         };
+        const wdb = openTradingDb();
         try {
-          if (!existsSync(SECTOR_CONFIG_PATH)) {
-            return NextResponse.json(
-              { error: "sector_config.json not found" },
-              { status: 404 },
-            );
-          }
-          const raw = JSON.parse(readFileSync(SECTOR_CONFIG_PATH, "utf-8"));
+          const upsert = wdb.prepare(
+            "INSERT INTO portfolio_config (key, value, updated_at) VALUES (?, ?, datetime('now')) " +
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+          );
           if (alertRules) {
-            raw.alert_rules = { ...(raw.alert_rules || {}), ...alertRules };
+            const existing = wdb
+              .prepare("SELECT value FROM portfolio_config WHERE key = ?")
+              .get("sector_config.alert_rules") as { value: string } | undefined;
+            const merged = { ...(existing ? JSON.parse(existing.value) : {}), ...alertRules };
+            upsert.run("sector_config.alert_rules", JSON.stringify(merged));
           }
           if (rotation) {
-            raw.rotation = { ...(raw.rotation || {}), ...rotation };
+            const existing = wdb
+              .prepare("SELECT value FROM portfolio_config WHERE key = ?")
+              .get("sector_config.rotation") as { value: string } | undefined;
+            const merged = { ...(existing ? JSON.parse(existing.value) : {}), ...rotation };
+            upsert.run("sector_config.rotation", JSON.stringify(merged));
           }
-          const tmp = SECTOR_CONFIG_PATH + ".tmp";
-          writeFileSync(tmp, JSON.stringify(raw, null, 2) + "\n", "utf-8");
-          renameSync(tmp, SECTOR_CONFIG_PATH);
         } catch (e) {
           return NextResponse.json(
             { error: `Failed to update config: ${e}` },
             { status: 500 },
           );
+        } finally {
+          wdb.close();
         }
         return NextResponse.json({ ok: true, action: "config" });
       }

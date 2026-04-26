@@ -29,6 +29,7 @@ import argparse
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 import time
@@ -58,9 +59,8 @@ from src.utils.logging_config import setup_logger
 
 logger = setup_logger("stock_monitor")
 
-# ── 配置路径 ──
-CONFIG_PATH = PROJECT_ROOT / "src" / "data" / "monitor_config.json"
-ALERT_CONFIG_PATH = PROJECT_ROOT / "src" / "data" / "alert_config.json"
+# ── 数据库路径 ──
+CONFIG_DB_PATH = PROJECT_ROOT / "src" / "data" / "config.db"
 
 # ── 默认配置 ──
 DEFAULT_SETTINGS = {
@@ -94,44 +94,165 @@ def load_config() -> dict:
     except Exception:
         pass
 
-    # 回退到 JSON
-    if CONFIG_PATH.exists():
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+    # 回退到 JSON（兼容旧数据）
+    json_path = PROJECT_ROOT / "src" / "data" / "monitor_config.json"
+    if json_path.exists():
+        with open(json_path, "r", encoding="utf-8") as f:
             return json.load(f)
 
     # 初始化默认配置
     config = {
-        "watchlist": {code: {"name": name} for code, name in AIDC_WATCHLIST.items()},
+        "watchlist": {code: {"name": name, "type": "watching"} for code, name in AIDC_WATCHLIST.items()},
         "settings": DEFAULT_SETTINGS.copy(),
     }
     save_config(config)
     return config
 
 
+def _get_db_conn() -> sqlite3.Connection:
+    """获取 config.db 连接，确保表已初始化。"""
+    from src.sim_trading.db import init_config_db
+
+    init_config_db()
+    conn = sqlite3.connect(str(CONFIG_DB_PATH), timeout=10, isolation_level=None)
+    conn.execute("PRAGMA journal_mode=DELETE")
+    conn.execute("PRAGMA busy_timeout=5000")
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
 def save_config(config: dict):
-    """保存配置到 JSON 文件（原子写入：tmp → rename）"""
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = CONFIG_PATH.with_suffix(".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(config, f, ensure_ascii=False, indent=2)
-    tmp.replace(CONFIG_PATH)
+    """保存配置到 SQLite DB（monitor_watchlist + monitor_settings）"""
+    conn = _get_db_conn()
+    now = int(time.time())
+    watchlist = config.get("watchlist", {})
+    settings = config.get("settings", {})
+
+    try:
+        # Upsert watchlist
+        for symbol, entry in watchlist.items():
+            name = entry.get("name", symbol)
+            list_type = entry.get("type", "watching")
+            cost = entry.get("cost")
+            shares = entry.get("shares")
+            lot = entry.get("lot")
+            hidden = 1 if entry.get("hidden") else 0
+            star = 1 if entry.get("star") else 0
+            dip_buy = 1 if entry.get("dip_buy") else 0
+            tags = json.dumps(entry.get("tags", []))
+            watch_price = entry.get("watch_price")
+            watch_price_date = entry.get("watch_price_date")
+
+            conn.execute(
+                """
+                INSERT INTO monitor_watchlist (
+                    symbol, name, list_type, cost, shares, lot,
+                    hidden, star, dip_buy, tags, watch_price, watch_price_date,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(symbol) DO UPDATE SET
+                    name=excluded.name,
+                    list_type=excluded.list_type,
+                    cost=excluded.cost,
+                    shares=excluded.shares,
+                    lot=excluded.lot,
+                    hidden=excluded.hidden,
+                    star=excluded.star,
+                    dip_buy=excluded.dip_buy,
+                    tags=excluded.tags,
+                    watch_price=excluded.watch_price,
+                    watch_price_date=excluded.watch_price_date,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    symbol, name, list_type, cost, shares, lot,
+                    hidden, star, dip_buy, tags, watch_price, watch_price_date,
+                    now, now,
+                ),
+            )
+
+        # Delete removed symbols (if watchlist is empty, delete all)
+        if watchlist:
+            placeholders = ",".join("?" * len(watchlist))
+            conn.execute(
+                f"DELETE FROM monitor_watchlist WHERE symbol NOT IN ({placeholders})",
+                tuple(watchlist.keys()),
+            )
+        else:
+            conn.execute("DELETE FROM monitor_watchlist")
+
+        # Upsert settings
+        for key, value in settings.items():
+            conn.execute(
+                """
+                INSERT INTO monitor_settings (key, value, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value=excluded.value,
+                    updated_at=excluded.updated_at
+                """,
+                (key, float(value), now),
+            )
+
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def load_alerts() -> dict:
-    """加载告警配置 alert_config.json"""
-    if ALERT_CONFIG_PATH.exists():
-        with open(ALERT_CONFIG_PATH, "r", encoding="utf-8") as f:
-            return json.load(f).get("alerts", {})
-    return {}
+    """加载告警配置（从 alert_rules 表）"""
+    conn = _get_db_conn()
+    try:
+        rows = conn.execute(
+            "SELECT symbol, above, below FROM alert_rules"
+        ).fetchall()
+        alerts = {}
+        for r in rows:
+            entry = {}
+            if r["above"] is not None:
+                entry["above"] = float(r["above"])
+            if r["below"] is not None:
+                entry["below"] = float(r["below"])
+            if entry:
+                alerts[r["symbol"]] = entry
+        return alerts
+    finally:
+        conn.close()
 
 
 def save_alerts(alerts: dict):
-    """保存告警配置（原子写入：tmp → rename）"""
-    ALERT_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = ALERT_CONFIG_PATH.with_suffix(".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"alerts": alerts}, f, ensure_ascii=False, indent=2)
-    tmp.replace(ALERT_CONFIG_PATH)
+    """保存告警配置到 alert_rules 表"""
+    conn = _get_db_conn()
+    now = int(time.time())
+    try:
+        for symbol, entry in alerts.items():
+            above = entry.get("above")
+            below = entry.get("below")
+            conn.execute(
+                """
+                INSERT INTO alert_rules (symbol, above, below, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(symbol) DO UPDATE SET
+                    above=excluded.above,
+                    below=excluded.below,
+                    updated_at=excluded.updated_at
+                """,
+                (symbol, above, below, now),
+            )
+
+        # Delete removed symbols (if alerts is empty, delete all)
+        if alerts:
+            placeholders = ",".join("?" * len(alerts))
+            conn.execute(
+                f"DELETE FROM alert_rules WHERE symbol NOT IN ({placeholders})",
+                tuple(alerts.keys()),
+            )
+        else:
+            conn.execute("DELETE FROM alert_rules")
+
+        conn.commit()
+    finally:
+        conn.close()
 
 
 # ══════════════════════════════════════════
