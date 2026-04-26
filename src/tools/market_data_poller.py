@@ -140,41 +140,43 @@ def _get_latest_services_from_db(codes: list[str]) -> list[dict]:
     if not codes:
         return []
     conn = get_connection()
-    placeholders = ",".join("?" * len(codes))
-    rows = conn.execute(
-        f"""
-        SELECT code, name, price, volume, amount, change_pct,
-               chg_amt, amp, turnover, vol_ratio, high, low, open, prev_close, amo1, amo2
-        FROM price_snapshots
-        WHERE code IN ({placeholders})
-          AND ts = (SELECT MAX(ts) FROM price_snapshots)
-        """,
-        codes,
-    ).fetchall()
-    conn.close()
-    services = []
-    for row in rows:
-        services.append(
-            {
-                "id": row["code"],
-                "name": row["name"] or "",
-                "price": row["price"] or 0,
-                "change": row["change_pct"] or 0,
-                "chgAmt": row["chg_amt"] or 0,
-                "vol": row["volume"] or 0,
-                "amount": row["amount"] or 0,
-                "amp": row["amp"] or 0,
-                "turnover": row["turnover"] or 0,
-                "volRatio": row["vol_ratio"] or 0,
-                "high": row["high"] or 0,
-                "low": row["low"] or 0,
-                "open": row["open"] or 0,
-                "prevClose": row["prev_close"] or 0,
-                "amo1": row["amo1"] or 1.0,
-                "amo2": row["amo2"] or 1.0,
-            }
-        )
-    return services
+    try:
+        placeholders = ",".join("?" * len(codes))
+        rows = conn.execute(
+            f"""
+            SELECT code, name, price, volume, amount, change_pct,
+                   chg_amt, amp, turnover, vol_ratio, high, low, open, prev_close, amo1, amo2
+            FROM price_snapshots
+            WHERE code IN ({placeholders})
+              AND ts = (SELECT MAX(ts) FROM price_snapshots)
+            """,
+            codes,
+        ).fetchall()
+        services = []
+        for row in rows:
+            services.append(
+                {
+                    "id": row["code"],
+                    "name": row["name"] or "",
+                    "price": row["price"] or 0,
+                    "change": row["change_pct"] or 0,
+                    "chgAmt": row["chg_amt"] or 0,
+                    "vol": row["volume"] or 0,
+                    "amount": row["amount"] or 0,
+                    "amp": row["amp"] or 0,
+                    "turnover": row["turnover"] or 0,
+                    "volRatio": row["vol_ratio"] or 0,
+                    "high": row["high"] or 0,
+                    "low": row["low"] or 0,
+                    "open": row["open"] or 0,
+                    "prevClose": row["prev_close"] or 0,
+                    "amo1": row["amo1"] or 1.0,
+                    "amo2": row["amo2"] or 1.0,
+                }
+            )
+        return services
+    finally:
+        conn.close()
 
 # ── AMO History (模块级状态，poll_once 之间保持) ──
 # _amo_history[code] = [amount_n, ..., amount_1]  # 最近的 N 天成交额(元)，最多12天

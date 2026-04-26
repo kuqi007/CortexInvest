@@ -371,9 +371,18 @@ export async function GET() {
     // Trade plans — read from trading.db + enrich with current prices
     let tradePlans: Record<string, unknown>[] = [];
     try {
+      // Ensure scope column exists (idempotent)
+      try {
+        db.prepare("SELECT scope FROM trade_plans LIMIT 1").get();
+      } catch {
+        try {
+          db.prepare("ALTER TABLE trade_plans ADD COLUMN scope TEXT NOT NULL DEFAULT 'real'").run();
+        } catch { /* ignore */ }
+      }
+
       const planRows = db
-        .prepare("SELECT id, name, symbol, status, created_at, orders_json FROM trade_plans ORDER BY created_at DESC")
-        .all() as { id: string; name: string; symbol: string; status: string; created_at: string; orders_json: string }[];
+        .prepare("SELECT id, name, symbol, status, scope, created_at, orders_json FROM trade_plans ORDER BY created_at DESC")
+        .all() as { id: string; name: string; symbol: string; status: string; scope: string | null; created_at: string; orders_json: string }[];
 
       tradePlans = planRows.map((row) => {
         const info = marketLookup[row.symbol];
@@ -386,6 +395,7 @@ export async function GET() {
           name: row.name,
           symbol: row.symbol,
           status: row.status,
+          scope: row.scope || "real",
           created_at: row.created_at,
           orders: parsedOrders,
           current_price: info?.price || 0,

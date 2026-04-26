@@ -129,6 +129,7 @@ def save_config(config: dict):
     settings = config.get("settings", {})
 
     try:
+        conn.execute("BEGIN")
         # Upsert watchlist
         for symbol, entry in watchlist.items():
             name = entry.get("name", symbol)
@@ -195,6 +196,9 @@ def save_config(config: dict):
             )
 
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -225,6 +229,7 @@ def save_alerts(alerts: dict):
     conn = _get_db_conn()
     now = int(time.time())
     try:
+        conn.execute("BEGIN")
         for symbol, entry in alerts.items():
             above = entry.get("above")
             below = entry.get("below")
@@ -251,6 +256,9 @@ def save_alerts(alerts: dict):
             conn.execute("DELETE FROM alert_rules")
 
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 

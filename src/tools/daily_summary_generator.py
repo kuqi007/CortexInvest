@@ -372,6 +372,7 @@ def _search_global_news() -> list[dict]:
 def _read_morning_briefing() -> dict | None:
     """Read morning briefing from trading.db."""
     today_str = datetime.now().strftime("%Y-%m-%d")
+    conn = None
     try:
         conn = sqlite3.connect(TRADING_DB_PATH)
         conn.row_factory = sqlite3.Row
@@ -379,11 +380,13 @@ def _read_morning_briefing() -> dict | None:
             "SELECT content_json FROM morning_briefings WHERE date = ?",
             (today_str,),
         ).fetchone()
-        conn.close()
         if row:
             return json.loads(row["content_json"])
     except Exception:
         pass
+    finally:
+        if conn:
+            conn.close()
     return None
 
 
@@ -424,15 +427,20 @@ def generate_morning_briefing() -> dict | None:
         }
 
         # 5. 写入 DB
-        conn = sqlite3.connect(TRADING_DB_PATH)
-        conn.execute(
-            "INSERT OR REPLACE INTO morning_briefings (date, generated_at, content_json) VALUES (?, ?, ?)",
-            (today_str, briefing["generated_at"], json.dumps(briefing, ensure_ascii=False)),
-        )
-        conn.commit()
-        conn.close()
-
-        logger.info("Morning briefing written to trading.db:morning_briefings")
+        conn = None
+        try:
+            conn = sqlite3.connect(TRADING_DB_PATH)
+            conn.execute(
+                "INSERT OR REPLACE INTO morning_briefings (date, generated_at, content_json) VALUES (?, ?, ?)",
+                (today_str, briefing["generated_at"], json.dumps(briefing, ensure_ascii=False)),
+            )
+            conn.commit()
+            logger.info("Morning briefing written to trading.db:morning_briefings")
+        except Exception as e:
+            logger.error(f"Morning briefing write to DB failed: {e}")
+        finally:
+            if conn:
+                conn.close()
         return briefing
 
     except Exception as e:
@@ -1523,24 +1531,30 @@ def generate_daily_summary(date_str: str | None = None) -> dict | None:
         logger.info(f"Thinking chain saved ({len(reasoning)} chars)")
 
     # ── Write to trading.db ──
-    conn = sqlite3.connect(TRADING_DB_PATH)
-    conn.execute(
-        "INSERT OR REPLACE INTO daily_summaries (date, market, stats_json, per_stock_json, generated_at) VALUES (?, ?, ?, ?, ?)",
-        (
-            today,
-            market,
-            json.dumps(stats, ensure_ascii=False),
-            json.dumps(summary.get("perStock", []), ensure_ascii=False),
-            summary["generatedAt"],
-        ),
-    )
-    conn.commit()
-    conn.close()
+    conn = None
+    try:
+        conn = sqlite3.connect(TRADING_DB_PATH)
+        conn.execute(
+            "INSERT OR REPLACE INTO daily_summaries (date, market, stats_json, per_stock_json, generated_at) VALUES (?, ?, ?, ?, ?)",
+            (
+                today,
+                market,
+                json.dumps(stats, ensure_ascii=False),
+                json.dumps(summary.get("perStock", []), ensure_ascii=False),
+                summary["generatedAt"],
+            ),
+        )
+        conn.commit()
+        logger.info(
+            f"Daily summary written to trading.db:daily_summaries "
+            f"({stats['totalSignals']} signals, {len(per_stock)} stocks)"
+        )
+    except Exception as e:
+        logger.error(f"Daily summary write to DB failed: {e}")
+    finally:
+        if conn:
+            conn.close()
 
-    logger.info(
-        f"Daily summary written to trading.db:daily_summaries "
-        f"({stats['totalSignals']} signals, {len(per_stock)} stocks)"
-    )
     return summary
 
 

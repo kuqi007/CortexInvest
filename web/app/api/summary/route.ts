@@ -23,7 +23,7 @@ export async function GET() {
       | undefined;
 
     if (summaryRow) {
-      const summary = {
+      const summary: Record<string, any> = {
         date: summaryRow.date,
         market: summaryRow.market,
         stats: JSON.parse(summaryRow.stats_json),

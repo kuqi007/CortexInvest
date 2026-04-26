@@ -271,19 +271,23 @@ def get_mtime(path: Path) -> float:
 
 def _get_latest_db_ts() -> int:
     """Get latest timestamp from price_snapshots."""
+    conn = None
     try:
         from src.sim_trading.db import get_connection
 
         conn = get_connection()
         row = conn.execute("SELECT MAX(ts) FROM price_snapshots").fetchone()
-        conn.close()
         return row[0] or 0
     except Exception:
         return 0
+    finally:
+        if conn:
+            conn.close()
 
 
 def _read_market_snapshot_from_db() -> dict | None:
     """Build market snapshot dict from DB for watchdog compatibility."""
+    conn = None
     try:
         from src.sim_trading.db import get_connection
 
@@ -315,11 +319,13 @@ def _read_market_snapshot_from_db() -> dict | None:
                 }
             )
         ts = _get_latest_db_ts()
-        conn.close()
         return {"services": services, "ts": ts}
     except Exception as e:
         logger.warning(f"Failed to read market snapshot from DB: {e}")
         return None
+    finally:
+        if conn:
+            conn.close()
 
 
 def _read_l2_indicators() -> dict:
@@ -1912,18 +1918,29 @@ class TradePlanEngine:
 
     def _reload_plans(self):
         """Load or reload plans from trading.db (checks updated_at for hot-reload)."""
+        conn = None
         try:
             conn = sqlite3.connect(str(TRADING_DB_PATH))
             conn.row_factory = sqlite3.Row
+            # Ensure scope column exists (idempotent migration)
+            try:
+                conn.execute("SELECT scope FROM trade_plans LIMIT 1")
+            except sqlite3.OperationalError:
+                try:
+                    conn.execute("ALTER TABLE trade_plans ADD COLUMN scope TEXT NOT NULL DEFAULT 'real'")
+                except sqlite3.OperationalError:
+                    pass
             rows = conn.execute(
-                "SELECT id, name, symbol, status, created_at, orders_json, updated_at "
+                "SELECT id, name, symbol, status, scope, created_at, orders_json, updated_at "
                 "FROM trade_plans"
             ).fetchall()
-            conn.close()
         except Exception as e:
             logger.warning(f"TradePlan: failed to load from DB: {e}")
             self._plans = {}
             return
+        finally:
+            if conn:
+                conn.close()
 
         # Use max updated_at as mtime proxy
         mtime = max((r["updated_at"] for r in rows), default=0)
@@ -1942,6 +1959,7 @@ class TradePlanEngine:
                 "name": r["name"],
                 "symbol": r["symbol"],
                 "status": r["status"],
+                "scope": r["scope"] or "real",
                 "created_at": r["created_at"],
                 "orders": orders,
             }
@@ -1949,28 +1967,40 @@ class TradePlanEngine:
 
     def _save_plans(self):
         """Write plans back to trading.db trade_plans table."""
+        conn = None
         try:
             conn = sqlite3.connect(str(TRADING_DB_PATH))
             now_ts = int(time.time())
+            # Ensure scope column exists (idempotent migration)
+            try:
+                conn.execute("SELECT scope FROM trade_plans LIMIT 1")
+            except sqlite3.OperationalError:
+                try:
+                    conn.execute("ALTER TABLE trade_plans ADD COLUMN scope TEXT NOT NULL DEFAULT 'real'")
+                except sqlite3.OperationalError:
+                    pass
             for plan_id, plan in self._plans.items():
                 conn.execute(
-                    "INSERT OR REPLACE INTO trade_plans (id, name, symbol, status, created_at, orders_json, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT OR REPLACE INTO trade_plans (id, name, symbol, status, scope, created_at, orders_json, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         plan_id,
                         plan.get("name", ""),
                         plan.get("symbol", ""),
                         plan.get("status", "active"),
+                        plan.get("scope", "real"),
                         plan.get("created_at", ""),
                         json.dumps(plan.get("orders", []), ensure_ascii=False),
                         now_ts,
                     ),
                 )
             conn.commit()
-            conn.close()
             self._last_mtime = now_ts
         except Exception as e:
             logger.error(f"TradePlan: failed to save to DB: {e}")
+        finally:
+            if conn:
+                conn.close()
 
     def _get_ashare_indicators(
         self, symbol: str, live_price: float = 0, live_volume: float = 0
@@ -2776,6 +2806,7 @@ class PanicSellEngine(PatternEngine):
             amo1 = q.get("amo1")
             if amo1 is None:
                 # fallback：从 price_snapshots 直接读
+                conn = None
                 try:
                     from src.sim_trading.db import get_connection
 
@@ -2784,11 +2815,13 @@ class PanicSellEngine(PatternEngine):
                         "SELECT amo1 FROM price_snapshots WHERE code = ? ORDER BY ts DESC LIMIT 1",
                         (symbol,),
                     ).fetchone()
-                    conn.close()
                     if row:
                         amo1 = row["amo1"]
                 except Exception:
                     pass
+                finally:
+                    if conn:
+                        conn.close()
             if amo1 is None or amo1 < self._stock_amo1_min:
                 continue
 

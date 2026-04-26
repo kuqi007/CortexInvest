@@ -36,31 +36,68 @@ interface PlanPosition {
 
 /* ── DB helpers ── */
 
-function rowToPlan(row: { id: string; name: string; symbol: string; status: string; created_at: string; orders_json: string }): TradePlan {
+function rowToPlan(row: { id: string; name: string; symbol: string; status: string; scope: string | null; created_at: string; orders_json: string }): TradePlan {
   return {
     name: row.name,
     symbol: row.symbol,
     status: row.status as "active" | "paused",
-    scope: "real", // default; stored in JSON previously but not in DB schema
+    scope: (row.scope as TradePlan["scope"]) || "real",
     created_at: row.created_at,
     orders: JSON.parse(row.orders_json),
   };
 }
 
+function ensureScopeColumn(db: ReturnType<typeof openTradingDb>) {
+  try {
+    db.prepare("SELECT scope FROM trade_plans LIMIT 1").get();
+  } catch {
+    try {
+      db.prepare("ALTER TABLE trade_plans ADD COLUMN scope TEXT NOT NULL DEFAULT 'real'").run();
+    } catch { /* ignore */ }
+  }
+}
+
+function migrateScopeFromJson(db: ReturnType<typeof openTradingDb>) {
+  try {
+    const hasNullScope = db.prepare("SELECT 1 FROM trade_plans WHERE scope IS NULL OR scope = '' LIMIT 1").get();
+    if (!hasNullScope) return;
+
+    const fs = require("fs");
+    const path = require("path");
+    const jsonPath = path.join(process.cwd(), "..", "src", "data", "trade_plans.json");
+    if (!fs.existsSync(jsonPath)) return;
+
+    const raw = JSON.parse(fs.readFileSync(jsonPath, "utf-8"));
+    const plans = raw?.plans || {};
+    for (const [id, plan] of Object.entries(plans)) {
+      const p = plan as { scope?: string };
+      if (p.scope) {
+        try {
+          db.prepare("UPDATE trade_plans SET scope = ? WHERE id = ? AND (scope IS NULL OR scope = '' OR scope = 'real')").run(p.scope, id);
+        } catch { /* ignore per-row errors */ }
+      }
+    }
+  } catch { /* ignore migration errors */ }
+}
+
 /* ── GET ── */
 
 export async function GET() {
-  const tdb = openTradingDb(true);
+  const tdb = openTradingDb();
   const cdb = openConfigDb(true);
   try {
+    ensureScopeColumn(tdb);
+    migrateScopeFromJson(tdb);
+
     // Read all trade plans
     const planRows = tdb
-      .prepare("SELECT id, name, symbol, status, created_at, orders_json FROM trade_plans")
+      .prepare("SELECT id, name, symbol, status, scope, created_at, orders_json FROM trade_plans")
       .all() as Array<{
       id: string;
       name: string;
       symbol: string;
       status: string;
+      scope: string | null;
       created_at: string;
       orders_json: string;
     }>;
@@ -164,13 +201,14 @@ export async function POST(request: Request) {
         }
 
         db.prepare(
-          `INSERT INTO trade_plans (id, name, symbol, status, created_at, orders_json)
-           VALUES (?, ?, ?, ?, ?, ?)`
+          `INSERT INTO trade_plans (id, name, symbol, status, scope, created_at, orders_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
         ).run(
           id,
           plan.name,
           plan.symbol,
           plan.status || "active",
+          scope,
           plan.created_at || new Date().toISOString().slice(0, 10),
           JSON.stringify(orders)
         );
@@ -181,8 +219,8 @@ export async function POST(request: Request) {
       /* ── update ── */
       case "update": {
         const { id, updates } = body as { id: string; updates: Partial<TradePlan> };
-        const row = db.prepare("SELECT id, name, symbol, status, created_at, orders_json FROM trade_plans WHERE id = ?").get(id) as
-          | { id: string; name: string; symbol: string; status: string; created_at: string; orders_json: string }
+        const row = db.prepare("SELECT id, name, symbol, status, scope, created_at, orders_json FROM trade_plans WHERE id = ?").get(id) as
+          | { id: string; name: string; symbol: string; status: string; scope: string | null; created_at: string; orders_json: string }
           | undefined;
         if (!row) {
           return NextResponse.json({ success: false, message: `Plan ${id} not found` }, { status: 400 });
@@ -209,9 +247,11 @@ export async function POST(request: Request) {
           newOrders = updates.orders;
         }
 
+        const newScope = updates.scope !== undefined ? updates.scope : plan.scope;
+
         db.prepare(
-          `UPDATE trade_plans SET name = ?, status = ?, orders_json = ?, updated_at = strftime('%s', 'now') WHERE id = ?`
-        ).run(newName, newStatus, JSON.stringify(newOrders), id);
+          `UPDATE trade_plans SET name = ?, status = ?, scope = ?, orders_json = ?, updated_at = strftime('%s', 'now') WHERE id = ?`
+        ).run(newName, newStatus, newScope, JSON.stringify(newOrders), id);
 
         return NextResponse.json({ success: true, message: `Updated plan ${id}` });
       }
