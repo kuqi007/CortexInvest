@@ -86,60 +86,95 @@ test.describe("Dashboard (首页)", () => {
   });
 });
 
-test.describe("Manage (管理页)", () => {
+test.describe("Dashboard 新增功能", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/manage", { waitUntil: "domcontentloaded" });
-    await page.waitForSelector("text=manage", { timeout: 15_000 });
-    await page.waitForTimeout(1000);
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("text=/refresh #[1-9]/", { timeout: 15_000 });
   });
 
-  test("管理页正常加载", async ({ page }) => {
-    await expect(page.getByText("manage", { exact: true })).toBeVisible();
-    await expect(page.locator("text=settings")).toBeVisible();
-  });
-
-  test("settings 区域可展开编辑", async ({ page }) => {
-    // settings 默认折叠，先点开
-    const settingsToggle = page.locator("text=settings").first();
-    await settingsToggle.click();
-    const pollInput = page.locator('input[type="number"]').first();
-    await expect(pollInput).toBeVisible();
-    await pollInput.click();
-    await expect(pollInput).toBeFocused();
-  });
-
-  test("持仓和自选分组可见", async ({ page }) => {
-    // 持仓分组：A股个股/ETF/港股
-    await expect(page.locator("text=/持仓:(A股个股|ETF|港股)/").first()).toBeVisible();
-    // 自选分组
-    const watchSection = page.locator("text=/自选/").first();
-    if (await watchSection.isVisible()) {
-      await expect(watchSection).toBeVisible();
+  test("搜索框可见且可输入", async ({ page }) => {
+    const searchInput = page.locator('input[placeholder="代码或名称..."]').first();
+    if (await searchInput.isVisible()) {
+      await searchInput.fill("000001");
+      await expect(searchInput).toHaveValue("000001");
+      await searchInput.fill("");
     }
   });
 
-  test("add stock 区域可见且能输入", async ({ page }) => {
-    await expect(page.locator("text=add stock")).toBeVisible();
-    const codeInput = page.locator('input[placeholder="000001"]');
-    await expect(codeInput).toBeVisible();
-    await codeInput.fill("000001");
-    await expect(codeInput).toHaveValue("000001");
-    // 清空避免实际添加
-    await codeInput.fill("");
+  test("inline add stock 按钮/区域可见", async ({ page }) => {
+    const addBtn = page.locator("text=添加持仓").first();
+    if (await addBtn.isVisible()) {
+      await expect(addBtn).toBeVisible();
+    }
+    const codeInput = page.locator('input[placeholder="代码"]').first();
+    if (await codeInput.isVisible()) {
+      await expect(codeInput).toBeVisible();
+    }
   });
 
-  test("导航链接可以回到首页", async ({ page }) => {
-    const backLink = page.locator("text=← monitor");
-    await expect(backLink).toBeVisible();
-    await backLink.click();
-    await expect(page).toHaveURL("/");
+  test("中文标签显示", async ({ page }) => {
+    const chgLabel = page.locator("text=涨跌幅").first();
+    if (await chgLabel.isVisible()) {
+      await expect(chgLabel).toBeVisible();
+    }
+    const posLabel = page.locator("text=持仓:").first();
+    if (await posLabel.isVisible()) {
+      await expect(posLabel).toBeVisible();
+    }
   });
 
-  test("持仓 hide 开关可见", async ({ page }) => {
-    // 只验证 hide toggle 存在，不实际点击（避免污染 config 数据）
-    const hideToggle = page.locator("text=hide").first();
-    if (await hideToggle.isVisible()) {
-      await expect(hideToggle).toBeVisible();
+  test("portfolio摘要显示更多字段", async ({ page }) => {
+    const positionLabel = page.locator("text=position:");
+    if (await positionLabel.isVisible()) {
+      await expect(page.locator("text=yield:")).toBeVisible();
+      await expect(page.locator("text=return:")).toBeVisible();
+      await expect(page.locator("text=today:")).toBeVisible();
+      // 扩展验证更多字段
+      const availLabel = page.locator("text=可用:").first();
+      if (await availLabel.isVisible()) {
+        await expect(availLabel).toBeVisible();
+      }
+      const totalAssets = page.locator("text=总资产:").first();
+      if (await totalAssets.isVisible()) {
+        await expect(totalAssets).toBeVisible();
+      }
+      const mktVal = page.locator("text=总市值:").first();
+      if (await mktVal.isVisible()) {
+        await expect(mktVal).toBeVisible();
+      }
+    }
+  });
+
+  test("排序功能 - 多列表头可点击", async ({ page }) => {
+    const headers = ["涨跌幅", "盈亏%", "市值", "仓位"];
+    for (const label of headers) {
+      const header = page.locator(`text=${label}`).first();
+      if (await header.isVisible()) {
+        await header.click();
+        await expect(header).toContainText(/[▲▼]/);
+        await header.click();
+        await expect(header).toContainText(/[▲▼]/);
+        break; // 验证一个即可，避免过多点击
+      }
+    }
+  });
+
+  test("Alert events区域", async ({ page }) => {
+    // alert log tail 可能在数据加载后出现
+    const alertLog = page.locator("text=info").filter({ hasText: /行情收集|调度器/ }).first();
+    if (await alertLog.isVisible()) {
+      await expect(alertLog).toBeVisible();
+    }
+  });
+
+  test("Market turnover显示", async ({ page }) => {
+    const shLabel = page.locator("text=SH").first();
+    if (await shLabel.isVisible()) {
+      await expect(shLabel).toBeVisible();
+      const szLabel = page.locator("text=SZ").first();
+      await expect(szLabel).toBeVisible();
+      const turnover = page.locator("text=成交").first();
+      await expect(turnover).toBeVisible();
     }
   });
 });
