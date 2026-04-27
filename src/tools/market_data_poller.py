@@ -892,13 +892,8 @@ def main():
                 continue
 
             poll_once()
-            # Force checkpoint after write so OneDrive can sync the updated file
-            try:
-                chk_conn = get_connection()
-                chk_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                chk_conn.close()
-            except Exception:
-                pass
+            # DELETE mode 不需要 checkpoint，SQLite 自动落盘
+            # 如果需要更安全的落盘，可以加 PRAGMA synchronous=FULL
     except KeyboardInterrupt:
         print("\nPoller 已停止")
 
