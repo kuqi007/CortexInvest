@@ -80,6 +80,10 @@ COOLDOWN_SEC = 300  # 同一订单触发后冷却 5 分钟
 BACKOFF_AFTER_FAIL = 30  # 连续失败后的退避间隔
 MAX_CONSECUTIVE_FAIL = 3  # 超过此次连续失败后进入退避
 
+# 飞书防刷屏：同一 symbol 30 分钟内只推一次，每天全局最多 20 条
+FEISHU_SYMBOL_COOLDOWN_SEC = 1800
+FEISHU_DAILY_MAX = 20
+
 
 # ══════════════════════════════════════════
 # Futu OpenD 连接管理
@@ -230,10 +234,13 @@ def load_state() -> dict[str, float]:
 def save_state(cooldowns: dict[str, float]) -> None:
     """原子写入冷却状态"""
     try:
+        # 确保目录存在
+        STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
         tmp = STATE_PATH.with_suffix(".tmp")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(cooldowns, f, ensure_ascii=False, indent=2)
         os.replace(tmp, STATE_PATH)
+        logger.debug(f"State saved: {len(cooldowns)} entries")
     except Exception as e:
         logger.warning(f"Failed to save tick_monitor_state.json: {e}")
 
@@ -268,13 +275,50 @@ def check_trigger(order: dict, tick_price: float) -> bool:
 # ══════════════════════════════════════════
 
 
+# 全局飞书每日计数和 symbol 冷却
+_feishu_symbol_cooldown: dict[str, float] = {}
+_feishu_daily_count = 0
+_feishu_daily_date = datetime.now().strftime("%Y-%m-%d")
+
+
+def _check_feishu_cooldown(symbol: str) -> bool:
+    """检查 symbol 是否可以通过飞书冷却。返回 True = 可以发送。"""
+    global _feishu_daily_count, _feishu_daily_date
+
+    # 每日重置
+    today = datetime.now().strftime("%Y-%m-%d")
+    if today != _feishu_daily_date:
+        _feishu_daily_date = today
+        _feishu_daily_count = 0
+        _feishu_symbol_cooldown.clear()
+
+    # 全局上限
+    if _feishu_daily_count >= FEISHU_DAILY_MAX:
+        return False
+
+    # symbol 冷却
+    now = time.time()
+    last = _feishu_symbol_cooldown.get(symbol, 0)
+    if now - last < FEISHU_SYMBOL_COOLDOWN_SEC:
+        return False
+
+    _feishu_symbol_cooldown[symbol] = now
+    _feishu_daily_count += 1
+    return True
+
+
 def send_tick_notification(
     plan_name: str,
     symbol: str,
     order: dict,
     tick: dict,
 ) -> bool:
-    """发送飞书逐笔触发通知"""
+    """发送飞书逐笔触发通知（带防刷屏冷却）"""
+    # 飞书冷却检查
+    if not _check_feishu_cooldown(symbol):
+        logger.info(f"Feishu cooldown for {symbol}, skip notification")
+        return True  # 返回 True 表示已处理（不重复触发）
+
     side = order.get("side", "buy")
     op = order.get("op", "<=")
     trigger_price = order.get("price", 0)
