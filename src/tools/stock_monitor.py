@@ -1072,18 +1072,15 @@ def notify(
         stock_info: 结构化股票信息，飞书卡片使用
     """
     # ── 飞书通知（先发，不阻塞 macOS 通知） ──
-    # 过滤策略：只推最关键的两类 alert，其余静默减少手机噪音
-    #   1. panic_sell — 极端恐慌放量下跌，必须关注
-    #   2. threshold — 用户手动设置的关注价触碰
-    # trade_plan / price_alert / L2_signals / drift 等只在 macOS + web 显示
+    # 过滤策略：只推需要立即操作的交易计划（买入/卖出/止盈/止损触发）
+    # 其余 alert（panic_sell、threshold、price_alert、L2_signal、drift 等）
+    # 只在 macOS + web 显示，不推飞书减少手机噪音
     should_feishu = False
-    if stock_info:
-        kind = stock_info.get("_kind")
-        if kind in ("panic_sell", "threshold"):
-            should_feishu = True
+    if stock_info and stock_info.get("_kind") == "trade_plan":
+        should_feishu = True
     # 无 stock_info（CLI 看板 alerts / 系统消息）→ 不推飞书
 
-    # 同一 symbol 30 分钟内只推一次飞书（避免波动市中反复刷屏）
+    # 同一 symbol 30 分钟内只推一次飞书（避免价格反复触碰条件时刷屏）
     if should_feishu:
         symbol = (stock_info or {}).get("code", "")
         if symbol:
