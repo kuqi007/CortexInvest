@@ -2801,8 +2801,8 @@ class PanicSellEngine(PatternEngine):
                 continue
 
             # 个股 AMO 和涨跌幅
-            # quotes 中的数据来自 market_data.json.services，每个 service 有 amo1
-            # 但 merge_data 构建 quotes 时可能没有带 amo1
+            # quotes 中的数据来自 price_snapshots 表，每个 service 有 amo1
+            # merge_data 已从 price_snapshots 读取完整字段
             amo1 = q.get("amo1")
             if amo1 is None:
                 # fallback：从 price_snapshots 直接读

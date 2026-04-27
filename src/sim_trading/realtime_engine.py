@@ -448,26 +448,36 @@ class RealtimeSimEngine:
         return False
 
     def _read_market_prices(self) -> dict[str, dict]:
-        """Read live prices from market_data.json."""
-        try:
-            with open(MARKET_DATA_PATH, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            return {}
+        """Read live prices from price_snapshots DB table."""
+        from .db import get_connection
 
         result = {}
-        for svc in data.get("services", []):
-            code = svc.get("id", "")
-            price = float(svc.get("price", 0) or 0)
-            if code and price > 0:
-                result[code] = {
-                    "price": price,
-                    "amount": float(svc.get("amount", 0) or 0),
-                    "change": float(svc.get("change", 0) or 0),
-                    "open": float(svc.get("open", 0) or 0),
-                    "prevClose": float(svc.get("prevClose", 0) or 0),
-                    "name": svc.get("name", ""),
-                }
+        conn = None
+        try:
+            conn = get_connection()
+            rows = conn.execute(
+                """SELECT code, name, price, change_pct, amount, open, prev_close
+                   FROM price_snapshots
+                   WHERE (code, ts) IN (
+                       SELECT code, MAX(ts) FROM price_snapshots GROUP BY code
+                   )"""
+            ).fetchall()
+            conn.close()
+            for row in rows:
+                code = row["code"]
+                price = float(row["price"] or 0)
+                if code and price > 0:
+                    result[code] = {
+                        "price": price,
+                        "amount": float(row["amount"] or 0),
+                        "change": float(row["change_pct"] or 0),
+                        "open": float(row["open"] or 0),
+                        "prevClose": float(row["prev_close"] or 0),
+                        "name": row["name"] or "",
+                    }
+        except Exception:
+            if conn:
+                conn.close()
         return result
 
     def _estimate_atr(self, code: str, date: str) -> float:

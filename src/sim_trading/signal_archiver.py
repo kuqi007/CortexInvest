@@ -2,7 +2,7 @@
 
 与 l2_strategy_daemon 共生运行:
 - 每 5s 检查 l2_strategy_signals.json，归档新信号
-- 每 30s 从 market_data.json 采样价格快照
+- 每 30s 从 price_snapshots DB 采样价格快照（而非直接读 market_data.json）
 - 水位标记避免重复归档
 
 可独立运行: poetry run python src/sim_trading/signal_archiver.py
@@ -181,32 +181,40 @@ class SignalArchiver:
         return archived
 
     def sample_prices(self) -> int:
-        """采样当前价格快照。返回采样数量。"""
+        """Sample current HK stock prices from price_snapshots DB. Returns sample count."""
         now = time.time()
         if now - self._last_price_sample < PRICE_SAMPLE_SEC:
             return 0
 
         self._last_price_sample = now
-
-        market_data = _read_json(MARKET_DATA_PATH)
-        if not market_data:
-            return 0
-
-        services = market_data.get("services", [])
-        if not services:
-            return 0
-
         ts = int(now * 1000)
         today = datetime.now().strftime("%Y-%m-%d")
 
-        conn = get_connection()
-        sampled = 0
-        for svc in services:
-            code = svc.get("id", "")
-            if not code.startswith("HK"):
-                continue  # 只归档 HK 持仓
+        conn = None
+        try:
+            conn = get_connection()
+            rows = conn.execute(
+                """SELECT code, name, price, volume, amount, change_pct
+                   FROM price_snapshots
+                   WHERE (code, ts) IN (
+                       SELECT code, MAX(ts) FROM price_snapshots GROUP BY code
+                   )
+                   AND code LIKE 'HK%'"""
+            ).fetchall()
+            conn.close()
+        except Exception:
+            if conn:
+                conn.close()
+            return 0
 
-            price = float(svc.get("price", 0) or 0)
+        if not rows:
+            return 0
+
+        conn = get_connection()
+        saved = 0
+        for row in rows:
+            code = row["code"]
+            price = float(row["price"] or 0)
             if price <= 0:
                 continue
 
@@ -220,19 +228,22 @@ class SignalArchiver:
                         today,
                         code,
                         price,
-                        float(svc.get("volume", 0) or 0),
-                        float(svc.get("amount", 0) or 0),
-                        float(svc.get("change", 0) or 0),
+                        float(row["volume"] or 0),
+                        float(row["amount"] or 0),
+                        float(row["change_pct"] or 0),
                     ),
                 )
-                sampled += 1
+                saved += 1
             except Exception as e:
                 logger.debug(f"Price sample error: {e}")
 
         conn.commit()
         conn.close()
 
-        return sampled
+        if saved > 0:
+            logger.info(f"Sampled {saved} HK prices from DB")
+
+        return saved
 
     def snapshot_session(self) -> int:
         """归档 session 上下文（资金流、盘口状态）到 SQLite。返回归档数量。

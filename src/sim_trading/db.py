@@ -2,7 +2,7 @@
 
 Split from single sim_trading.db into:
 - config.db: monitor config tables (DELETE mode for OneDrive sync)
-- trading.db: all operational data (WAL mode for performance)
+- trading.db: all operational data (DELETE mode for OneDrive sync)
 """
 
 import sqlite3
@@ -419,11 +419,16 @@ def get_config_connection() -> sqlite3.Connection:
 
 
 def get_connection() -> sqlite3.Connection:
-    """Trading DB — WAL mode for performance. (existing API, now points to trading.db)"""
+    """Trading DB — DELETE mode for OneDrive cross-machine sync.
+
+    使用 DELETE 模式替代 WAL：跨机器文件同步场景下，WAL 模式存在中间状态风险。
+    DELETE 模式每次写入是完整文件替换，不会有部分写入的中间状态。
+    see: https://www.sqlite.org/draft/wal.html#avoiding_cross_machine_synchronization_problems
+    """
     path = _db_path_override if _db_path_override is not None else str(TRADING_DB_PATH)
     use_uri = path.startswith("file:")
     conn = sqlite3.connect(path, timeout=10, uri=use_uri, isolation_level=None)
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA journal_mode=DELETE")
     conn.execute("PRAGMA busy_timeout=5000")
     conn.row_factory = sqlite3.Row
     return conn

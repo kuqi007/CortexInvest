@@ -892,7 +892,7 @@ def main():
                 continue
 
             poll_once()
-            # Checkpoint trading.db WAL so OneDrive can sync
+            # Force checkpoint after write so OneDrive can sync the updated file
             try:
                 chk_conn = get_connection()
                 chk_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")

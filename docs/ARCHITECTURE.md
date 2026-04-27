@@ -9,20 +9,21 @@
 └─────────────────────────┬───────────────────────────────────┘
                           │ /api/metrics, /api/config, etc.
 ┌─────────────────────────▼───────────────────────────────────┐
-│              market_data.json + sim_trading.db               │
+│         trading.db:price_snapshots + config.db              │
 │                 (Poller 写入, Web 只读)                      │
 └─────────────────────────┬───────────────────────────────────┘
                           │
 ┌─────────────────────────▼───────────────────────────────────┐
-│                   Poller (market_data_poller.py)             │
-│         东方财富 API → market_data.json (30s 轮询)           │
-│         汇率 hkdCnyRate → market_data.json                  │
+│                   Poller (market_data_poller.py)           │
+│    东方财富 API → trading.db:price_snapshots (30s 轮询)     │
+│    汇率 hkdCnyRate → trading.db:market_turnover            │
+│    market_data.json 仅作为 DB crash 后的 recovery log       │
 └─────────────────────────────────────────────────────────────┘
                           │
 ┌─────────────────────────▼───────────────────────────────────┐
 │              Notifier (stock_notifier.py)                   │
-│         market_data.json → DeltaAlertEngine → 弹窗/SQLite   │
-│         market_data.json → TradePlanEngine → 条件单触发      │
+│  trading.db:price_snapshots → DeltaAlertEngine → 弹窗/SQLite │
+│  trading.db:price_snapshots → TradePlanEngine → 条件单触发   │
 └─────────────────────────────────────────────────────────────┘
                           │
 ┌─────────────────────────▼───────────────────────────────────┐
@@ -36,9 +37,10 @@
 
 ### 1. Poller 是生产者，UI 是消费者
 
-- Poller (`src/tools/market_data_poller.py`) 只写 `market_data.json`
+- Poller (`src/tools/market_data_poller.py`) 只写 `trading.db:price_snapshots`
 - Web 通过 `/api/metrics` 读取，不直接获取市场数据
 - 所有市场数据必须在 Python poller 中获取，Next.js API 路由绝不直接获取市场数据
+- `market_data.json` 仅在 DB 写入成功后作为 recovery log（标记 `_recovery: true`），不是实时数据源
 
 ### 2. 告警计算单一数据源
 
@@ -69,11 +71,13 @@
 ## 数据流
 
 ```
-market_data.json ─────────────────────────────────────────────────→ /api/metrics ──→ Web UI
+trading.db:price_snapshots ──────────────────────────────→ /api/metrics ──→ Web UI
      ↑                                                              ↑
-monitor_config.json ← → monitor_watchlist (DB)      alert_events (DB) ← DeltaAlertEngine
+market_data.json (recovery only)    alert_events (DB) ← DeltaAlertEngine
+     ↑                                                              ↑
+monitor_config.json ← → monitor_watchlist (DB)      stock_notifier.py
      ↑                            ↑                                  ↑
-/api/config (Web)        /api/config (Web)              stock_notifier.py
+/api/config (Web)        /api/config (Web)
 ```
 
 ## Config 数据职责分离

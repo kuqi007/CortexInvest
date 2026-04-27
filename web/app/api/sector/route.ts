@@ -532,7 +532,7 @@ export async function GET(request: NextRequest) {
 
       const baseline = tag.baseline_value || 100;
 
-      // Live intraday value from market_data.json
+      // Live intraday value from price_snapshots (trading.db)
       const liveChange = computeLiveChange(stockCodes, liveChangeMap);
       const todayVal = liveChange != null ? round(liveChange, 2) : 0;
 

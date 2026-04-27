@@ -4,7 +4,7 @@
 
 | 组件 | 进程 | 用途 |
 |------|------|------|
-| Poller | `market_data_poller.py` | 采集行情数据，写入 `market_data.json` |
+| Poller | `market_data_poller.py` | 采集行情数据，写入 `trading.db:price_snapshots` |
 | Notifier | `stock_notifier.py` | 告警计算 + 弹窗 |
 | L2 Daemon | `l2_strategy_daemon.py` | 模拟交易信号（Futu OpenD） |
 
@@ -14,7 +14,8 @@
 
 - **数据源**: 东方财富 API（优先）+ 新浪财经（降级）
 - **轮询间隔**: 30s（可配置）
-- **写入**: `market_data.json`（个股行情 + marketTurnover + hkdCnyRate）
+- **写入**: `trading.db:price_snapshots`（个股行情）+ `trading.db:market_turnover`（大盘成交额）
+- **JSON Recovery Log**: DB 写入成功后可选写入 `market_data.json`（标记 `_recovery: true`），仅用于 DB crash 恢复
 - **降级**: 东方财富不可用时 fallback 到新浪，价格刷新但无量比/换手率
 
 ### 降级保护
@@ -29,10 +30,10 @@
 
 **Data flow**:
 ```
-market_data.json + monitor_config.json + alert_config.json
+trading.db:price_snapshots + monitor_config.json + alert_config.json
   → DeltaAlertEngine + TradePlanEngine
   → stealth_dispatch → terminal-notifier
-  → sim_trading.db:alert_events
+  → trading.db:alert_events
   → web
 ```
 
