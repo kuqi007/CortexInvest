@@ -76,6 +76,9 @@ FEISHU_USER_OPEN_ID = os.environ.get("FEISHU_USER_OPEN_ID", "")
 _feishu_access_token: str | None = None
 _feishu_token_expires_at: float = 0
 
+# 飞书按 symbol 冷却：同一股票 30 分钟内只推一次飞书（避免波动市刷屏）
+_feishu_symbol_cooldown: dict[str, float] = {}
+
 
 # ══════════════════════════════════════════
 # 1. 配置管理
@@ -1068,17 +1071,28 @@ def notify(
         is_portfolio: 是否为组合持仓消息（暂未用于飞书）
         stock_info: 结构化股票信息，飞书卡片使用
     """
-    # 飞书通知（先发，不阻塞 macOS 通知）
-    # 过滤：只推 L1 和关键 L2（panic_sell / threshold），其余静默减少噪音
+    # ── 飞书通知（先发，不阻塞 macOS 通知） ──
+    # 过滤策略：只推最关键的两类 alert，其余静默减少手机噪音
+    #   1. panic_sell — 极端恐慌放量下跌，必须关注
+    #   2. threshold — 用户手动设置的关注价触碰
+    # trade_plan / price_alert / L2_signals / drift 等只在 macOS + web 显示
     should_feishu = False
     if stock_info:
-        lvl = stock_info.get("level")
         kind = stock_info.get("_kind")
-        if lvl == 1:
+        if kind in ("panic_sell", "threshold"):
             should_feishu = True
-        elif lvl == 2 and kind in ("panic_sell", "threshold"):
-            should_feishu = True
-    # 无 stock_info（CLI 看板 alerts）→ 不推飞书
+    # 无 stock_info（CLI 看板 alerts / 系统消息）→ 不推飞书
+
+    # 同一 symbol 30 分钟内只推一次飞书（避免波动市中反复刷屏）
+    if should_feishu:
+        symbol = (stock_info or {}).get("code", "")
+        if symbol:
+            now_ts = time.time()
+            last_ts = _feishu_symbol_cooldown.get(symbol, 0)
+            if now_ts - last_ts < 1800:  # 30min
+                should_feishu = False
+            else:
+                _feishu_symbol_cooldown[symbol] = now_ts
 
     if should_feishu:
         try:
