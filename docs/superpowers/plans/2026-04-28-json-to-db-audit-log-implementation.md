@@ -74,7 +74,7 @@ This is an umbrella plan for seven reviewable PRs. Each PR must remain deployabl
   - Stop runtime JSON fallback for market/config reads.
   - Preserve `DeltaAlertEngine` authority.
 - Modify: `src/tools/tick_monitor.py`
-  - Move `tick_monitor_state.json` runtime state to DB.
+  - Remove `tick_monitor_state.json` persistence; use in-memory `_order_cooldown: dict[str, float]` for per-order 60s cooldown; write signals to `trading.db:tick_monitor_events`.
 - Modify: `src/tools/l2_strategy_engine.py`, `src/tools/l2_strategy_daemon.py`
   - Move L2 config/signals runtime reads/writes to DB tables.
 - Modify: `src/tools/trading_calendar.py`, `src/tools/news_crawler.py`, `src/tools/daily_summary_generator.py`
@@ -430,15 +430,15 @@ Expected: non-zero exit.
 
 ### Task 3.1: Remove config JSON fallback
 
-- **Step 1: Add tests deleting config JSON**
+- [x] **Step 1: Add tests deleting config JSON**
 
 Extend existing config/poller tests so `monitor_config.json` is absent and `read_monitor_config()` still returns DB rows.
 
-- **Step 2: Change `read_monitor_config()`**
+- [x] **Step 2: Change `read_monitor_config()`**
 
 Read from `config.db` only. If DB is unavailable, raise an explicit error. Do not read `monitor_config.json`.
 
-- **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run: `uv run pytest src/sim_trading/test_market_data_poller.py -q`
 
@@ -446,21 +446,21 @@ Expected: PASS.
 
 ### Task 3.2: Replace market-data mtime lock with DB lease
 
-- **Step 1: Add lease tests**
+- [x] **Step 1: Add lease tests**
 
 Test that lease acquisition increments `generation`, respects `lease_until_ms`, and does not trust PID.
 
-- **Step 2: Update poller heartbeat**
+- [x] **Step 2: Update poller heartbeat**
 
 In `src/tools/market_data_poller.py`, renew `poller_leader_lease` every poller cycle with `BEGIN IMMEDIATE`.
 
-- **Step 3: Update `monitor_lock.py`**
+- [x] **Step 3: Update `monitor_lock.py`**
 
 Read `poller_leader_lease` instead of `market_data.json` mtime.
 
 ### Task 3.3: Batch 1 evidence
 
-- **Step 1: Run reader inventory**
+- [x] **Step 1: Run reader inventory**
 
 Run:
 
@@ -470,7 +470,7 @@ rg "monitor_config\\.json|market_data\\.json" src web start_ai_investor_full.sh
 
 Expected: no runtime reads outside migration/test/docs.
 
-- **Step 2: Delete/rename old JSON locally and smoke**
+- [x] **Step 2: Delete/rename old JSON locally and smoke**
 
 Run:
 
