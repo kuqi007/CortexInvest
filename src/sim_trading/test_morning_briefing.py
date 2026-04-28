@@ -2,12 +2,9 @@
 """
 Tests for daily_summary_generator morning briefing functionality.
 """
-import json
-import os
-import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
@@ -26,91 +23,134 @@ class TestMorningBriefing:
         data_dir = tmp_path / "data"
         data_dir.mkdir()
 
-        # Create empty market_data.json
-        (data_dir / "market_data.json").write_text('{"services": []}')
-
         # Create empty monitor_config.json
         (data_dir / "monitor_config.json").write_text('{"holdings": {}, "watching": {}}')
 
         # Create empty alert_config.json
         (data_dir / "alert_config.json").write_text('{"alerts": {}}')
 
-        # Patch DATA_DIR
+        # Patch TRADING_DB_PATH to a temp DB
         import src.tools.daily_summary_generator as dsg
-        monkeypatch.setattr(dsg, 'DATA_DIR', data_dir)
-        monkeypatch.setattr(dsg, 'MORNING_BRIEFING_PATH', data_dir / "morning_briefing.json")
+        monkeypatch.setattr(dsg, 'TRADING_DB_PATH', str(tmp_path / "trading.db"))
+
+        # Init the morning_briefings table
+        import sqlite3
+        conn = sqlite3.connect(str(tmp_path / "trading.db"))
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS morning_briefings (
+                date TEXT PRIMARY KEY,
+                generated_at TEXT,
+                content_json TEXT
+            )
+        """)
+        conn.commit()
+        conn.close()
 
         return data_dir
 
     def test_generate_morning_briefing_creates_file(self, mock_data_dir):
-        """Test that generate_morning_briefing creates the file."""
+        """Test that generate_morning_briefing creates the briefing."""
         from src.tools.daily_summary_generator import generate_morning_briefing
 
-        with patch('src.tools.daily_summary_generator._call_eastmoney_api') as mock_api:
-            mock_api.return_value = {}
-            generate_morning_briefing()
+        mock_news = {
+            "data": {
+                "data": {
+                    "llmSearchResponse": {"data": []}
+                }
+            }
+        }
+        with patch('src.tools.daily_summary_generator._call_news_search_api') as mock_api:
+            mock_api.return_value = mock_news
+            result = generate_morning_briefing()
 
-        morning_file = mock_data_dir / "morning_briefing.json"
-        assert morning_file.exists()
-
-        data = json.loads(morning_file.read_text())
-        assert "generated_at" in data
-        assert "us_markets" in data
-        assert "asia_markets" in data
-        assert "global_news" in data
+        assert result is not None
+        assert "generated_at" in result
+        assert "us_markets" in result
+        assert "asia_markets" in result
+        assert "global_news" in result
 
     def test_generate_morning_briefing_includes_us_markets(self, mock_data_dir):
         """Test that morning briefing includes US market data."""
         from src.tools.daily_summary_generator import generate_morning_briefing
 
-        with patch('src.tools.daily_summary_generator._call_eastmoney_api') as mock_api:
-            mock_api.return_value = {}
-            generate_morning_briefing()
+        mock_news = {
+            "data": {
+                "data": {
+                    "llmSearchResponse": {
+                        "data": [
+                            {
+                                "title": "隔夜美股",
+                                "content": "道琼斯涨0.85%，纳斯达克跌0.12%，标普500涨0.65%",
+                            }
+                        ]
+                    }
+                }
+            }
+        }
 
-        morning_file = mock_data_dir / "morning_briefing.json"
-        data = json.loads(morning_file.read_text())
+        with patch('src.tools.daily_summary_generator._call_news_search_api') as mock_api:
+            mock_api.return_value = mock_news
+            result = generate_morning_briefing()
 
-        assert "us_markets" in data
-        # US markets should have at least some data
-        us_markets = data["us_markets"]
+        assert result is not None
+        assert "us_markets" in result
+        us_markets = result["us_markets"]
         assert len(us_markets) > 0
+        assert "dow" in us_markets
 
     def test_generate_morning_briefing_includes_asia_markets(self, mock_data_dir):
-        """Test that morning briefing includes Asia market data (uses real API)."""
+        """Test that morning briefing includes Asia market data."""
         from src.tools.daily_summary_generator import generate_morning_briefing
 
-        # This test uses real API since Asia markets use different endpoint
-        generate_morning_briefing()
+        mock_news = {
+            "data": {
+                "data": {
+                    "llmSearchResponse": {"data": []}
+                }
+            }
+        }
+        with patch('src.tools.daily_summary_generator._call_news_search_api') as mock_api:
+            mock_api.return_value = mock_news
+            result = generate_morning_briefing()
 
-        morning_file = mock_data_dir / "morning_briefing.json"
-        data = json.loads(morning_file.read_text())
-        assert "asia_markets" in data
+        assert result is not None
+        assert "asia_markets" in result
 
     def test_generate_morning_briefing_includes_global_news(self, mock_data_dir):
-        """Test that morning briefing includes global news (uses real API)."""
+        """Test that morning briefing includes global news."""
         from src.tools.daily_summary_generator import generate_morning_briefing
 
-        # This test uses real API since mock doesn't work for news search
-        # The important thing is that the function runs without error
-        generate_morning_briefing()
+        mock_news = {
+            "data": {
+                "data": {
+                    "llmSearchResponse": {"data": []}
+                }
+            }
+        }
+        with patch('src.tools.daily_summary_generator._call_news_search_api') as mock_api:
+            mock_api.return_value = mock_news
+            result = generate_morning_briefing()
 
-        morning_file = mock_data_dir / "morning_briefing.json"
-        assert morning_file.exists()
-        data = json.loads(morning_file.read_text())
-        assert "global_news" in data
+        assert result is not None
+        assert "global_news" in result
 
     def test_morning_briefing_date_format(self, mock_data_dir):
         """Test that generated_at follows ISO format."""
         from src.tools.daily_summary_generator import generate_morning_briefing
 
-        with patch('src.tools.daily_summary_generator._call_eastmoney_api') as mock_api:
-            mock_api.return_value = {}
-            generate_morning_briefing()
+        mock_news = {
+            "data": {
+                "data": {
+                    "llmSearchResponse": {"data": []}
+                }
+            }
+        }
+        with patch('src.tools.daily_summary_generator._call_news_search_api') as mock_api:
+            mock_api.return_value = mock_news
+            result = generate_morning_briefing()
 
-        morning_file = mock_data_dir / "morning_briefing.json"
-        data = json.loads(morning_file.read_text())
-
-        generated_at = data["generated_at"]
+        assert result is not None
+        generated_at = result["generated_at"]
         # Should be ISO format: YYYY-MM-DDTHH:MM:SS.microseconds
         assert "T" in generated_at
         date_part = generated_at.split("T")[0]

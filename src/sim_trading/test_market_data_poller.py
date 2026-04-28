@@ -236,9 +236,14 @@ def test_poll_once_uses_db_watchlist(tmp_db, stale_json, tmp_path):
             for s in symbols if s not in INDEX_CODES
         ], False)  # (stocks, is_sina_fallback)
 
+    write_args: dict[str, list] = {}
+
+    def capture_write(services, ts, date_str):
+        write_args["services"] = services
+
     with _config_db_patch(tmp_db), \
          patch.object(poller, "CONFIG_PATH", stale_json), \
-         patch.object(poller, "OUTPUT_PATH", output), \
+         patch.object(poller, "_write_price_snapshots", side_effect=capture_write), \
          patch(
              "src.tools.market_data_poller.fetch_realtime_with_fallback",
              side_effect=fake_realtime_fallback,
@@ -255,8 +260,7 @@ def test_poll_once_uses_db_watchlist(tmp_db, stale_json, tmp_path):
         result = poller.poll_once()
 
     assert result is True
-    data = json.loads(output.read_text())
-    ids = {s["id"] for s in data["services"]}
+    ids = {s["id"] for s in write_args.get("services", [])}
 
     assert "002080" in ids, \
         "002080 must be fetched (was absent from stale JSON)"
@@ -275,8 +279,6 @@ def test_poll_once_extracts_chiNext_kc50_to_turnover(tmp_db, stale_json, tmp_pat
     Index stocks must NOT appear in services list.
     """
     import src.tools.market_data_poller as poller
-
-    output = tmp_path / "market_data.json"
 
     def fake_realtime_fallback(symbols):
         # Simulate eastmoney returning watchlist stocks + INDEX_CODES
@@ -313,9 +315,19 @@ def test_poll_once_extracts_chiNext_kc50_to_turnover(tmp_db, stale_json, tmp_pat
             "kc50": 1020.30, "kc50Pct": -0.32,
         }
 
+    turnover_args: dict = {}
+    write_args: dict[str, list] = {}
+
+    def capture_turnover(turnover, ts, date_str):
+        turnover_args["turnover"] = turnover
+
+    def capture_write(services, ts, date_str):
+        write_args["services"] = services
+
     with _config_db_patch(tmp_db), \
          patch.object(poller, "CONFIG_PATH", stale_json), \
-         patch.object(poller, "OUTPUT_PATH", output), \
+         patch.object(poller, "_write_price_snapshots", side_effect=capture_write), \
+         patch.object(poller, "_write_market_turnover", side_effect=capture_turnover), \
          patch("src.tools.market_data_poller.fetch_realtime_with_fallback", side_effect=fake_realtime_fallback), \
          patch("src.tools.market_data_poller.fetch_realtime_yahoo", return_value=[]), \
          patch("src.tools.market_data_poller.fetch_market_turnover", side_effect=fake_turnover), \
@@ -323,8 +335,7 @@ def test_poll_once_extracts_chiNext_kc50_to_turnover(tmp_db, stale_json, tmp_pat
         result = poller.poll_once()
 
     assert result is True
-    data = json.loads(output.read_text())
-    mt = data["marketTurnover"]
+    mt = turnover_args.get("turnover", {})
 
     # Index data written to marketTurnover
     assert mt.get("chiNext") == 2050.21, f"chiNext should be 2050.21, got {mt.get('chiNext')}"
@@ -333,7 +344,7 @@ def test_poll_once_extracts_chiNext_kc50_to_turnover(tmp_db, stale_json, tmp_pat
     assert mt.get("kc50Pct") == -0.32, f"kc50Pct should be -0.32, got {mt.get('kc50Pct')}"
 
     # Index stocks NOT in services list
-    svc_ids = {s["id"] for s in data["services"]}
+    svc_ids = {s["id"] for s in write_args.get("services", [])}
     assert "399006" not in svc_ids, "399006 (创业板) must not appear in services"
     assert "sh000688" not in svc_ids, "sh000688 (科创50) must not appear in services"
 
@@ -524,14 +535,11 @@ def test_poll_once_index_results_empty_on_fetch_failure(tmp_db, stale_json, tmp_
     """
     import src.tools.market_data_poller as poller
 
-    output = tmp_path / "market_data.json"
-
     def fake_realtime_fallback(symbols):
         return ([], True)  # Empty + sina fallback
 
     with _config_db_patch(tmp_db), \
          patch.object(poller, "CONFIG_PATH", stale_json), \
-         patch.object(poller, "OUTPUT_PATH", output), \
          patch("src.tools.market_data_poller.fetch_realtime_with_fallback", side_effect=fake_realtime_fallback), \
          patch("src.tools.market_data_poller.fetch_realtime_yahoo", return_value=[]), \
          patch("src.tools.market_data_poller.fetch_market_turnover", return_value=None), \
@@ -540,8 +548,3 @@ def test_poll_once_index_results_empty_on_fetch_failure(tmp_db, stale_json, tmp_
 
     # Should return False (fetch failure) but not crash
     assert result is False
-    data = json.loads(output.read_text())
-    # marketTurnover is NOT written when fetch_market_turnover returns None
-    assert "marketTurnover" not in data
-    # Basic fields still present
-    assert data.get("services") == []

@@ -65,7 +65,9 @@ CREATE TABLE IF NOT EXISTS position_change_log (
     shares_from INTEGER,
     shares_to INTEGER,
     cost_from REAL,
-    cost_to REAL
+    cost_to REAL,
+    type_from TEXT,
+    type_to TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_pcl_symbol ON position_change_log(symbol);
 CREATE INDEX IF NOT EXISTS idx_pcl_ts ON position_change_log(ts);
@@ -466,6 +468,21 @@ def init_config_db():
     if "parent" not in tag_meta_cols:
         try:
             conn.execute("ALTER TABLE tag_meta ADD COLUMN parent TEXT")
+        except sqlite3.OperationalError:
+            pass
+    # Migration: add type_from/type_to to position_change_log (feat: type change tracking)
+    pcl_cols = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(position_change_log)").fetchall()
+    }
+    if "type_from" not in pcl_cols:
+        try:
+            conn.execute("ALTER TABLE position_change_log ADD COLUMN type_from TEXT")
+        except sqlite3.OperationalError:
+            pass
+    if "type_to" not in pcl_cols:
+        try:
+            conn.execute("ALTER TABLE position_change_log ADD COLUMN type_to TEXT")
         except sqlite3.OperationalError:
             pass
     conn.commit()
