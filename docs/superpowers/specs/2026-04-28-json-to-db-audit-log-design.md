@@ -64,7 +64,8 @@
 | ----------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------- |
 | 实时行情                    | `price_snapshots`、`market_turnover`                         | 已存在，替代 `market_data.json`                                        |
 | 交易计划                    | `trade_plans`、`trade_plan_events`                           | 纳入集中 schema，替代 `trade_plans.json`                                |
-| Tick Monitor 事件         | `tick_monitor_events`                                       | 已在 `tick_monitor.py` 定义，纳入 schema 初始化；冷却状态为内存 dict，不持久化 |
+| Tick Monitor 状态         | `tick_monitor_state`                                        | 新增，用于替代 `tick_monitor_state.json` 冷却状态                           |
+| Tick Monitor 事件         | `tick_monitor_events`                                       | 已在 `tick_monitor.py` 定义，纳入 schema 初始化                            |
 | L2 信号                   | `signals`、`session_snapshots`                               | 已存在，替代 `l2_strategy_signals.json` 的运行读取                          |
 | 日报                      | `daily_summaries`、`morning_briefings`                       | 已存在，替代 `daily_summary.json`                                      |
 | 交易日历缓存                  | `trading_calendar_cache`                                    | 新增或补齐，用于替代 `trading_calendar_cache.json`                         |
@@ -82,7 +83,7 @@
 
 - `trade_plans`、`trade_plan_events`
 - `daily_summaries`、`morning_briefings`
-- `tick_monitor_events`
+- `tick_monitor_events`、`tick_monitor_state`
 - `l2_strategy_config`、`signal_rules`
 - `trading_calendar_cache`、`sentiment_cache`
 - `poller_leader_lease`
@@ -102,7 +103,7 @@ DDL 唯一权威放在 `src/sim_trading/db.py`。独立 migration 脚本只做�
 | `monitor_config.json` watchlist/settings | 自选、持仓、全局设置          | `config.db:monitor_watchlist`、`monitor_settings` |
 | `market_data.json` services/turnover     | 实时行情和大盘成交额          | `trading.db:price_snapshots`、`market_turnover`   |
 | `trade_plans.json` plans                 | 条件单、tick monitor 计划 | `trading.db:trade_plans`                         |
-| `tick_monitor_state.json`                | ~~冷却状态~~ 已移除；tick_monitor 使用内存 dict `_order_cooldown` 做 per-order 60s 冷却，不写 DB | N/A — 无持久化状态表 |
+| `tick_monitor_state.json`                | 冷却状态                | `trading.db:tick_monitor_state`                  |
 | `alert_config.json` panic keys           | panic 通知参数          | `config.db:monitor_settings` 的 `panic_*` key     |
 | `alert_config.json` alert rules          | 价格阈值                | `config.db:alert_rules`                          |
 | `l2_strategy_config.json`                | L2 daemon 配置        | `trading.db:l2_strategy_config`                  |
@@ -615,7 +616,7 @@ Batch 1 验收：
 
 改动：
 
-- `tick_monitor` 从 `trade_plans` 读取 `scope='tick_monitor'` 的计划，冷却状态使用内存 dict `_order_cooldown`，不读写 DB 或 JSON 文件。
+- `tick_monitor` 从 `trade_plans` 读取 `scope='tick_monitor'` 的计划，从 `tick_monitor_state` 读写冷却状态。
 - `daily_summary_generator` 从 DB 读取 trade plans、L2 信号和日报，不再读 `trade_plans.json`。
 - `stock_notifier` 的 panic 配置进入 DB，不再读 `alert_config.json`。
 - `l2_strategy_config.json`、`signal_rules.json` 迁入 DB；L2 daemon 不再读文件作为运行配置。
