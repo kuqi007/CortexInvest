@@ -131,12 +131,19 @@ def _archive_and_reset(today):
         d4 = conn.execute(
             "DELETE FROM session_snapshots WHERE date < ?", (cutoff_180d,)
         ).rowcount
+        # tick_monitor_events: 30 天
+        try:
+            d5 = conn.execute(
+                "DELETE FROM tick_monitor_events WHERE date < ?", (cutoff_30d,)
+            ).rowcount
+        except Exception:
+            d5 = 0
 
         conn.commit()
-        total = d1 + d2 + d3 + d4
+        total = d1 + d2 + d3 + d4 + d5
         if total:
             logger.info(
-                f"SQLite 清理: alert_events -{d1}, signals -{d2}, price_snap -{d3}, session_snap -{d4}"
+                f"SQLite 清理: alert_events -{d1}, signals -{d2}, price_snap -{d3}, session_snap -{d4}, tick_monitor_events -{d5}"
             )
     except Exception as e:
         logger.warning(f"SQLite 清理失败: {e}")
@@ -1620,16 +1627,16 @@ def stealth_dispatch(alerts: list[dict], *, sound: str = ""):
     tick_alerts = [a for a in stock_alerts if a.get("_kind") == "tick_monitor"]
     other_alerts = [a for a in stock_alerts if a.get("_kind") != "tick_monitor"]
 
-    # Apply per-symbol cooldown to tick_alerts
+    # Apply per-symbol cooldown to Feishu batch ONLY, NOT macOS
     now_ts = time.time()
-    alerts_to_send = []
+    feishu_batch = []
     for a in tick_alerts:
         symbol = a.get("symbol", "")
         if not symbol:
-            continue  # skip empty symbol
+            continue
         last_ts = _tick_symbol_cooldown.get(symbol, 0)
         if now_ts - last_ts >= _TICK_SYMBOL_COOLDOWN_SEC:
-            alerts_to_send.append(a)
+            feishu_batch.append(a)
             _tick_symbol_cooldown[symbol] = now_ts
     # drop symbols older than 2 hours to prevent memory growth
     cutoff = now_ts - 7200
@@ -1638,20 +1645,21 @@ def stealth_dispatch(alerts: list[dict], *, sound: str = ""):
             del _tick_symbol_cooldown[sym]
 
     # Send batch Feishu for cooled-down tick_alerts
-    if alerts_to_send:
+    feishu_ok = False
+    if feishu_batch:
         try:
             from src.tools.stock_monitor import feishu_send_tick_batch
 
-            feishu_send_tick_batch(alerts_to_send)
+            feishu_ok = feishu_send_tick_batch(feishu_batch)
         except Exception as e:
             logger.warning(f"feishu_send_tick_batch failed: {e}")
+            feishu_ok = False
 
-    # Add cooled-down tick_alerts to other_alerts → goes through notify() for macOS popup
-    # Skip Feishu in notify() since we already sent batch Feishu above
-    if alerts_to_send:
-        for a in alerts_to_send:
+    # All tick_alerts (including cooled-down ones) go to macOS popup
+    if feishu_ok:
+        for a in feishu_batch:
             a["_skip_feishu"] = True
-        other_alerts.extend(alerts_to_send)
+        other_alerts.extend(feishu_batch)  # only add to macOS if Feishu succeeded
 
     # Note: tick_alerts written via main loop's write_alert_events(all_alerts)
     # tick_web_only written separately in main loop
