@@ -18,7 +18,6 @@ import json
 import logging
 import time
 from datetime import datetime, timedelta
-from pathlib import Path
 from statistics import mean
 
 import re
@@ -30,9 +29,7 @@ from src.sim_trading.db import get_config_connection, get_connection, init_db
 
 logger = logging.getLogger("sector_engine")
 
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "data" / "sector_config.json"
-
-# Default alert rules (previously in sector_config.json → alert_rules)
+# Default alert rules (overridden by config.db monitor_settings)
 _DEFAULT_ALERT_RULES = {
     "cumulative_gain_pct": 8,
     "slope_threshold": 0.05,
@@ -46,18 +43,39 @@ _DEFAULT_ALERT_RULES = {
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _load_config() -> dict:
-    """Load sector_config.json, return empty dict on failure.
-
-    Still used for rotation config (category, sort, top_n) and alert_rules
-    fallback.
-    """
+def _load_sector_settings() -> dict[str, float]:
+    """Load sector settings from config.db monitor_settings."""
+    conn = None
     try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError) as exc:
-        logger.warning("Failed to load config %s: %s", CONFIG_PATH, exc)
+        conn = get_config_connection()
+        rows = conn.execute(
+            "SELECT key, value FROM monitor_settings WHERE key LIKE 'sector_%'"
+        ).fetchall()
+        return {row["key"]: row["value"] for row in rows}
+    except Exception as exc:
+        logger.warning("Failed to load sector settings from config.db: %s", exc)
         return {}
+    finally:
+        if conn:
+            conn.close()
+
+
+def _load_alert_rules_from_db() -> dict:
+    """Load mainline detection alert rules from config.db."""
+    settings = _load_sector_settings()
+    mapping = {
+        "cumulative_gain_pct": "sector_cumulative_gain_pct",
+        "slope_threshold": "sector_slope_threshold",
+        "r_squared_min": "sector_r_squared_min",
+        "lookback_days": "sector_lookback_days",
+        "min_days_since_create": "sector_min_days_since_create",
+    }
+    rules = dict(_DEFAULT_ALERT_RULES)
+    for target_key, setting_key in mapping.items():
+        if setting_key in settings:
+            value = settings[setting_key]
+            rules[target_key] = int(value) if target_key.endswith("_days") else value
+    return rules
 
 
 def _load_tag_indices() -> dict:
@@ -749,9 +767,7 @@ def detect_mainline(today=None):
 
     indices = _load_tag_indices()
 
-    # Alert rules: try sector_config.json fallback, else hardcoded defaults
-    cfg_alert_rules = _load_config().get("alert_rules", {})
-    alert_rules = {**_DEFAULT_ALERT_RULES, **cfg_alert_rules}
+    alert_rules = _load_alert_rules_from_db()
 
     cum_gain_threshold = alert_rules.get("cumulative_gain_pct", 8)
     slope_threshold = alert_rules.get("slope_threshold", 0.05)
@@ -881,6 +897,17 @@ _DEFAULT_PERIOD_THRESHOLDS = {
 }
 
 
+def _load_period_thresholds_from_db() -> dict[int, tuple[float, float]]:
+    """Load N-day sector gain/drop thresholds from config.db."""
+    settings = _load_sector_settings()
+    thresholds: dict[int, tuple[float, float]] = {}
+    for period, (default_gain, default_drop) in _DEFAULT_PERIOD_THRESHOLDS.items():
+        gain = settings.get(f"sector_period_{period}_gain", default_gain)
+        drop = settings.get(f"sector_period_{period}_drop", default_drop)
+        thresholds[period] = (gain, drop)
+    return thresholds
+
+
 def detect_period_alerts(today=None):
     """Detect indices with significant N-day gains or drops.
 
@@ -897,20 +924,7 @@ def detect_period_alerts(today=None):
     if not indices:
         return
 
-    # Load thresholds from config, merge with defaults
-    cfg = _load_config().get("alert_rules", {})
-    period_thresholds = {}
-    cfg_periods = cfg.get("period_thresholds", {})
-    for period, (default_gain, default_drop) in _DEFAULT_PERIOD_THRESHOLDS.items():
-        key = str(period)
-        if key in cfg_periods:
-            pt = cfg_periods[key]
-            period_thresholds[period] = (
-                pt.get("gain", default_gain),
-                pt.get("drop", default_drop),
-            )
-        else:
-            period_thresholds[period] = (default_gain, default_drop)
+    period_thresholds = _load_period_thresholds_from_db()
 
     logger.info(
         "detect_period_alerts for %s (%d indices, periods=%s)",

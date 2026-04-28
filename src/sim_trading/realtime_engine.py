@@ -19,7 +19,6 @@ import logging
 import subprocess
 import time
 from datetime import datetime
-from pathlib import Path
 
 from .broker import AbstractBroker, VirtualBroker, FutuBroker
 from .db import get_connection, init_db
@@ -29,8 +28,7 @@ from .simulation_engine import SimulationEngine
 
 logger = logging.getLogger("l2_daemon.rt_sim")
 
-MARKET_DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "market_data.json"
-# Config read from DB (primary) or JSON (backup)
+# Config read from config.db only.
 from src.utils.config_reader import read_monitor_config
 
 PARAM_VERSION = "live"
@@ -596,22 +594,33 @@ class RealtimeSimEngine:
         ) <= time_str <= db_cfg.get("window_end", "14:30"):
             self._evaluate_dip_buy(today, prices, market)
 
-        # 2. Consume new signals from DB — v2 only processes T3 + intraday exceptions
-        # Skip during pre-open / closing auction (09:00-09:30 for HK, 09:15-09:25 for A-share)
-        if not self._is_continuous_trading():
-            return
+        # 2. Consume new signals from DB — v2 only processes T3 + intraday exceptions.
+        # During auction/lunch gaps we skip new entries, but still run exits below.
+        rows = []
+        if self._is_continuous_trading():
+            conn = None
+            try:
+                conn = get_connection()
+                rows = conn.execute(
+                    "SELECT * FROM signals WHERE ts > ? ORDER BY ts",
+                    (self._last_processed_ts,),
+                ).fetchall()
+            except Exception as e:
+                logger.warning(f"RT signal fetch failed, continuing risk checks: {e}")
+            finally:
+                if conn:
+                    conn.close()
 
-        conn = get_connection()
-        rows = conn.execute(
-            "SELECT * FROM signals WHERE ts > ? ORDER BY ts",
-            (self._last_processed_ts,),
-        ).fetchall()
-        conn.close()
-
-        new_signals = [dict(r) for r in rows]
-        for sig in new_signals:
-            self._process_signal_v2(sig, time_str, prices, market)
-            self._last_processed_ts = max(self._last_processed_ts, sig.get("ts", 0))
+            new_signals = [dict(r) for r in rows]
+            for sig in new_signals:
+                try:
+                    self._process_signal_v2(sig, time_str, prices, market)
+                except Exception as e:
+                    logger.warning(
+                        f"RT signal process failed for {sig.get('code')} "
+                        f"{sig.get('strategy')}: {e}"
+                    )
+                self._last_processed_ts = max(self._last_processed_ts, sig.get("ts", 0))
 
         # 3. Exit review: score below threshold → close
         if in_exit_window and not self._exit_evaluated_today:

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Stock Notifier -- mtime-driven notification daemon
+Stock Notifier -- DB-driven notification daemon
 
-Watches market_data.json (written by poller) for changes, merges with
-monitor_config.json (user thresholds), and fires macOS notifications
+Watches trading.db price_snapshots (written by poller), merges with
+config.db monitor config, and fires macOS notifications
 when price/big-move alerts trigger.
 
 Does NOT fetch any market data -- purely a consumer of poller output.
@@ -31,14 +31,8 @@ from src.utils.logging_config import setup_logger
 
 logger = setup_logger("stock_notifier")
 
-# ── Data file paths ──
-MARKET_DATA_PATH = PROJECT_ROOT / "src" / "data" / "market_data.json"
-# Config now read from DB (primary) or JSON (backup)
+# Config is read from config.db only.
 from src.utils.config_reader import read_monitor_config
-
-ALERT_CONFIG_PATH = PROJECT_ROOT / "src" / "data" / "alert_config.json"
-L2_SIGNALS_PATH = PROJECT_ROOT / "src" / "data" / "l2_strategy_signals.json"
-
 
 ARCHIVE_DIR = PROJECT_ROOT / "src" / "data" / "archive"
 
@@ -52,48 +46,38 @@ _tick_symbol_cooldown: dict[str, float] = {}
 _TICK_SYMBOL_COOLDOWN_SEC = 180  # 3 min per symbol for tick_monitor alerts
 
 
+def _read_monitor_settings(keys: list[str]) -> dict[str, float]:
+    """Read selected numeric monitor settings from config.db."""
+    if not keys:
+        return {}
+    conn = None
+    try:
+        from src.sim_trading.db import get_config_connection
+
+        placeholders = ",".join("?" * len(keys))
+        conn = get_config_connection()
+        rows = conn.execute(
+            f"SELECT key, value FROM monitor_settings WHERE key IN ({placeholders})",
+            tuple(keys),
+        ).fetchall()
+        return {row["key"]: row["value"] for row in rows}
+    except Exception as e:
+        logger.debug(f"Failed to read monitor_settings: {e}")
+        return {}
+    finally:
+        if conn:
+            conn.close()
+
+
 def _archive_and_reset(today):
-    """归档昨日 market_data + l2_strategy_signals，清理 30 天前 alert_events。
+    """Clean old alert/archive records at the daily reset boundary.
 
-    归档文件命名: archive/market_data_2026-02-12.json
-    l2_strategy_signals 每 3s 覆盖，session 上下文（资金流、盘口）不入 DB，
-    必须每日归档保留完整数据用于量化回测。
+    Market data, L2 signals/session snapshots, and daily summaries are
+    persisted in trading.db. JSON archive export is handled by the
+    dedicated snapshot exporter.
     """
-    import shutil
-
     yesterday = (today - timedelta(days=1)).isoformat()
     ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
-
-    # 归档 market_data.json
-    try:
-        if MARKET_DATA_PATH.exists():
-            dest = ARCHIVE_DIR / f"market_data_{yesterday}.json"
-            if not dest.exists():
-                shutil.copy2(MARKET_DATA_PATH, dest)
-                logger.info(f"归档: {MARKET_DATA_PATH.name} → archive/{dest.name}")
-    except Exception as e:
-        logger.warning(f"归档 market_data 失败: {e}")
-
-    # 归档 l2_strategy_signals.json（session 上下文仅存于此文件，不归档则丢失）
-    try:
-        if L2_SIGNALS_PATH.exists():
-            dest = ARCHIVE_DIR / f"l2_strategy_signals_{yesterday}.json"
-            if not dest.exists():
-                shutil.copy2(L2_SIGNALS_PATH, dest)
-                logger.info(f"归档: {L2_SIGNALS_PATH.name} → archive/{dest.name}")
-    except Exception as e:
-        logger.warning(f"归档 l2_strategy_signals 失败: {e}")
-
-    # 归档 daily_summary.json（LLM 日报每日覆盖，不归档则丢失）
-    try:
-        summary_path = PROJECT_ROOT / "src" / "data" / "daily_summary.json"
-        if summary_path.exists():
-            dest = ARCHIVE_DIR / f"daily_summary_{yesterday}.json"
-            if not dest.exists():
-                shutil.copy2(summary_path, dest)
-                logger.info(f"归档: {summary_path.name} → archive/{dest.name}")
-    except Exception as e:
-        logger.warning(f"归档 daily_summary 失败: {e}")
 
     # 清理 90 天前的归档文件
     try:
@@ -254,34 +238,6 @@ def register_pattern_engine(engine: PatternEngine) -> PatternEngine:
     return engine
 
 
-# ══════════════════════════════════════════
-# 2. File reading helpers
-# ══════════════════════════════════════════
-
-
-def read_json_safe(path: Path) -> dict | None:
-    """Read a JSON file, returning None on any error."""
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return None
-    except json.JSONDecodeError as e:
-        logger.warning(f"JSON parse error in {path.name}: {e}")
-        return None
-    except Exception as e:
-        logger.warning(f"Failed to read {path.name}: {e}")
-        return None
-
-
-def get_mtime(path: Path) -> float:
-    """Return file mtime, or 0 if file does not exist."""
-    try:
-        return path.stat().st_mtime
-    except (FileNotFoundError, OSError):
-        return 0.0
-
-
 def _get_latest_db_ts() -> int:
     """Get latest timestamp from price_snapshots."""
     conn = None
@@ -342,14 +298,40 @@ def _read_market_snapshot_from_db() -> dict | None:
 
 
 def _read_l2_indicators() -> dict:
-    """Read indicators snapshot from l2_strategy_signals.json.
+    """Read latest indicator snapshots from trading.db.
 
     Returns: {code: {rsi, macd_hist, macd_hist_list, vol_ratio, updated_at}}
     """
-    data = read_json_safe(L2_SIGNALS_PATH)
-    if data is None:
+    conn = None
+    try:
+        from src.sim_trading.db import get_connection
+
+        conn = get_connection()
+        rows = conn.execute(
+            """
+            SELECT code, session_json
+            FROM session_snapshots
+            WHERE (code, ts) IN (
+                SELECT code, MAX(ts) FROM session_snapshots GROUP BY code
+            )
+            """
+        ).fetchall()
+        indicators = {}
+        for row in rows:
+            try:
+                payload = json.loads(row["session_json"] or "{}")
+            except json.JSONDecodeError:
+                continue
+            ind = payload.get("indicators")
+            if isinstance(ind, dict):
+                indicators[row["code"]] = ind
+        return indicators
+    except Exception as e:
+        logger.debug(f"Failed to read L2 indicators from DB: {e}")
         return {}
-    return data.get("indicators", {})
+    finally:
+        if conn:
+            conn.close()
 
 
 # ══════════════════════════════════════════
@@ -428,7 +410,7 @@ def merge_data(market: dict, config: dict) -> dict:
 # 例: 掌阅涨停 +10% → 通知1次，记住 31.09。
 #     价格不变 → 不再通知。回落到 29.85 (-4%) → 再通知。
 #
-# Settings (均可通过 monitor_config.json 覆盖):
+# Settings (均可通过 config.db monitor_settings 覆盖):
 #   trigger_pct  : 首次触发阈值，|日涨跌幅| 超过此值才通知 (default 5%)
 #   delta_pct    : 再次触发阈值，距上次通知价变化超过此值才通知 (default 4%)
 #   portfolio_delta_pct : 组合 P&L 变化阈值 (default 2%)
@@ -1470,45 +1452,115 @@ def write_alert_events(alerts: list[dict]):
 # ══════════════════════════════════════════
 
 PER_STOCK_DAILY_CAP = 8  # max L2 alerts per stock per day (safety net)
+_l2_watermark_unavailable = False
+
+
+def _load_l2_signal_watermark_from_db() -> int:
+    """Return latest known L2 signal timestamp so restarts do not replay history."""
+    global _l2_watermark_unavailable
+    conn = None
+    try:
+        from src.sim_trading.db import get_connection
+
+        conn = get_connection()
+        state = conn.execute(
+            "SELECT value_json FROM tick_monitor_state WHERE key = ?",
+            ("stock_notifier_l2_last_consumed",),
+        ).fetchone()
+        if state:
+            _l2_watermark_unavailable = False
+            return int(state["value_json"])
+        row = conn.execute("SELECT COALESCE(MAX(ts), 0) AS max_ts FROM signals").fetchone()
+        watermark = int(row["max_ts"] or 0) if row else 0
+        _save_l2_signal_watermark_to_db(watermark, conn=conn)
+        _l2_watermark_unavailable = False
+        return watermark
+    except Exception as e:
+        _l2_watermark_unavailable = True
+        logger.warning(f"Failed to load L2 signal watermark; L2 consumption paused: {e}")
+        return 0
+    finally:
+        if conn:
+            conn.close()
+
+
+def _save_l2_signal_watermark_to_db(watermark: int, conn=None) -> None:
+    owns_conn = conn is None
+    try:
+        if conn is None:
+            from src.sim_trading.db import get_connection
+
+            conn = get_connection()
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO tick_monitor_state (key, value_json, updated_at_ms)
+            VALUES (?, ?, ?)
+            """,
+            ("stock_notifier_l2_last_consumed", str(int(watermark)), int(time.time() * 1000)),
+        )
+        if owns_conn:
+            conn.commit()
+    except Exception as e:
+        logger.warning(f"Failed to save L2 signal watermark: {e}")
+    finally:
+        if owns_conn and conn:
+            conn.close()
 
 
 def check_l2_signals() -> list[dict]:
-    """读取 l2_strategy_signals.json 中未处理的信号，转换为 alert 格式。
+    """读取 trading.db 中未处理的 L2 信号，转换为 alert 格式。
 
     L2 daemon 写信号 → notifier 消费 → 统一 dispatch。
     用 lastConsumed 时间戳避免重复处理。
     Per-stock daily cap: 超过 PER_STOCK_DAILY_CAP 的信号不写入 alert_events。
     """
-    data = read_json_safe(L2_SIGNALS_PATH)
-    if data is None:
-        return []
+    global _l2_watermark_unavailable
+    if _l2_watermark_unavailable:
+        check_l2_signals._last_consumed = _load_l2_signal_watermark_from_db()
+        if _l2_watermark_unavailable:
+            return []
 
-    signals = data.get("signals", [])
-    if not signals:
-        return []
+    conn = None
+    try:
+        from src.sim_trading.db import get_connection
 
-    # 只取本次新增的（ts > _l2_last_consumed）
-    new_signals = [
-        s for s in signals if s.get("ts", 0) > check_l2_signals._last_consumed
-    ]
+        conn = get_connection()
+        rows = conn.execute(
+            """
+            SELECT ts, strategy, code, direction, notify, detail, display
+            FROM signals
+            WHERE ts > ?
+            ORDER BY ts
+            """,
+            (check_l2_signals._last_consumed,),
+        ).fetchall()
+        new_signals = [dict(row) for row in rows]
+    except Exception as e:
+        logger.debug(f"Failed to read L2 signals from DB: {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
     if not new_signals:
         return []
 
     # 更新消费位点
     check_l2_signals._last_consumed = max(s.get("ts", 0) for s in new_signals)
+    _save_l2_signal_watermark_to_db(check_l2_signals._last_consumed)
 
     # 转换为 notifier alert 格式, applying per-stock daily cap
     alerts = []
     for s in new_signals:
         strategy = s.get("strategy", "")
         display = s.get("display", "")
-        message = s.get("message", "")
         code = s.get("code", "")
-        should_notify = s.get("notify", False)
+        should_notify = bool(s.get("notify", False))
 
         # Per code+strategy daily dedup: same signal for same stock only once per day
-        # Key uses (symbol, message) to match DB UNIQUE and survive restarts
-        dedup_key = (code, message)
+        # Key uses (symbol, display) to survive restarts without collapsing
+        # every signal for the same stock into one alert.
+        dedup_key = (code, display)
         if dedup_key in check_l2_signals._seen_today:
             continue
         check_l2_signals._seen_today.add(dedup_key)
@@ -1527,8 +1579,8 @@ def check_l2_signals() -> list[dict]:
                 "_kind": "l2_strategy",
                 "_change_pct": 0,
                 # message is "{stock_name} {cn_name}" — first word is the stock name
-                "_name": message.split()[0] if message and message.split() else code,
-                "_stealth": message,
+                "_name": code,
+                "_stealth": display,
                 "_notify": should_notify,
             }
         )
@@ -1537,7 +1589,7 @@ def check_l2_signals() -> list[dict]:
 
 
 # Initialize consumption watermark and daily counters
-check_l2_signals._last_consumed = 0
+check_l2_signals._last_consumed = _load_l2_signal_watermark_from_db()
 check_l2_signals._daily_counts = {}  # {code: count} — reset daily at 08:00
 
 
@@ -2781,29 +2833,18 @@ class PanicSellEngine(PatternEngine):
         self._stock_drop_pct = 2.0
         self._cooldown_hours = 24
 
-        # 从 alert_config.json 加载用户自定义阈值（如果存在）
-        if config_path and config_path.exists():
-            try:
-                import json as _j
-
-                cfg = _j.loads(config_path.read_text("utf-8"))
-                self._market_amo1_min = cfg.get(
-                    "panic_market_amo1_min", self._market_amo1_min
-                )
-                self._market_drop_pct = cfg.get(
-                    "panic_market_drop_pct", self._market_drop_pct
-                )
-                self._stock_amo1_min = cfg.get(
-                    "panic_stock_amo1_min", self._stock_amo1_min
-                )
-                self._stock_drop_pct = cfg.get(
-                    "panic_stock_drop_pct", self._stock_drop_pct
-                )
-                self._cooldown_hours = cfg.get(
-                    "panic_cooldown_hours", self._cooldown_hours
-                )
-            except Exception:
-                pass
+        cfg = _read_monitor_settings([
+            "panic_market_amo1_min",
+            "panic_market_drop_pct",
+            "panic_stock_amo1_min",
+            "panic_stock_drop_pct",
+            "panic_cooldown_hours",
+        ])
+        self._market_amo1_min = cfg.get("panic_market_amo1_min", self._market_amo1_min)
+        self._market_drop_pct = cfg.get("panic_market_drop_pct", self._market_drop_pct)
+        self._stock_amo1_min = cfg.get("panic_stock_amo1_min", self._stock_amo1_min)
+        self._stock_drop_pct = cfg.get("panic_stock_drop_pct", self._stock_drop_pct)
+        self._cooldown_hours = cfg.get("panic_cooldown_hours", self._cooldown_hours)
 
         # cooldown: {(date_str, symbol): last_alert_ts_ms}
         self._cooldown: dict[tuple[str, str], int] = {}
@@ -2982,7 +3023,7 @@ def run():
         f"  delta     : L1 +/-{l1['delta_pct']}% / L2 +/-{get_policy(2, settings)['delta_pct']}% (再次触发)"
     )
     print(f"  portfolio : +/-{settings.get('portfolio_delta_pct', 2)}% (组合变化)")
-    print(f"  data file : {MARKET_DATA_PATH.name}")
+    print("  data src  : trading.db")
     print(f"  Ctrl+C to stop\n")
 
     # ── Ensure alert_events table exists ──
@@ -3018,8 +3059,8 @@ def run():
 
     # ── 注册通用形态引擎（新增形态只需在此 register 一行）──
     register_pattern_engine(GapFadeEngine(config))
-    register_pattern_engine(WatchDriftPatternEngine(ALERT_CONFIG_PATH))
-    register_pattern_engine(PanicSellEngine(ALERT_CONFIG_PATH))
+    register_pattern_engine(WatchDriftPatternEngine(None))
+    register_pattern_engine(PanicSellEngine(None))
     # A股日线技术指标: 不再全局告警，改为交易计划条件单按需检测
     # (TradePlanEngine._get_ashare_indicators 在 15:05-15:20 窗口内自动拉取)
     sent_open_today = False
@@ -3029,7 +3070,7 @@ def run():
     mainline_checked_today = False
     latest_quotes: dict | None = None  # last merged quotes (for close summary)
     latest_hkd_cny_rate: float | None = None
-    market_snapshot: dict | None = None  # latest parsed market_data.json (for watchdog)
+    market_snapshot: dict | None = None  # latest DB market snapshot (for watchdog)
     last_indicator_refresh: float = 0.0  # 指标缓存上次刷新时间戳
     INDICATOR_REFRESH_INTERVAL = 1800  # 30 分钟刷新一次
 
@@ -3335,14 +3376,9 @@ class AlertClusterer:
         self._enabled = True
         self._min_count = 3  # 最少告警数才触发聚类（太少没必要）
 
-        if config_path and config_path.exists():
-            try:
-                import json as _j
-                cfg = _j.loads(config_path.read_text("utf-8"))
-                self._enabled = cfg.get("cluster_enabled", self._enabled)
-                self._min_count = cfg.get("cluster_min_count", self._min_count)
-            except Exception:
-                pass
+        cfg = _read_monitor_settings(["cluster_enabled", "cluster_min_count"])
+        self._enabled = bool(cfg.get("cluster_enabled", 1 if self._enabled else 0))
+        self._min_count = int(cfg.get("cluster_min_count", self._min_count))
 
     @property
     def enabled(self) -> bool:

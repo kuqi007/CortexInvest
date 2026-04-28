@@ -2,10 +2,10 @@
 """
 L2 Strategy Daemon — 独立进程，3s 轮询检测 L2 策略信号
 
-读取 monitor_config.json（持仓列表）+ l2_strategy_config.json（策略参数），
-通过 Futu OpenD 获取实时 L2 数据，检测信号后写入 l2_strategy_signals.json。
+读取 config.db（持仓列表 + L2 策略参数），
+通过 Futu OpenD 获取实时 L2 数据，检测信号后写入 trading.db。
 
-Notifier 消费信号文件，转换为 macOS 通知 + sim_trading.db:alert_events。
+Notifier 消费 trading.db 信号，转换为 macOS 通知 + trading.db:alert_events。
 
 设计原则:
   - OpenD 不可用时静默退出（Futu 可选）
@@ -30,18 +30,21 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.tools.l2_strategy_engine import L2StrategyEngine
-from src.tools.stock_notifier import is_any_market_open, read_json_safe
+from src.tools.stock_notifier import is_any_market_open
 from src.tools.stock_monitor import is_hk_symbol
 from src.utils.logging_config import setup_logger
+from src.sim_trading.db import (
+    get_config_connection,
+    get_connection,
+    init_config_db,
+    init_trading_db,
+)
+from src.sim_trading.l2_signal_direction import infer_l2_signal_direction
+from src.sim_trading.signal_rules import load_signal_rules
 
 logger = setup_logger("l2_daemon")
 
-# ── File paths ──
-# Config read from DB (primary) or JSON (backup)
 from src.utils.config_reader import read_monitor_config
-
-L2_CONFIG_PATH = PROJECT_ROOT / "src" / "data" / "l2_strategy_config.json"
-L2_SIGNALS_PATH = PROJECT_ROOT / "src" / "data" / "l2_strategy_signals.json"
 
 # ── Poll intervals ──
 TRADING_POLL_SEC = 3
@@ -51,18 +54,54 @@ MAX_SIGNALS = 200
 
 
 def load_configs() -> tuple[dict, dict]:
-    """Load monitor_config from DB and l2_strategy_config from JSON"""
+    """Load monitor config and L2 strategy config from config.db."""
     monitor = read_monitor_config()
     if not monitor.get("watchlist"):
         logger.error("Cannot read watchlist from DB")
         sys.exit(1)
 
-    l2_config = read_json_safe(L2_CONFIG_PATH)
-    if l2_config is None:
-        logger.warning(f"Cannot read {L2_CONFIG_PATH}, using defaults")
-        l2_config = {"enabled": True, "strategies": {}, "max_signals": MAX_SIGNALS}
+    l2_config = load_l2_strategy_config()
 
     return monitor, l2_config
+
+
+def load_l2_strategy_config() -> dict:
+    """Load L2 strategy config rows from config.db."""
+    conn = None
+    try:
+        init_config_db()
+        conn = get_config_connection()
+        rows = conn.execute(
+            """
+            SELECT strategy, enabled, config_json
+            FROM l2_strategy_config
+            ORDER BY strategy
+            """
+        ).fetchall()
+    except Exception as e:
+        logger.warning(f"Cannot read l2_strategy_config from DB, using defaults: {e}")
+        return {"enabled": True, "strategies": {}, "max_signals": MAX_SIGNALS}
+    finally:
+        if conn is not None:
+            conn.close()
+
+    strategies = {}
+    for row in rows:
+        try:
+            config = json.loads(row["config_json"] or "{}")
+        except json.JSONDecodeError:
+            logger.warning(f"Invalid l2_strategy_config row: {row['strategy']}")
+            config = {}
+        strategies[row["strategy"]] = {
+            "enabled": bool(row["enabled"]),
+            **config,
+        }
+    return {"enabled": True, "strategies": strategies, "max_signals": MAX_SIGNALS}
+
+
+def load_realtime_rules() -> dict:
+    """Load realtime signal rules from config.db."""
+    return load_signal_rules()
 
 
 def write_signals(
@@ -87,46 +126,73 @@ def write_signals(
 
 
 def _flush_signals_to_disk():
-    """Actual disk write — called by write_signals when buffer threshold met."""
-    buf = write_signals._buffer
-    write_signals._buffer = []
-    write_signals._last_flush = time.time()
+    """Flush buffered L2 signals/session state to trading.db."""
+    buf = list(write_signals._buffer)
 
-    # 读已有数据
-    existing = []
-    prev_session = {}
-    prev_indicators = {}
+    session = write_signals._session or {}
+    indicators = write_signals._indicators or {}
+    conn = None
     try:
-        if L2_SIGNALS_PATH.exists():
-            with open(L2_SIGNALS_PATH, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            existing = data.get("signals", [])
-            prev_session = data.get("session", {})
-            prev_indicators = data.get("indicators", {})
-    except Exception:
-        existing = []
+        init_trading_db()
+        conn = get_connection()
+        conn.execute("BEGIN IMMEDIATE")
+        for signal in buf:
+            ts = int(signal.get("ts") or time.time() * 1000)
+            dt = datetime.fromtimestamp(ts / 1000)
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO signals
+                    (ts, date, time, strategy, code, direction, notify, detail, display)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    ts,
+                    dt.strftime("%Y-%m-%d"),
+                    signal.get("time") or dt.strftime("%H:%M:%S"),
+                    signal.get("strategy", ""),
+                    signal.get("code", ""),
+                    signal.get("direction") or infer_l2_signal_direction(signal),
+                    1 if signal.get("notify") else 0,
+                    json.dumps(signal.get("detail", {}), ensure_ascii=False),
+                    signal.get("display", ""),
+                ),
+            )
 
-    existing.extend(buf)
-    existing = existing[-MAX_SIGNALS:]
-
-    ts = int(time.time() * 1000)
-    session = write_signals._session or prev_session
-    ind = write_signals._indicators or prev_indicators
-
-    tmp = L2_SIGNALS_PATH.with_suffix(".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "signals": existing,
-                "session": session,
-                "indicators": ind,
-                "lastUpdated": ts,
-            },
-            f,
-            ensure_ascii=False,
-            indent=2,
-        )
-    tmp.replace(L2_SIGNALS_PATH)
+        snapshot_ts = int(time.time() * 1000)
+        snapshot_dt = datetime.fromtimestamp(snapshot_ts / 1000)
+        for code, ctx in session.items():
+            if not isinstance(ctx, dict):
+                continue
+            payload = dict(ctx)
+            if code in indicators:
+                payload["indicators"] = indicators[code]
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO session_snapshots
+                    (ts, date, time, code, session_json)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    snapshot_ts,
+                    snapshot_dt.strftime("%Y-%m-%d"),
+                    snapshot_dt.strftime("%H:%M:%S"),
+                    code,
+                    json.dumps(payload, ensure_ascii=False),
+                ),
+            )
+        conn.commit()
+        write_signals._buffer = []
+        write_signals._last_flush = time.time()
+    except Exception as e:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logger.warning(f"Flush L2 signals to DB failed: {e}")
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 # Buffer state (module-level, attached to function for testability)
@@ -199,8 +265,7 @@ def run():
     try:
         from src.sim_trading.realtime_engine import RealtimeSimEngine
 
-        rt_rules_path = PROJECT_ROOT / "src" / "data" / "signal_rules.json"
-        rt_rules = json.loads(rt_rules_path.read_text(encoding="utf-8"))
+        rt_rules = load_realtime_rules()
         daily_tracker = getattr(engine, "_daily_indicators", None)
         futu_cfg = rt_rules.get("futu_trade", {})
         rt_engine = RealtimeSimEngine(
@@ -222,7 +287,7 @@ def run():
     strategies = l2_config.get("strategies", {})
     enabled = [k for k, v in strategies.items() if v.get("enabled", True)]
     print(f"  strategies  : {', '.join(enabled)}")
-    print(f"  signals file: {L2_SIGNALS_PATH.name}")
+    print("  signals sink: trading.db")
     print(f"  archiver    : {'enabled' if archiver_enabled else 'disabled'}")
     print(f"  sim engine  : {'enabled' if rt_enabled else 'disabled'}")
     if rt_enabled and rt_engine:
@@ -290,8 +355,8 @@ def run():
             if rt_enabled and rt_engine:
                 try:
                     rt_engine.tick()
-                except Exception:
-                    pass  # sim engine failure should not affect daemon
+                except Exception as e:
+                    logger.warning(f"RT sim engine tick failed: {e}")
 
             # Status line
             rt_pos = (

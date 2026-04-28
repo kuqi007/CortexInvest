@@ -1600,7 +1600,7 @@ def cmd_add(args, config: dict):
 
     save_config(config)
 
-    # 告警写到 alert_config.json
+    # 告警写到 config.db:alert_rules
     if above is not None or below is not None:
         alert_rules = load_alerts()
         if symbol not in alert_rules:

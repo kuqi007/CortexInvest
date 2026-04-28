@@ -5,7 +5,7 @@ Daily Summary Generator — post-market LLM-powered signal digest
 Aggregates L2 strategy signals, alert events, and market data after market close,
 then calls LLM to produce a structured daily report for the web dashboard.
 
-Output: src/data/daily_summary.json
+Output: trading.db:daily_summaries
 
 Usage:
     poetry run python -c "from src.tools.daily_summary_generator import generate_daily_summary; generate_daily_summary()"
@@ -42,21 +42,11 @@ DATA_DIR = PROJECT_ROOT / "src" / "data"
 # Config read from DB (primary) or JSON (backup)
 from src.utils.config_reader import read_monitor_config
 
-L2_SIGNALS_PATH = DATA_DIR / "l2_strategy_signals.json"
-
 CONFIG_DB_PATH = DATA_DIR / "config.db"
 TRADING_DB_PATH = DATA_DIR / "trading.db"
 
 # Rate limiting flag - set to True when API daily limit is reached
 _morning_api_rate_limited = False
-
-
-def _read_json(path: Path) -> dict | None:
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
 
 
 def _read_market_data_from_db() -> dict:
@@ -130,6 +120,50 @@ def _load_trade_plans_from_db() -> dict:
             "orders": orders if isinstance(orders, list) else [],
         }
     return {"plans": plans}
+
+
+def _load_l2_signals_from_db(date_str: str) -> list[dict]:
+    """Read L2 signals for one date from trading.db."""
+    conn = None
+    try:
+        conn = sqlite3.connect(TRADING_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT ts, date, time, strategy, code, direction, notify, detail, display
+            FROM signals
+            WHERE date = ?
+            ORDER BY ts
+            """,
+            (date_str,),
+        ).fetchall()
+    except Exception as e:
+        logger.warning(f"读取 L2 signals 失败: {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+    signals = []
+    for row in rows:
+        try:
+            detail = json.loads(row["detail"] or "{}")
+        except json.JSONDecodeError:
+            detail = {}
+        signals.append(
+            {
+                "ts": row["ts"],
+                "date": row["date"],
+                "time": row["time"],
+                "strategy": row["strategy"],
+                "code": row["code"],
+                "direction": row["direction"],
+                "notify": bool(row["notify"]),
+                "detail": detail,
+                "display": row["display"],
+            }
+        )
+    return signals
 
 
 def _read_alert_rules_from_db() -> dict:
@@ -529,7 +563,7 @@ def _aggregate_signals(signals: list[dict]) -> dict:
 def _aggregate_alerts(events: list[dict]) -> dict:
     """Aggregate non-L2 alert events by stock code.
 
-    L2 signals are already counted from l2_strategy_signals.json,
+    L2 signals are already counted from trading.db:signals,
     so we exclude kind=l2_strategy to avoid double counting.
 
     Returns: {code: {kinds: Counter, count: int}}
@@ -539,7 +573,7 @@ def _aggregate_alerts(events: list[dict]) -> dict:
         code = e.get("symbol", "")
         if not code:
             continue
-        # Skip L2 signals — already aggregated from l2_strategy_signals.json
+        # Skip L2 signals — already aggregated from trading.db:signals
         if e.get("kind") == "l2_strategy":
             continue
         by_stock[code]["count"] += 1
@@ -1357,15 +1391,7 @@ def generate_daily_summary(date_str: str | None = None) -> dict | None:
     config = read_monitor_config()
     if not config.get("watchlist"):
         config = {"watchlist": {}, "settings": {}}
-    l2_signals_data = _read_json(L2_SIGNALS_PATH) or {"signals": []}
-
-    # Filter signals to today only (JSON has no date column; use timestamp)
-    all_signals = l2_signals_data.get("signals", [])
-    today_start_ts = int(datetime.strptime(today, "%Y-%m-%d").timestamp() * 1000)
-    today_end_ts = today_start_ts + 86400_000
-    signals = [
-        s for s in all_signals if today_start_ts <= s.get("ts", 0) < today_end_ts
-    ]
+    signals = _load_l2_signals_from_db(today)
 
     # 从 SQLite 读取当日 alert events
     events: list[dict] = []

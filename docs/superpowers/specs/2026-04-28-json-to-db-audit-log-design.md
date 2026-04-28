@@ -106,8 +106,8 @@ DDL 唯一权威放在 `src/sim_trading/db.py`。独立 migration 脚本只做�
 | `tick_monitor_state.json`                | 冷却状态                | `trading.db:tick_monitor_state`                  |
 | `alert_config.json` panic keys           | panic 通知参数          | `config.db:monitor_settings` 的 `panic_*` key     |
 | `alert_config.json` alert rules          | 价格阈值                | `config.db:alert_rules`                          |
-| `l2_strategy_config.json`                | L2 daemon 配置        | `trading.db:l2_strategy_config`                  |
-| `signal_rules.json`                      | 模拟/L2 信号规则          | `trading.db:signal_rules`                        |
+| `l2_strategy_config.json`                | L2 daemon 配置        | `config.db:l2_strategy_config`                  |
+| `signal_rules.json`                      | 模拟/L2 信号规则          | `config.db:signal_rules`                        |
 | `l2_strategy_signals.json`               | L2 当前信号快照           | `trading.db:signals`、`session_snapshots`         |
 | `sector_config.json` tag defaults        | 板块/标签配置             | `config.db:tag_meta`；派生行情在 `trading.db:sector_*` |
 | `trading_calendar_cache.json`            | 交易日缓存               | `trading.db:trading_calendar_cache`              |

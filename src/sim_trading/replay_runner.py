@@ -12,9 +12,9 @@ import json
 import logging
 import sys
 from datetime import datetime
-from pathlib import Path
 
 from .db import get_connection, init_db
+from .signal_rules import load_signal_rules
 from .signal_mapper import TradeSignalMapper
 from .position_manager import PositionManager
 from .simulation_engine import SimulationEngine
@@ -22,13 +22,11 @@ from .trade_analyzer import TradeAnalyzer
 
 logger = logging.getLogger("replay_runner")
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RULES_PATH = PROJECT_ROOT / "data" / "signal_rules.json"
-
-
 def _load_rules() -> dict:
-    with open(RULES_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+    rules = load_signal_rules()
+    if not rules:
+        raise RuntimeError("config.db signal_rules is empty; import rules before replay")
+    return rules
 
 
 def _get_trading_dates(conn) -> list[str]:

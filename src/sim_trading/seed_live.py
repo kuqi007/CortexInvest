@@ -3,24 +3,21 @@
 用法: poetry run python -m src.sim_trading.seed_live
 """
 
-import json
 import logging
-from pathlib import Path
 
 from .db import get_connection, init_db
 from .realtime_engine import RealtimeSimEngine
+from .signal_rules import load_signal_rules
 
 logger = logging.getLogger("seed_live")
-
-RULES_PATH = Path(__file__).resolve().parent.parent / "data" / "signal_rules.json"
-
 
 def seed():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     init_db()
 
-    with open(RULES_PATH, "r", encoding="utf-8") as f:
-        rules = json.load(f)
+    rules = load_signal_rules()
+    if not rules:
+        raise RuntimeError("config.db signal_rules is empty; import rules before seeding live state")
 
     # Clear existing live state
     conn = get_connection()

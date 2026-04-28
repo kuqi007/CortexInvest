@@ -305,27 +305,42 @@ class FutuL2Enricher:
             })
 
     def _read_capital_from_l2_signals(self) -> dict[str, dict]:
-        """从 l2_strategy_daemon 的 session 产出读取主力资金数据
+        """从 trading.db session_snapshots 读取主力资金数据
 
-        l2_strategy_signals.json 的 session[code].capital_flow 包含:
+        session_json 的 capital_flow 包含:
           main_net_inflow, main_net_inflow_pct, direction_score
         daemon 每 3s 更新一次，数据比 poller 自己调 API 更实时。
         """
-        import json
-        from pathlib import Path
-
-        L2_SIGNALS_PATH = Path(__file__).parent.parent / "data" / "l2_strategy_signals.json"
         result = {}
+        conn = None
         try:
-            data = json.loads(L2_SIGNALS_PATH.read_text(encoding="utf-8"))
-            session = data.get("session", {})
-            for code, info in session.items():
+            import json
+            from src.sim_trading.db import get_connection
+
+            conn = get_connection()
+            rows = conn.execute(
+                """
+                SELECT code, session_json
+                FROM session_snapshots
+                WHERE (code, ts) IN (
+                    SELECT code, MAX(ts) FROM session_snapshots GROUP BY code
+                )
+                """
+            ).fetchall()
+            for row in rows:
+                try:
+                    info = json.loads(row["session_json"] or "{}")
+                except json.JSONDecodeError:
+                    continue
                 cf = info.get("capital_flow")
                 if cf and cf.get("main_net_inflow") is not None:
-                    result[code] = {
+                    result[row["code"]] = {
                         "mainNetInflow": cf["main_net_inflow"],
                         "retailNetInflow": 0,  # session 不拆分散户，用 0 占位
                     }
         except Exception as e:
-            logger.debug(f"读取 l2_strategy_signals.json 失败: {e}")
+            logger.debug(f"读取 session_snapshots capital_flow 失败: {e}")
+        finally:
+            if conn is not None:
+                conn.close()
         return result

@@ -14,9 +14,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import re
-import sqlite3
 import sys
 import time
 from pathlib import Path
@@ -39,9 +37,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.sim_trading.db import get_config_connection
-
-JSON_PATH = PROJECT_ROOT / "src" / "data" / "monitor_config.json"
-
 
 def extract_text_from_image(image_path: Path) -> str:
     """从图片中提取文本"""
@@ -220,72 +215,6 @@ def import_stocks_to_db(stocks: list[dict[str, Any]], force_type: str | None = N
     
     return added, updated
 
-
-def export_to_json():
-    """导出数据库到 JSON 备份"""
-    conn = get_config_connection()
-    conn.row_factory = sqlite3.Row
-    
-    rows = conn.execute(
-        'SELECT symbol, name, list_type, cost, shares, lot, hidden, star, dip_buy, tags, watch_price, watch_price_date '
-        'FROM monitor_watchlist ORDER BY symbol'
-    ).fetchall()
-    
-    watchlist = {}
-    holdings = {}
-    watching = {}
-    
-    for r in rows:
-        entry = {'name': r['name']}
-        if r['cost']:
-            entry['cost'] = r['cost']
-        if r['shares']:
-            entry['shares'] = r['shares']
-        if r['lot']:
-            entry['lot'] = r['lot']
-        if r['hidden']:
-            entry['hidden'] = True
-        if r['star']:
-            entry['star'] = True
-        if r['dip_buy']:
-            entry['dip_buy'] = True
-        if r['tags']:
-            try:
-                tags = json.loads(r['tags'])
-                if tags:
-                    entry['tags'] = tags
-            except:
-                pass
-        if r['watch_price']:
-            entry['watch_price'] = r['watch_price']
-        if r['watch_price_date']:
-            entry['watch_price_date'] = r['watch_price_date']
-        
-        watchlist[r['symbol']] = entry
-        if r['list_type'] == 'holding':
-            holdings[r['symbol']] = entry
-        else:
-            watching[r['symbol']] = entry
-    
-    settings_rows = conn.execute('SELECT key, value FROM monitor_settings').fetchall()
-    settings = {r['key']: r['value'] for r in settings_rows}
-    
-    conn.close()
-    
-    config = {
-        'watchlist': watchlist,
-        'holdings': holdings,
-        'watching': watching,
-        'settings': settings
-    }
-    
-    tmp = JSON_PATH.with_suffix('.tmp')
-    tmp.write_text(json.dumps(config, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-    tmp.replace(JSON_PATH)
-    
-    print(f'\n✅ 已导出 {len(watchlist)} 只股票到 monitor_config.json')
-
-
 def main():
     parser = argparse.ArgumentParser(description='从截图导入股票信息')
     parser.add_argument('image_path', type=Path, help='截图文件路径')
@@ -326,13 +255,11 @@ def main():
         # 导入数据库
         added, updated = import_stocks_to_db(stocks, args.type)
         
-        # 导出 JSON
-        export_to_json()
-        
         print()
         print(f'共处理 {len(stocks)} 只股票')
         print(f'  新增: {added}')
         print(f'  更新: {updated}')
+        print('配置已写入 config.db；JSON 快照由专用导出流程生成。')
         
     except Exception as e:
         print(f'错误: {e}')

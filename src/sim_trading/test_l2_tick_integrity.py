@@ -376,6 +376,53 @@ class TestL2TickIntegrity:
             }
         }
 
+    def test_load_l2_signals_from_db_for_summary_without_json(self, tmp_path, monkeypatch):
+        """Daily summary should load L2 signals from trading.db."""
+        import src.sim_trading.db as db_module
+        import src.tools.daily_summary_generator as dsg
+
+        monkeypatch.setattr(db_module, "_db_path_override", str(tmp_path / "trading.db"))
+        monkeypatch.setattr(dsg, "TRADING_DB_PATH", str(tmp_path / "trading.db"))
+        db_module.init_trading_db()
+        today = datetime.now().strftime("%Y-%m-%d")
+        conn = db_module.get_connection()
+        conn.execute(
+            """
+            INSERT INTO signals
+                (ts, date, time, strategy, code, direction, notify, detail, display)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1777376520000,
+                today,
+                "10:00:00",
+                "tick_imbalance",
+                "HK00700",
+                "bullish",
+                1,
+                json.dumps({"score": 2}),
+                "腾讯 L2 买盘增强",
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        signals = dsg._load_l2_signals_from_db(today)
+
+        assert signals == [
+            {
+                "ts": 1777376520000,
+                "date": today,
+                "time": "10:00:00",
+                "strategy": "tick_imbalance",
+                "code": "HK00700",
+                "direction": "bullish",
+                "notify": True,
+                "detail": {"score": 2},
+                "display": "腾讯 L2 买盘增强",
+            }
+        ]
+
     def test_digest_direction_score_calculation(self, mock_db, monkeypatch):
         """Test direction score calculation with tick imbalance."""
         db_path, conn = mock_db

@@ -338,57 +338,17 @@ def get_stock_news(symbol: str, max_news: int = 10, date: str = None) -> list:
     # 获取当前日期或使用指定日期
     cache_date = date if date else datetime.now().strftime("%Y-%m-%d")
 
-    # 构建新闻文件路径
-    news_dir = os.path.join("src", "data", "stock_news")
-    print(f"新闻保存目录: {news_dir}")
-
-    # 确保目录存在
-    try:
-        os.makedirs(news_dir, exist_ok=True)
-        print(f"成功创建或确认目录存在: {news_dir}")
-    except Exception as e:
-        print(f"创建目录失败: {e}")
-        return []
-
-    # 缓存文件名包含日期信息
-    news_file = os.path.join(news_dir, f"{symbol}_news_{cache_date}.json")
-    print(f"新闻文件路径: {news_file}")
-
     # 检查缓存是否存在且有效
     cached_news = []
     cache_valid = False
-
-    if os.path.exists(news_file):
-        try:
-            # 检查缓存文件的修改时间（时效性检查）
-            file_mtime = os.path.getmtime(news_file)
-            current_time = time.time()
-            # 缓存有效期：当天的缓存在当天有效，历史日期的缓存始终有效
-            if date:  # 如果指定了历史日期，缓存始终有效
-                cache_valid = True
-            else:  # 如果是当天数据，检查是否在同一天创建
-                cache_date_obj = datetime.fromtimestamp(file_mtime).date()
-                today = datetime.now().date()
-                cache_valid = cache_date_obj == today
-
-            if cache_valid:
-                with open(news_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    cached_news = data.get("news", [])
-
-                    if len(cached_news) >= max_news:
-                        print(
-                            f"使用缓存的新闻数据: {news_file} (缓存数量: {len(cached_news)})")
-                        return cached_news[:max_news]
-                    else:
-                        print(
-                            f"缓存的新闻数量({len(cached_news)})不足，需要获取更多新闻({max_news}条)")
-            else:
-                print(f"缓存文件已过期，将重新获取新闻")
-
-        except Exception as e:
-            print(f"读取缓存文件失败: {e}")
-            cached_news = []
+    cache_payload = _read_stock_news_cache(symbol, cache_date)
+    if cache_payload:
+        cached_news = cache_payload.get("news", [])
+        cache_valid = True
+        if len(cached_news) >= max_news:
+            print(f"使用缓存的新闻数据: {symbol} {cache_date} (缓存数量: {len(cached_news)})")
+            return cached_news[:max_news]
+        print(f"缓存的新闻数量({len(cached_news)})不足，需要获取更多新闻({max_news}条)")
 
     print(f'开始获取{symbol}的新闻数据...')
 
@@ -448,26 +408,72 @@ def get_stock_news(symbol: str, max_news: int = 10, date: str = None) -> list:
     # 只保留指定条数的新闻
     final_news_list = combined_news[:max_news]
 
-    # 保存到文件（只有当获取到新数据时才保存）
+    # 保存到 DB（只有当获取到新数据时才保存）
     if new_news_list or not cache_valid:
-        try:
-            save_data = {
-                "date": cache_date,
-                "method": "mx" if new_news_list and _mx_api_key else "akshare",
-                "query": f"{symbol} 股票 新闻",
-                "news": combined_news,  # 保存所有新闻，不只是返回的部分
-                "cached_count": len(cached_news),
-                "new_count": len(new_news_list),
-                "total_count": len(combined_news),
-                "last_updated": datetime.now().isoformat()
-            }
-            with open(news_file, 'w', encoding='utf-8') as f:
-                json.dump(save_data, f, ensure_ascii=False, indent=2)
-            print(f"成功保存{len(combined_news)}条新闻到文件: {news_file}")
-        except Exception as e:
-            print(f"保存新闻数据到文件时出错: {e}")
+        save_data = {
+            "date": cache_date,
+            "method": "mx" if new_news_list and _mx_api_key else "akshare",
+            "query": f"{symbol} 股票 新闻",
+            "news": combined_news,  # 保存所有新闻，不只是返回的部分
+            "cached_count": len(cached_news),
+            "new_count": len(new_news_list),
+            "total_count": len(combined_news),
+            "last_updated": datetime.now().isoformat()
+        }
+        _write_stock_news_cache(symbol, cache_date, save_data)
 
     return final_news_list
+
+
+def _stock_news_cache_key(symbol: str, cache_date: str) -> str:
+    return f"news:{symbol}:{cache_date}"
+
+
+def _read_stock_news_cache(symbol: str, cache_date: str) -> dict | None:
+    conn = None
+    try:
+        init_trading_db()
+        conn = get_connection()
+        row = conn.execute(
+            "SELECT payload_json FROM sentiment_cache WHERE cache_key = ?",
+            (_stock_news_cache_key(symbol, cache_date),),
+        ).fetchone()
+        if not row:
+            return None
+        payload = json.loads(row["payload_json"])
+        return payload if isinstance(payload, dict) else None
+    except Exception as e:
+        print(f"读取新闻缓存出错: {e}")
+        return None
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def _write_stock_news_cache(symbol: str, cache_date: str, payload: dict) -> None:
+    conn = None
+    try:
+        init_trading_db()
+        conn = get_connection()
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO sentiment_cache
+                (cache_key, payload_json, updated_at_ms)
+            VALUES (?, ?, ?)
+            """,
+            (
+                _stock_news_cache_key(symbol, cache_date),
+                json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                int(time.time() * 1000),
+            ),
+        )
+        conn.commit()
+        print(f"成功保存{len(payload.get('news', []))}条新闻到 DB 缓存: {symbol} {cache_date}")
+    except Exception as e:
+        print(f"保存新闻数据到 DB 时出错: {e}")
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def get_news_sentiment(news_list: list, num_of_news: int = 5,

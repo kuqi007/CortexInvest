@@ -54,3 +54,63 @@ def test_news_sentiment_writes_score_to_db_not_json(tmp_path, monkeypatch):
     conn.close()
     assert row is not None
     assert json.loads(row["payload_json"])["score"] == 0.42
+
+
+def test_stock_news_reads_cached_news_from_db_without_json(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "_db_path_override", str(tmp_path / "trading.db"))
+    monkeypatch.setattr(db, "_config_db_path_override", str(tmp_path / "config.db"))
+    db.init_trading_db()
+    payload = {
+        "date": "2026-04-28",
+        "news": [
+            {
+                "title": "缓存新闻",
+                "content": "已缓存",
+                "publish_time": "2026-04-28 09:00:00",
+                "source": "DB",
+            }
+        ],
+    }
+    conn = db.get_connection()
+    conn.execute(
+        "INSERT INTO sentiment_cache (cache_key, payload_json, updated_at_ms) VALUES (?, ?, ?)",
+        ("news:HK00700:2026-04-28", json.dumps(payload), 1777376520000),
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(
+        nc,
+        "get_stock_news_via_akshare",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not fetch")),
+    )
+
+    assert nc.get_stock_news("HK00700", max_news=1, date="2026-04-28") == payload["news"]
+
+
+def test_stock_news_writes_cache_to_db_not_json(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "_db_path_override", str(tmp_path / "trading.db"))
+    monkeypatch.setattr(db, "_config_db_path_override", str(tmp_path / "config.db"))
+    stock_news_dir = tmp_path / "stock_news"
+    monkeypatch.setattr(nc, "STOCK_NEWS_DIR", stock_news_dir, raising=False)
+    db.init_trading_db()
+    fetched = [
+        {
+            "title": "新新闻",
+            "content": "新增",
+            "publish_time": "2026-04-28 10:00:00",
+            "source": "akshare",
+        }
+    ]
+    monkeypatch.setattr(nc, "_mx_api_key", None)
+    monkeypatch.setattr(nc, "get_stock_news_via_akshare", lambda *args, **kwargs: fetched)
+
+    assert nc.get_stock_news("HK00700", max_news=1, date="2026-04-28") == fetched
+    assert not stock_news_dir.exists()
+    conn = db.get_connection()
+    row = conn.execute(
+        "SELECT payload_json FROM sentiment_cache WHERE cache_key = ?",
+        ("news:HK00700:2026-04-28",),
+    ).fetchone()
+    conn.close()
+    assert row is not None
+    assert json.loads(row["payload_json"])["news"] == fetched

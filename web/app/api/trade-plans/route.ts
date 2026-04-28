@@ -36,14 +36,38 @@ interface PlanPosition {
 
 /* ── DB helpers ── */
 
+const VALID_STATUSES = new Set(["active", "paused"]);
+const VALID_SCOPES = new Set(["real", "sim", "tick_monitor"]);
+
+function safeParseOrders(raw: string): Order[] {
+  try {
+    const parsed = JSON.parse(raw || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function normalizeStatus(status: unknown): TradePlan["status"] {
+  return typeof status === "string" && VALID_STATUSES.has(status)
+    ? (status as TradePlan["status"])
+    : "active";
+}
+
+function normalizeScope(scope: unknown): TradePlan["scope"] {
+  return typeof scope === "string" && VALID_SCOPES.has(scope)
+    ? (scope as TradePlan["scope"])
+    : "real";
+}
+
 function rowToPlan(row: { id: string; name: string; symbol: string; status: string; scope: string | null; created_at: string; orders_json: string }): TradePlan {
   return {
     name: row.name,
     symbol: row.symbol,
-    status: row.status as "active" | "paused",
-    scope: (row.scope as TradePlan["scope"]) || "real",
+    status: normalizeStatus(row.status),
+    scope: normalizeScope(row.scope),
     created_at: row.created_at,
-    orders: JSON.parse(row.orders_json),
+    orders: safeParseOrders(row.orders_json),
   };
 }
 
@@ -146,6 +170,7 @@ export async function GET() {
 export async function POST(request: Request) {
   const db = openTradingDb();
   try {
+    ensureScopeColumn(db);
     const body = await request.json();
     const { action } = body;
 
@@ -163,7 +188,8 @@ export async function POST(request: Request) {
         }
 
         // validate orders (shares required only for real/sim trade plans)
-        const scope = plan.scope || "real";
+        const scope = normalizeScope(plan.scope);
+        const status = normalizeStatus(plan.status);
         const orders = plan.orders || [];
         if (scope !== "tick_monitor") {
           for (const o of orders) {
@@ -183,7 +209,7 @@ export async function POST(request: Request) {
           id,
           plan.name,
           plan.symbol,
-          plan.status || "active",
+          status,
           scope,
           plan.created_at || new Date().toISOString().slice(0, 10),
           JSON.stringify(orders)
@@ -204,7 +230,7 @@ export async function POST(request: Request) {
 
         const plan = rowToPlan(row);
         const newName = updates.name !== undefined ? updates.name : plan.name;
-        const newStatus = updates.status !== undefined ? updates.status : plan.status;
+        const newStatus = updates.status !== undefined ? normalizeStatus(updates.status) : plan.status;
         let newOrders = plan.orders;
 
         // orders replacement
@@ -223,7 +249,7 @@ export async function POST(request: Request) {
           newOrders = updates.orders;
         }
 
-        const newScope = updates.scope !== undefined ? updates.scope : plan.scope;
+        const newScope = updates.scope !== undefined ? normalizeScope(updates.scope) : plan.scope;
 
         db.prepare(
           `UPDATE trade_plans SET name = ?, status = ?, scope = ?, orders_json = ?, updated_at = strftime('%s', 'now') WHERE id = ?`
@@ -262,7 +288,7 @@ export async function POST(request: Request) {
         if (!row) {
           return NextResponse.json({ success: false, message: `Plan ${id} not found` }, { status: 400 });
         }
-        const orders: Order[] = JSON.parse(row.orders_json);
+        const orders: Order[] = safeParseOrders(row.orders_json);
         const order = orders.find((o) => o.id === order_id);
         if (!order) {
           return NextResponse.json({ success: false, message: `Order ${order_id} not found in plan ${id}` }, { status: 400 });
