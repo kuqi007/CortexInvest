@@ -536,6 +536,7 @@ export default function ManagePage() {
       showToast("Code is required", "err");
       return;
     }
+    if (!/^(HK\d{5,6}|\d{6})$/.test(code)) { showToast("股票代码格式错误（港股HK00700，A股600519）", "err"); return; }
     const data: Record<string, unknown> = {};
     if (addType === "holding") data.type = "holding";
     if (addCost) data.cost = Number(addCost);

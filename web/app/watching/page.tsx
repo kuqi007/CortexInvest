@@ -69,6 +69,7 @@ function WatchingContent() {
   async function handleAdd() {
     const code = addCode.trim();
     if (!code) return;
+    if (!/^(HK\d{5,6}|\d{6})$/.test(code)) { alert("股票代码格式错误\n港股: HK00700  A股: 600519"); return; }
     try {
       const resp = await fetch("/api/config", {
         method: "POST",

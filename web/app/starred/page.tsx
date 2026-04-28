@@ -91,6 +91,7 @@ function StarredPage() {
   async function handleAdd() {
     const code = addCode.trim();
     if (!code) return;
+    if (!/^(HK\d{5,6}|\d{6})$/.test(code)) { alert("股票代码格式错误\n港股: HK00700  A股: 600519"); return; }
     const data: Record<string, unknown> = { star: true, type: addType };
     if (addType === "holding") {
       if (addCost) data.cost = Number(addCost);
