@@ -348,6 +348,7 @@ def load_watchlist_from_db() -> tuple[dict, dict]:
     """
     watchlist: dict = {}
     settings: dict = {}
+    conn = None
     try:
         conn = get_config_connection()
         # watchlist
@@ -392,16 +393,11 @@ def load_watchlist_from_db() -> tuple[dict, dict]:
                     settings[row["key"]] = float(row["value"])
                 except (TypeError, ValueError):
                     settings[row["key"]] = row["value"]
-        conn.close()
     except Exception as e:
-        logger.error(f"load_watchlist_from_db 失败，回退 JSON: {e}")
-        # 降级到 JSON（应急 fallback，避免 poller 停摆）
-        try:
-            with open(CONFIG_PATH, encoding="utf-8") as f:
-                cfg = json.load(f)
-            return cfg.get("watchlist", {}), cfg.get("settings", {})
-        except Exception:
-            return {}, {}
+        raise RuntimeError(f"Failed to read watchlist from config.db: {e}") from e
+    finally:
+        if conn is not None:
+            conn.close()
     return watchlist, settings
 
 
@@ -425,6 +421,7 @@ def _backfill_missing_names(stocks: list[dict], watchlist: dict) -> bool:
         return False
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = None
     try:
         conn = get_config_connection()
         cur = conn.cursor()
@@ -436,9 +433,11 @@ def _backfill_missing_names(stocks: list[dict], watchlist: dict) -> bool:
                 (name, now, code),
             )
         conn.commit()
-        conn.close()
     except Exception as e:
         logger.warning(f"backfill names DB write failed: {e}")
+    finally:
+        if conn is not None:
+            conn.close()
 
     logger.info(f"自动填充股票名称: {updates}")
     return True
@@ -504,7 +503,7 @@ def build_services(stocks: list[dict], watchlist: dict) -> list[dict]:
     """将东方财富原始数据组装为前端 Service 格式
 
     只写行情数据，不写 config 字段（type/cost/shares/hidden/above/below/pnl）。
-    config 字段由 web /api/metrics 实时从 monitor_config.json 合并，
+    config 字段由 web /api/metrics 实时从 config.db 合并，
     确保 UI 端操作（隐藏、改持仓等）立即生效，不依赖 poller 周期。
     """
     services = []

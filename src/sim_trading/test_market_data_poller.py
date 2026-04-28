@@ -3,7 +3,7 @@ Tests for market_data_poller: load_watchlist_from_db, _backfill_missing_names.
 
 Coverage:
   1. load_watchlist_from_db: reads watchlist + settings from DB
-  2. load_watchlist_from_db: fallback to JSON when DB unavailable
+  2. load_watchlist_from_db: fails closed when DB unavailable
   3. load_watchlist_from_db: JSON out of sync does NOT affect DB reads
   4. _backfill_missing_names: only writes to DB, not JSON
   5. _backfill_missing_names: skips entries where name already filled

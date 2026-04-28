@@ -1,10 +1,11 @@
 import time
+from unittest.mock import MagicMock
 
 import src.sim_trading.db as db
 from src.tools import monitor_lock
 
 
-def test_monitor_lock_ignores_recent_market_data_json(tmp_path, monkeypatch):
+def test_monitor_lock_acquires_when_no_active_lease(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "_config_db_path_override", str(tmp_path / "config.db"))
     monkeypatch.setattr(db, "_db_path_override", str(tmp_path / "trading.db"))
     market_data = tmp_path / "market_data.json"
@@ -47,3 +48,42 @@ def test_monitor_lock_rejects_active_remote_poller_lease(tmp_path, monkeypatch):
 
     assert lock.try_acquire() is False
     assert lock.get_lock_holder() == ("remote-host", 123)
+
+
+def test_refresh_heartbeat_returns_false_when_db_update_fails(monkeypatch):
+    lock = monitor_lock.MonitorLock.__new__(monitor_lock.MonitorLock)
+    lock.hostname = "local-host"
+    lock.pid = 123
+    lock.holder_id = "local-host:123"
+    lock.is_leader = True
+
+    class BrokenConn:
+        def execute(self, *args, **kwargs):
+            raise RuntimeError("db busy")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(monitor_lock, "get_config_connection", lambda: BrokenConn())
+
+    assert lock.refresh_heartbeat() is False
+
+
+def test_try_acquire_closes_connection(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "_config_db_path_override", str(tmp_path / "config.db"))
+    monkeypatch.setattr(db, "_db_path_override", str(tmp_path / "trading.db"))
+    monkeypatch.setattr(monitor_lock, "_hostname", lambda: "local-host")
+    db.init_config_db()
+    real_conn = db.get_config_connection()
+    wrapped_conn = MagicMock(wraps=real_conn)
+    wrapped_conn.close = MagicMock(wraps=real_conn.close)
+    monkeypatch.setattr(monitor_lock, "get_config_connection", lambda: wrapped_conn)
+
+    lock = monitor_lock.MonitorLock.__new__(monitor_lock.MonitorLock)
+    lock.hostname = "local-host"
+    lock.pid = 123
+    lock.holder_id = "local-host:123"
+    lock.is_leader = False
+
+    assert lock.try_acquire() is True
+    wrapped_conn.close.assert_called_once()

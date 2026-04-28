@@ -42,9 +42,7 @@ def config_db(tmp_path, monkeypatch):
     return tmp_path / "config.db"
 
 
-def test_read_monitor_config_reads_db_when_json_is_missing(config_db, monkeypatch, tmp_path):
-    monkeypatch.setattr(config_reader, "JSON_PATH", tmp_path / "missing.json")
-
+def test_read_monitor_config_reads_db_without_json_fallback(config_db):
     cfg = config_reader.read_monitor_config()
 
     assert cfg["watchlist"]["HK09988"]["name"] == "阿里巴巴"
@@ -58,10 +56,7 @@ def test_read_monitor_config_raises_when_db_unavailable_and_json_exists(
     tmp_path, monkeypatch
 ):
     missing_db = tmp_path / "missing-config.db"
-    stale_json = tmp_path / "monitor_config.json"
-    stale_json.write_text('{"watchlist": {"KR000660": {"name": "SK"}}}')
     monkeypatch.setattr(db, "_config_db_path_override", str(missing_db))
-    monkeypatch.setattr(config_reader, "JSON_PATH", stale_json)
 
     with pytest.raises(RuntimeError, match="config.db"):
         config_reader.read_monitor_config()

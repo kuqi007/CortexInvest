@@ -1,8 +1,8 @@
-"""Unified config reader — DB first, JSON as backup.
+"""Unified config reader — DB-only runtime source.
 
 All Python tools should use this module to read monitor config.
-- Primary source: SQLite (sim_trading.db)
-- Backup source: JSON (monitor_config.json)
+- Primary source: SQLite config.db
+- JSON files are audit/archive only and are not runtime fallback.
 
 Usage:
     from src.utils.config_reader import read_monitor_config
@@ -15,35 +15,14 @@ Usage:
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
 from src.sim_trading.db import get_config_connection
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-JSON_PATH = PROJECT_ROOT / "src" / "data" / "monitor_config.json"
 
-
-def _num_or_none(v: Any) -> float | None:
-    if v is None:
-        return None
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return None
-
-
-def _int_or_none(v: Any) -> int | None:
-    if v is None:
-        return None
-    try:
-        return int(v)
-    except (TypeError, ValueError):
-        return None
-
-
-def _read_from_db() -> dict[str, Any] | None:
-    """Read config from SQLite. Returns None if DB/table not available."""
+def _read_from_db() -> dict[str, Any]:
+    """Read config from SQLite. Raises when DB/table is not available."""
+    conn = None
     try:
         conn = get_config_connection()
 
@@ -52,13 +31,12 @@ def _read_from_db() -> dict[str, Any] | None:
             "SELECT name FROM sqlite_master WHERE type='table' AND name='monitor_watchlist'"
         )
         if not cursor.fetchone():
-            conn.close()
-            return None
+            raise RuntimeError("config.db monitor_watchlist table is missing")
 
         # Read watchlist
         rows = conn.execute(
             """
-            SELECT symbol, name, alias, list_type, cost, shares, lot,
+            SELECT symbol, name, list_type, cost, shares, lot,
                    hidden, star, dip_buy, tags, watch_price, watch_price_date
             FROM monitor_watchlist
             ORDER BY symbol
@@ -70,14 +48,10 @@ def _read_from_db() -> dict[str, Any] | None:
             "SELECT key, value FROM monitor_settings ORDER BY key"
         ).fetchall()
 
-        conn.close()
-        
         watchlist: dict[str, dict[str, Any]] = {}
         for r in rows:
             entry: dict[str, Any] = {"name": r["name"]}
             
-            if r["alias"]:
-                entry["alias"] = r["alias"]
             if r["list_type"]:
                 entry["type"] = r["list_type"]
             if r["cost"] is not None:
@@ -116,93 +90,24 @@ def _read_from_db() -> dict[str, Any] | None:
         
         return {"watchlist": watchlist, "settings": settings}
         
-    except Exception:
-        return None
-
-
-def _read_from_json() -> dict[str, Any]:
-    """Read config from JSON file (fallback)."""
-    raw = json.loads(JSON_PATH.read_text(encoding="utf-8"))
-    
-    # Normalize: merge holdings + watching into watchlist
-    watchlist_raw = raw.get("watchlist", {}) or {}
-    if not watchlist_raw:
-        holdings_raw = raw.get("holdings", {}) or {}
-        watching_raw = raw.get("watching", {}) or {}
-        merged: dict[str, Any] = {}
-        
-        for symbol, entry in (holdings_raw or {}).items():
-            entry = dict(entry or {})
-            entry["type"] = "holding"
-            merged[symbol] = entry
-        
-        for symbol, entry in (watching_raw or {}).items():
-            if symbol in merged:
-                continue
-            entry = dict(entry or {})
-            entry["type"] = "watching"
-            merged[symbol] = entry
-        
-        watchlist_raw = merged
-    
-    # Normalize entries
-    normalized_watchlist: dict[str, dict[str, Any]] = {}
-    for symbol, raw_entry in sorted(watchlist_raw.items()):
-        entry = raw_entry or {}
-        list_type = "holding" if entry.get("type") == "holding" else "watching"
-        raw_tags = entry.get("tags", [])
-        tags = list(raw_tags) if isinstance(raw_tags, (list, tuple)) else []
-        
-        normalized_watchlist[symbol] = {
-            "name": str(entry.get("name", symbol)),
-            "type": list_type,
-            "cost": _num_or_none(entry.get("cost")),
-            "shares": _int_or_none(entry.get("shares")),
-            "lot": _int_or_none(entry.get("lot")),
-            "hidden": bool(entry.get("hidden", False)),
-            "star": bool(entry.get("star", False)),
-            "dip_buy": bool(entry.get("dip_buy", False)),
-            "tags": tags,
-            "watch_price": _num_or_none(entry.get("watch_price")),
-            "watch_price_date": entry.get("watch_price_date") or None,
-        }
-        
-        # Remove None values for cleaner output
-        normalized_watchlist[symbol] = {
-            k: v for k, v in normalized_watchlist[symbol].items() 
-            if v is not None and v != False and v != []
-        }
-        if tags:
-            normalized_watchlist[symbol]["tags"] = tags
-    
-    # Normalize settings
-    settings_raw = raw.get("settings", {}) or {}
-    normalized_settings: dict[str, float] = {}
-    for key, val in sorted(settings_raw.items()):
-        n = _num_or_none(val)
-        if n is not None:
-            normalized_settings[key] = n
-    
-    return {"watchlist": normalized_watchlist, "settings": normalized_settings}
-
+    except Exception as exc:
+        raise RuntimeError(f"Failed to read monitor config from config.db: {exc}") from exc
+    finally:
+        if conn is not None:
+            conn.close()
 
 def read_monitor_config(prefer_db: bool = True) -> dict[str, Any]:
-    """Read monitor config from DB (primary) or JSON (fallback).
+    """Read monitor config from config.db only.
     
     Args:
-        prefer_db: If True, try DB first; if False, read JSON directly
+        prefer_db: Deprecated compatibility argument; ignored.
     
     Returns:
         dict with keys: watchlist, settings
         watchlist: {symbol: {name, type?, cost?, shares?, lot?, hidden?, star?, dip_buy?, tags?, watch_price?, watch_price_date?}}
         settings: {key: value}
     """
-    if prefer_db:
-        db_config = _read_from_db()
-        if db_config is not None:
-            return db_config
-    
-    return _read_from_json()
+    return _read_from_db()
 
 
 def get_watchlist_codes() -> list[str]:
