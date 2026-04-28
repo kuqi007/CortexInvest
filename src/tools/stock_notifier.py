@@ -49,7 +49,7 @@ NON_TRADING_CHECK_SEC = 60  # mtime check interval outside trading hours
 # tick_monitor per-symbol cooldown: prevents notification spam for same symbol
 # format: {symbol: last_notify_ts}
 _tick_symbol_cooldown: dict[str, float] = {}
-_TICK_SYMBOL_COOLDOWN_SEC = 1800  # 30 min per symbol for tick_monitor alerts
+_TICK_SYMBOL_COOLDOWN_SEC = 180  # 3 min per symbol for tick_monitor alerts
 
 
 def _archive_and_reset(today):
@@ -1574,7 +1574,7 @@ def check_tick_monitor_signals() -> tuple[list[dict], list[dict]]:
     """从 trading.db 读取未处理的 tick_monitor 信号（tick_monitor 直接写 DB）。
 
     tick_monitor 写 DB → notifier 消费 → stealth_dispatch:
-      - Feishu: 批量推送（30min per-symbol cooldown）
+      - Feishu: 批量推送（3min per-symbol cooldown）
       - macOS: 弹窗 + 声音（无额外 cooldown）
       - Web: write_alert_events
 

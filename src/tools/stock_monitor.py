@@ -1256,8 +1256,14 @@ def feishu_send(
         header_color = "blue"
         header_icon = "📌"
 
-    # 极简卡片: 窄屏 + header 显示涨跌% + 一行正文
-    header_title = f"{header_icon} {pct_str}" if stock_info else title
+    # 极简卡片: 窄屏 + header 显示股票名 + 代码 + 涨跌%
+    if stock_info:
+        name = stock_info.get("name", "")
+        code = stock_info.get("code", "")
+        name_part = f"{name}({code})" if name and code else (name or code or "")
+        header_title = f"{header_icon} {name_part} {pct_str}"
+    else:
+        header_title = title
     card = {
         "config": {"wide_screen_mode": False},
         "header": {
@@ -1303,7 +1309,7 @@ def feishu_send(
 
 
 def feishu_send_tick_batch(alerts: list[dict]) -> bool:
-    """发送 tick_monitor 批量飞书卡片（所有信号合并为1条消息）
+    """发送 tick_monitor 批量飞书卡片（按股票分组，每只股票一个卡片，按时间排序）
 
     Args:
         alerts: tick_monitor 告警列表，每条包含 message 或 _stealth 字段
@@ -1318,29 +1324,13 @@ def feishu_send_tick_batch(alerts: list[dict]) -> bool:
     if not token:
         return False
 
-    # 构建多行内容
-    n = len(alerts)
-    header_content = f"🎯 短线盯盘信号 ({n}条)"
-
-    lines = []
+    # 按股票分组
+    groups: dict[str, list[dict]] = {}
     for a in alerts:
-        content = a.get("_stealth") or a.get("message", "")
-        if content:
-            lines.append(content)
-
-    body = "\n".join(lines) if lines else header_content
-
-    # 使用蓝色 header（tick_monitor 非涨跌信号）
-    card = {
-        "config": {"wide_screen_mode": False},
-        "header": {
-            "title": {"tag": "plain_text", "content": header_content},
-            "template": "blue",
-        },
-        "elements": [
-            {"tag": "div", "text": {"tag": "lark_md", "content": body}},
-        ],
-    }
+        name = a.get("_name", "") or a.get("symbol", "未知")
+        if name not in groups:
+            groups[name] = []
+        groups[name].append(a)
 
     url = "https://open.feishu.cn/open-apis/im/v1/messages"
     if FEISHU_CHAT_ID:
@@ -1353,26 +1343,64 @@ def feishu_send_tick_batch(alerts: list[dict]) -> bool:
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
-    payload = {
-        "receive_id": receive_id,
-        "msg_type": "interactive",
-        "content": json.dumps(card),
-    }
 
-    try:
-        resp = requests.post(
-            url, params=params, headers=headers, json=payload, timeout=10
-        )
-        resp.raise_for_status()
-        result = resp.json()
-        if result.get("code") != 0:
-            logger.warning(f"飞书批量消息发送失败: {result}")
-            return False
-        logger.info(f"飞书批量通知已发送: {n}条 tick_monitor 信号")
-        return True
-    except Exception as e:
-        logger.warning(f"飞书批量消息发送异常: {e}")
-        return False
+    success = True
+    for name, stock_alerts in groups.items():
+        # 按时间排序（早→晚）
+        stock_alerts.sort(key=lambda a: a.get("_tick_time", ""))
+
+        # 方向emoji
+        directions = set(a.get("side", "") for a in stock_alerts)
+        if len(directions) == 1:
+            d = list(directions)[0]
+            emoji = "📈" if d == "buy" else "📉"
+            template = "green" if d == "buy" else "red"
+        else:
+            emoji, template = "⚡", "blue"
+
+        n = len(stock_alerts)
+        header_content = f"{emoji} {name} ({n}条)"
+
+        lines = []
+        for a in stock_alerts:
+            content = a.get("_stealth") or a.get("message", "")
+            if content:
+                lines.append(content)
+
+        body = "\n".join(lines)
+        card = {
+            "config": {"wide_screen_mode": False},
+            "header": {
+                "title": {"tag": "plain_text", "content": header_content},
+                "template": template,
+            },
+            "elements": [
+                {"tag": "div", "text": {"tag": "lark_md", "content": body}},
+            ],
+        }
+
+        payload = {
+            "receive_id": receive_id,
+            "msg_type": "interactive",
+            "content": json.dumps(card),
+        }
+
+        try:
+            resp = requests.post(
+                url, params=params, headers=headers, json=payload, timeout=10
+            )
+            resp.raise_for_status()
+            result = resp.json()
+            if result.get("code") != 0:
+                logger.warning(f"飞书批量消息发送失败: {result}")
+                success = False
+            else:
+                logger.info(f"飞书批量通知已发送: {name} ({n}条)")
+        except Exception as e:
+            logger.warning(f"飞书批量消息发送异常: {e}")
+            success = False
+
+    return success
 
 
 # ══════════════════════════════════════════
