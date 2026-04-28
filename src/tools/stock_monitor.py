@@ -73,6 +73,7 @@ DEFAULT_SETTINGS = {
 FEISHU_APP_ID = os.environ.get("FEISHU_APP_ID", "")
 FEISHU_APP_SECRET = os.environ.get("FEISHU_APP_SECRET", "")
 FEISHU_USER_OPEN_ID = os.environ.get("FEISHU_USER_OPEN_ID", "")
+FEISHU_CHAT_ID = os.environ.get("FEISHU_CHAT_ID", "")  # 群聊 ID，优先级高于 USER_OPEN_ID
 _feishu_access_token: str | None = None
 _feishu_token_expires_at: float = 0
 
@@ -1080,6 +1081,9 @@ def notify(
     if stock_info and stock_info.get("_kind") in ("trade_plan", "tick_monitor"):
         should_feishu = True
     # 无 stock_info（CLI 看板 alerts / 系统消息）→ 不推飞书
+    # _skip_feishu 标记表示已在外部发了 batch Feishu，跳过
+    if stock_info and stock_info.get("_skip_feishu"):
+        should_feishu = False
 
     # 同一 symbol 30 分钟内只推一次飞书（避免价格反复触碰条件时刷屏）
     if should_feishu:
@@ -1266,13 +1270,18 @@ def feishu_send(
     }
 
     url = "https://open.feishu.cn/open-apis/im/v1/messages"
-    params = {"receive_id_type": "open_id"}
+    if FEISHU_CHAT_ID:
+        params = {"receive_id_type": "chat_id"}
+        receive_id = FEISHU_CHAT_ID
+    else:
+        params = {"receive_id_type": "open_id"}
+        receive_id = FEISHU_USER_OPEN_ID
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
     payload = {
-        "receive_id": FEISHU_USER_OPEN_ID,
+        "receive_id": receive_id,
         "msg_type": "interactive",
         "content": json.dumps(card),
     }
@@ -1290,6 +1299,79 @@ def feishu_send(
         return True
     except Exception as e:
         logger.warning(f"飞书消息发送异常: {e}")
+        return False
+
+
+def feishu_send_tick_batch(alerts: list[dict]) -> bool:
+    """发送 tick_monitor 批量飞书卡片（所有信号合并为1条消息）
+
+    Args:
+        alerts: tick_monitor 告警列表，每条包含 message 或 _stealth 字段
+
+    Returns:
+        是否发送成功
+    """
+    if not alerts:
+        return True
+
+    token = feishu_get_token()
+    if not token:
+        return False
+
+    # 构建多行内容
+    n = len(alerts)
+    header_content = f"🎯 短线盯盘信号 ({n}条)"
+
+    lines = []
+    for a in alerts:
+        content = a.get("_stealth") or a.get("message", "")
+        if content:
+            lines.append(content)
+
+    body = "\n".join(lines) if lines else header_content
+
+    # 使用蓝色 header（tick_monitor 非涨跌信号）
+    card = {
+        "config": {"wide_screen_mode": False},
+        "header": {
+            "title": {"tag": "plain_text", "content": header_content},
+            "template": "blue",
+        },
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md", "content": body}},
+        ],
+    }
+
+    url = "https://open.feishu.cn/open-apis/im/v1/messages"
+    if FEISHU_CHAT_ID:
+        params = {"receive_id_type": "chat_id"}
+        receive_id = FEISHU_CHAT_ID
+    else:
+        params = {"receive_id_type": "open_id"}
+        receive_id = FEISHU_USER_OPEN_ID
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "receive_id": receive_id,
+        "msg_type": "interactive",
+        "content": json.dumps(card),
+    }
+
+    try:
+        resp = requests.post(
+            url, params=params, headers=headers, json=payload, timeout=10
+        )
+        resp.raise_for_status()
+        result = resp.json()
+        if result.get("code") != 0:
+            logger.warning(f"飞书批量消息发送失败: {result}")
+            return False
+        logger.info(f"飞书批量通知已发送: {n}条 tick_monitor 信号")
+        return True
+    except Exception as e:
+        logger.warning(f"飞书批量消息发送异常: {e}")
         return False
 
 

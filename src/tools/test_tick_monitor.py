@@ -41,15 +41,6 @@ def tmp_trade_plans(tmp_path):
     tm.TRADE_PLANS_PATH = orig
 
 
-@pytest.fixture
-def tmp_state_path(tmp_path):
-    """Return a temporary STATE_PATH."""
-    orig = tm.STATE_PATH
-    tm.STATE_PATH = tmp_path / "tick_monitor_state.json"
-    yield tm.STATE_PATH
-    tm.STATE_PATH = orig
-
-
 # ══════════════════════════════════════════
 # check_trigger
 # ══════════════════════════════════════════
@@ -180,40 +171,14 @@ class TestLoadTickMonitorPlans:
 
 
 # ══════════════════════════════════════════
-# State persistence
-# ══════════════════════════════════════════
-
-
-class TestStatePersistence:
-    def test_load_missing_returns_empty(self, tmp_path):
-        tm.STATE_PATH = tmp_path / "missing.json"
-        assert tm.load_state() == {}
-
-    def test_load_and_save_roundtrip(self, tmp_state_path):
-        state = {"order_1": time.time(), "order_2": time.time() + 10}
-        tm.save_state(state)
-        loaded = tm.load_state()
-        assert loaded == pytest.approx(state, abs=0.001)
-
-    def test_load_corrupted_returns_empty(self, tmp_state_path):
-        tmp_state_path.write_text("not json", encoding="utf-8")
-        assert tm.load_state() == {}
-
-    def test_save_atomic_write(self, tmp_state_path):
-        tm.save_state({"o1": 123.0})
-        assert tmp_state_path.exists()
-        assert tmp_state_path.with_suffix(".tmp").exists() is False
-
-
-# ══════════════════════════════════════════
 # send_tick_notification
 # ══════════════════════════════════════════
 
 
 class TestSendTickNotification:
-    @patch("src.tools.tick_monitor.feishu_send")
-    def test_buy_notification(self, mock_feishu):
-        mock_feishu.return_value = True
+    @patch("src.tools.tick_monitor._write_signals")
+    def test_buy_notification(self, mock_write_signals):
+        mock_write_signals.return_value = True
         order = {
             "side": "buy",
             "op": "<=",
@@ -223,17 +188,19 @@ class TestSendTickNotification:
         tick = {"price": 84.5, "direction": "BUY", "volume": 100, "time": "10:30:00"}
         result = tm.send_tick_notification("华勤技术", "HK03296", order, tick)
         assert result is True
-        mock_feishu.assert_called_once()
-        call = mock_feishu.call_args
-        assert "短线盯盘触发" in call[0][0]       # title positional arg
-        assert "买入信号" in call[0][1]            # message positional arg
-        stock_info = call[1]["stock_info"]
-        assert stock_info["code"] == "HK03296"
-        assert stock_info["price"] == "84.5"
+        mock_write_signals.assert_called_once()
+        call_args = mock_write_signals.call_args[0][0]
+        assert len(call_args) == 1
+        alert = call_args[0]
+        assert alert["symbol"] == "HK03296"
+        assert alert["side"] == "buy"
+        assert alert["trigger_price"] == 85
+        assert alert["tick_price"] == 84.5
+        assert alert["_level"] == 1
 
-    @patch("src.tools.tick_monitor.feishu_send")
-    def test_sell_notification(self, mock_feishu):
-        mock_feishu.return_value = True
+    @patch("src.tools.tick_monitor._write_signals")
+    def test_sell_notification(self, mock_write_signals):
+        mock_write_signals.return_value = True
         order = {
             "side": "sell",
             "op": ">=",
@@ -243,16 +210,72 @@ class TestSendTickNotification:
         tick = {"price": 95.5, "direction": "SELL", "volume": 200, "time": "14:00:00"}
         result = tm.send_tick_notification("华勤技术", "HK03296", order, tick)
         assert result is True
-        call = mock_feishu.call_args
-        assert "卖出信号" in call[0][1]
+        call_args = mock_write_signals.call_args[0][0]
+        assert len(call_args) == 1
+        alert = call_args[0]
+        assert alert["symbol"] == "HK03296"
+        assert alert["side"] == "sell"
+        assert alert["trigger_price"] == 95
+        assert alert["tick_price"] == 95.5
 
-    @patch("src.tools.tick_monitor.feishu_send")
-    def test_feishu_failure(self, mock_feishu):
-        mock_feishu.return_value = False
+    @patch("src.tools.tick_monitor._write_signals")
+    def test_write_signals_failure(self, mock_write_signals):
+        mock_write_signals.return_value = False
         order = {"side": "buy", "op": "<=", "price": 85}
         tick = {"price": 84.0}
         result = tm.send_tick_notification("Test", "HK00001", order, tick)
         assert result is False
+
+
+# ══════════════════════════════════════════
+# get_pending_tick_signals
+# ══════════════════════════════════════════
+
+
+class TestGetPendingTickSignals:
+    @patch("src.sim_trading.db.get_connection")
+    def test_empty_db_returns_empty_lists(self, mock_get_conn):
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value.fetchall.return_value = []
+        mock_get_conn.return_value = mock_conn
+
+        alerts, web_only = tm.get_pending_tick_signals()
+        assert alerts == []
+        assert web_only == []
+
+    @patch("src.sim_trading.db.get_connection")
+    def test_returns_alerts_split_by_level(self, mock_get_conn):
+        mock_conn = MagicMock()
+        # Two rows: one L1, one L2
+        mock_conn.execute.return_value.fetchall.return_value = [
+            (1, 1000, "HK00001", "plan1", "o1", "buy", "<=", "label1",
+             85.0, 84.5, "10:00:00", "BUY", 100, "title1", "msg1", 1),
+            (2, 2000, "HK00002", "plan2", "o2", "sell", ">=", "label2",
+             95.0, 95.5, "10:01:00", "SELL", 200, "title2", "msg2", 2),
+        ]
+        mock_get_conn.return_value = mock_conn
+
+        alerts, web_only = tm.get_pending_tick_signals()
+        assert len(alerts) == 1
+        assert len(web_only) == 1
+        assert alerts[0]["symbol"] == "HK00001"
+        assert alerts[0]["_level"] == 1
+        assert web_only[0]["symbol"] == "HK00002"
+        assert web_only[0]["_level"] == 2
+
+    @patch("src.sim_trading.db.get_connection")
+    def test_marks_as_dispatched(self, mock_get_conn):
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value.fetchall.return_value = [
+            (1, 1000, "HK00001", "plan1", "o1", "buy", "<=", "label1",
+             85.0, 84.5, "10:00:00", "BUY", 100, "title1", "msg1", 1),
+        ]
+        mock_get_conn.return_value = mock_conn
+
+        tm.get_pending_tick_signals()
+        # Verify UPDATE was called with dispatched = 1
+        update_call = mock_conn.execute.call_args
+        assert "UPDATE tick_monitor_events SET dispatched = 1" in str(update_call)
 
 
 # ══════════════════════════════════════════
@@ -310,21 +333,21 @@ class TestRunTickMonitor:
     @patch("src.tools.tick_monitor.time.sleep")
     @patch("src.tools.tick_monitor.is_any_market_open")
     @patch("src.tools.tick_monitor.FutuConnection")
-    @patch("src.tools.tick_monitor.feishu_send")
+    @patch("src.tools.tick_monitor._write_signals")
     def test_triggers_and_cools_down(
-        self, mock_feishu, mock_conn_cls, mock_open, mock_sleep
+        self, mock_write_signals, mock_conn_cls, mock_open, mock_sleep
     ):
         """
-        Simulate two ticks: first triggers, second is within cooldown.
-        Then a third tick after cooldown passes triggers again.
+        Simulate ticks: each trigger calls _write_signals (cooldown is now in stock_notifier).
+        tick_monitor writes every trigger; stock_notifier handles cooldown dedup.
         """
-        mock_feishu.return_value = True
+        mock_write_signals.return_value = True
         mock_open.return_value = True
 
         mock_conn = MagicMock()
         # tick 1: triggers at price 84
-        # tick 2: still 84 but within cooldown
-        # tick 3: after cooldown, triggers again
+        # tick 2: same price, triggers again (no cooldown in tick_monitor)
+        # tick 3: after some time, triggers again
         mock_conn.get_latest_tick.side_effect = [
             {"price": 84.0, "direction": "BUY", "volume": 100, "time": "10:00:00"},
             {"price": 84.0, "direction": "BUY", "volume": 100, "time": "10:01:00"},
@@ -352,17 +375,6 @@ class TestRunTickMonitor:
             }
         }
 
-        # Override time to simulate cooldown window.
-        # Note: get_latest_tick is mocked via side_effect list, so connect()
-        # body is NOT executed -> time.time() is only called for `now = time.time()`.
-        base_time = 1000.0
-        time_values = [
-            base_time,      # loop 1: now
-            base_time,      # loop 2: now
-            base_time + 10, # loop 3: now (still cooldown)
-            base_time + 400 # loop 4: now (past cooldown)
-        ]
-
         loop_count = [0]
 
         def counting_sleep(seconds):
@@ -372,14 +384,13 @@ class TestRunTickMonitor:
 
         mock_sleep.side_effect = counting_sleep
 
-        with patch("src.tools.tick_monitor.time.time", side_effect=time_values):
-            with patch.object(tm, "load_tick_monitor_plans", return_value=plans):
-                with patch.object(tm, "load_state", return_value={}):
-                    with pytest.raises(StopIteration):
-                        tm.run_tick_monitor(poll_interval=5)
+        with patch.object(tm, "load_tick_monitor_plans", return_value=plans):
+            with pytest.raises(StopIteration):
+                tm.run_tick_monitor(poll_interval=5)
 
-        # feishu_send should be called twice (tick 1 and tick 4)
-        assert mock_feishu.call_count == 2
+        # _write_signals should be called 4 times (once per trigger including sentinel)
+        # Cooldown dedup is handled by stock_notifier, not tick_monitor
+        assert mock_write_signals.call_count == 4
 
     @patch("src.tools.tick_monitor.time.sleep")
     @patch("src.tools.tick_monitor.is_any_market_open")

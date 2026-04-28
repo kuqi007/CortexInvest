@@ -46,8 +46,6 @@ Tick Monitor — 短线盯盘 Daemon
   - sell + op="<=" → 最新 tick price <= trigger price → 触发
   - sell + op=">=" → 最新 tick price >= trigger price → 触发
 
-通知冷却: 同一订单触发后 5 分钟内不再重复通知（防止抖动）
-状态持久化: 冷却状态写入 tick_monitor_state.json，daemon 重启后不重发
 """
 
 import json
@@ -70,7 +68,6 @@ logger = setup_logger("tick_monitor")
 
 # ── 配置 ──
 TRADE_PLANS_PATH = PROJECT_ROOT / "src" / "data" / "trade_plans.json"
-STATE_PATH = PROJECT_ROOT / "src" / "data" / "tick_monitor_state.json"
 
 # DB table SQL for tick_monitor_events
 _TICK_EVENTS_TABLE_SQL = (
@@ -107,7 +104,6 @@ OPEND_HOST = "127.0.0.1"
 OPEND_PORT = 11111
 RECONNECT_COOLDOWN = 60
 POLL_INTERVAL = 5  # 秒
-COOLDOWN_SEC = 300  # 同一订单触发后冷却 5 分钟
 BACKOFF_AFTER_FAIL = 30  # 连续失败后的退避间隔
 MAX_CONSECUTIVE_FAIL = 3  # 超过此次连续失败后进入退避
 
@@ -241,37 +237,6 @@ def load_tick_monitor_plans() -> dict[str, dict]:
 
 
 # ══════════════════════════════════════════
-# 状态持久化 (冷却状态)
-# ══════════════════════════════════════════
-
-
-def load_state() -> dict[str, float]:
-    """加载持久化的冷却状态"""
-    if not STATE_PATH.exists():
-        return {}
-    try:
-        with open(STATE_PATH, "r", encoding="utf-8") as f:
-            raw = json.load(f)
-        return {k: float(v) for k, v in raw.items()}
-    except Exception as e:
-        logger.warning(f"Failed to load tick_monitor_state.json: {e}")
-        return {}
-
-
-def save_state(cooldowns: dict[str, float]) -> None:
-    """原子写入冷却状态"""
-    try:
-        # 确保目录存在
-        STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        tmp = STATE_PATH.with_suffix(".tmp")
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(cooldowns, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, STATE_PATH)
-        logger.debug(f"State saved: {len(cooldowns)} entries")
-    except Exception as e:
-        logger.warning(f"Failed to save tick_monitor_state.json: {e}")
-
-
 # ══════════════════════════════════════════
 # 触发检测
 # ══════════════════════════════════════════
@@ -450,7 +415,7 @@ def send_tick_notification(
     order: dict,
     tick: dict,
 ) -> bool:
-    """将逐笔触发通知写入 tick_monitor_signals.json，由 stock_notifier 统一分发。"""
+    """将逐笔触发通知写入 trading.db:tick_monitor_events，由 stock_notifier 统一分发。"""
     side = order.get("side", "buy")
     op = order.get("op", "<=")
     trigger_price = order.get("price", 0)
@@ -512,7 +477,6 @@ def run_tick_monitor(poll_interval: int = POLL_INTERVAL):
     signal.signal(signal.SIGTERM, _sigterm_handler)
 
     conn = FutuConnection()
-    cooldowns = load_state()
     fail_count = 0
 
     try:
@@ -552,11 +516,6 @@ def run_tick_monitor(poll_interval: int = POLL_INTERVAL):
                     if not order_id:
                         continue
 
-                    # 冷却检查
-                    last_trigger = cooldowns.get(order_id, 0)
-                    if now - last_trigger < COOLDOWN_SEC:
-                        continue
-
                     if check_trigger(order, tick_price):
                         logger.info(
                             f"🎯 TRIGGERED: {plan_name} {order_id} "
@@ -566,8 +525,6 @@ def run_tick_monitor(poll_interval: int = POLL_INTERVAL):
                         # 发送通知
                         success = send_tick_notification(plan_name, symbol, order, tick)
                         if success:
-                            cooldowns[order_id] = now
-                            save_state(cooldowns)
                             logger.info(f"Notification sent for {plan_id}.{order_id}")
                         else:
                             logger.warning(f"Notification failed for {plan_id}.{order_id}")
@@ -589,7 +546,6 @@ def run_tick_monitor(poll_interval: int = POLL_INTERVAL):
         logger.info("Tick Monitor 收到中断信号，退出")
     finally:
         conn.close()
-        save_state(cooldowns)
         logger.info("Tick Monitor 已停止")
 
 

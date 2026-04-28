@@ -46,6 +46,11 @@ ARCHIVE_DIR = PROJECT_ROOT / "src" / "data" / "archive"
 TRADING_CHECK_SEC = 3  # mtime check interval during trading hours
 NON_TRADING_CHECK_SEC = 60  # mtime check interval outside trading hours
 
+# tick_monitor per-symbol cooldown: prevents notification spam for same symbol
+# format: {symbol: last_notify_ts}
+_tick_symbol_cooldown: dict[str, float] = {}
+_TICK_SYMBOL_COOLDOWN_SEC = 1800  # 30 min per symbol for tick_monitor alerts
+
 
 def _archive_and_reset(today):
     """归档昨日 market_data + l2_strategy_signals，清理 30 天前 alert_events。
@@ -1568,11 +1573,14 @@ check_l2_signals._seen_today = _load_seen_today_from_db()
 def check_tick_monitor_signals() -> tuple[list[dict], list[dict]]:
     """从 trading.db 读取未处理的 tick_monitor 信号（tick_monitor 直接写 DB）。
 
-    tick_monitor 写 DB → notifier 消费 → 统一 dispatch。
+    tick_monitor 写 DB → notifier 消费 → stealth_dispatch:
+      - Feishu: 批量推送（30min per-symbol cooldown）
+      - macOS: 弹窗 + 声音（无额外 cooldown）
+      - Web: write_alert_events
 
     Returns:
         (alerts_to_dispatch, alerts_web_only):
-            - alerts_to_dispatch: L1 alerts → stealth_dispatch with sound
+            - alerts_to_dispatch: L1 alerts → stealth_dispatch
             - alerts_web_only: L3 alerts → write to DB only
     """
     try:
@@ -1607,27 +1615,68 @@ def stealth_dispatch(alerts: list[dict], *, sound: str = ""):
     # Separate portfolio-level from per-stock alerts
     portfolio_alerts = [a for a in alerts if a.get("_kind") == "portfolio"]
     stock_alerts = [a for a in alerts if a.get("_kind") != "portfolio"]
+
+    # Separate tick_monitor alerts (handled separately with batch Feishu)
+    tick_alerts = [a for a in stock_alerts if a.get("_kind") == "tick_monitor"]
+    other_alerts = [a for a in stock_alerts if a.get("_kind") != "tick_monitor"]
+
+    # Apply per-symbol cooldown to tick_alerts
+    now_ts = time.time()
+    alerts_to_send = []
+    for a in tick_alerts:
+        symbol = a.get("symbol", "")
+        if not symbol:
+            continue  # skip empty symbol
+        last_ts = _tick_symbol_cooldown.get(symbol, 0)
+        if now_ts - last_ts >= _TICK_SYMBOL_COOLDOWN_SEC:
+            alerts_to_send.append(a)
+            _tick_symbol_cooldown[symbol] = now_ts
+    # drop symbols older than 2 hours to prevent memory growth
+    cutoff = now_ts - 7200
+    for sym in list(_tick_symbol_cooldown.keys()):
+        if _tick_symbol_cooldown[sym] < cutoff:
+            del _tick_symbol_cooldown[sym]
+
+    # Send batch Feishu for cooled-down tick_alerts
+    if alerts_to_send:
+        try:
+            from src.tools.stock_monitor import feishu_send_tick_batch
+
+            feishu_send_tick_batch(alerts_to_send)
+        except Exception as e:
+            logger.warning(f"feishu_send_tick_batch failed: {e}")
+
+    # Add cooled-down tick_alerts to other_alerts → goes through notify() for macOS popup
+    # Skip Feishu in notify() since we already sent batch Feishu above
+    if alerts_to_send:
+        for a in alerts_to_send:
+            a["_skip_feishu"] = True
+        other_alerts.extend(alerts_to_send)
+
+    # Note: tick_alerts written via main loop's write_alert_events(all_alerts)
+    # tick_web_only written separately in main loop
+
     sent = 0
 
     # ── Per-stock alerts → 1 notification ──
-    if stock_alerts:
+    if other_alerts:
         # Sort by severity: threshold > pnl > big_move > l2_strategy
-        priority = {"threshold": 0, "pnl": 1, "big_move": 2, "l2_strategy": 3, "tick_monitor": 0}
-        stock_alerts.sort(key=lambda a: priority.get(a.get("_kind", ""), 9))
+        priority = {"threshold": 0, "pnl": 1, "big_move": 2, "l2_strategy": 3}
+        other_alerts.sort(key=lambda a: priority.get(a.get("_kind", ""), 9))
 
         lines = []
-        for a in stock_alerts[:2]:
+        for a in other_alerts[:2]:
             lines.append(a.get("_stealth", a["message"]))
-        if len(stock_alerts) > 2:
-            lines.append(f"+{len(stock_alerts) - 2} more")
+        if len(other_alerts) > 2:
+            lines.append(f"+{len(other_alerts) - 2} more")
 
         # Critical if any threshold breach or change > 8%
         has_critical = any(
             a.get("_kind") == "threshold" or abs(a.get("_change_pct", 0)) >= 8
-            for a in stock_alerts
+            for a in other_alerts
         )
 
-        top = stock_alerts[0]
+        top = other_alerts[0]
 
         # STALE / system alerts have empty symbol → skip stock_info card
         top_symbol = top.get("symbol", "")
@@ -1649,6 +1698,7 @@ def stealth_dispatch(alerts: list[dict], *, sound: str = ""):
                 "change_pct": top.get("_change_pct"),
                 "level": top.get("_level"),
                 "_kind": top.get("_kind"),
+                "_skip_feishu": top.get("_skip_feishu", False),
                 "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
         else:
