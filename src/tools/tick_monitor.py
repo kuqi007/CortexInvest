@@ -66,6 +66,9 @@ from src.utils.logging_config import setup_logger
 
 logger = setup_logger("tick_monitor")
 
+# ── 生产者侧冷却 (防止同一 order 频繁重复写入) ──
+_order_cooldown: dict[str, float] = {}  # key: "plan_id.order_id", value: last trigger time
+
 # ── 配置 ──
 TRADE_PLANS_PATH = PROJECT_ROOT / "src" / "data" / "trade_plans.json"
 
@@ -291,6 +294,7 @@ def _write_signals(alerts: list[dict]) -> bool:
     """将触发信号直接写入 trading.db:tick_monitor_events，供 stock_notifier 消费。"""
     if not alerts:
         return True
+    conn = None
     try:
         from src.sim_trading.db import get_connection
         _ensure_tick_events_table()
@@ -329,12 +333,14 @@ def _write_signals(alerts: list[dict]) -> bool:
             rows,
         )
         conn.commit()
-        conn.close()
         logger.debug(f"Written {len(alerts)} signals to tick_monitor_events DB")
         return True
     except Exception as e:
         logger.warning(f"Failed to write tick_monitor_events: {e}")
         return False
+    finally:
+        if conn:
+            conn.close()
 
 
 def get_pending_tick_signals() -> tuple[list[dict], list[dict]]:
@@ -347,7 +353,8 @@ def get_pending_tick_signals() -> tuple[list[dict], list[dict]]:
         from src.sim_trading.db import get_connection
         conn = get_connection()
 
-        # 读取未分发信号
+        # BEGIN IMMEDIATE 保证 SELECT→UPDATE 原子性
+        conn.execute("BEGIN IMMEDIATE")
         rows = conn.execute(
             "SELECT id, ts, symbol, plan_name, order_id, side, op, label, trigger_price, "
             "tick_price, tick_time, direction, volume, title, message, level "
@@ -355,6 +362,7 @@ def get_pending_tick_signals() -> tuple[list[dict], list[dict]]:
         ).fetchall()
 
         if not rows:
+            conn.commit()
             conn.close()
             return [], []
 
@@ -381,6 +389,7 @@ def get_pending_tick_signals() -> tuple[list[dict], list[dict]]:
 
             alert = {
                 "symbol": symbol,
+                "side": side,
                 "title": title or f"🎯 短线盯盘触发: {plan_name}",
                 "message": message,
                 "display": display,
@@ -517,6 +526,15 @@ def run_tick_monitor(poll_interval: int = POLL_INTERVAL):
                         continue
 
                     if check_trigger(order, tick_price):
+                        # 生产者侧 60s 冷却，防止同一 order 频繁重复写入
+                        order_key = f"{plan_id}.{order_id}"
+                        now = time.time()
+                        last = _order_cooldown.get(order_key, 0)
+                        if now - last < 60:
+                            logger.debug(f"Cooldown active for {order_key}, skipping")
+                            continue
+                        _order_cooldown[order_key] = now
+
                         logger.info(
                             f"🎯 TRIGGERED: {plan_name} {order_id} "
                             f"price={tick_price} op={order.get('op')} target={order.get('price')}"
