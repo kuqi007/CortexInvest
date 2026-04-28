@@ -123,17 +123,16 @@ def test_load_settings_from_db(tmp_db, stale_json):
     assert settings.get("poll_interval") == 30
 
 
-def test_load_watchlist_fallback_to_json_when_db_missing(stale_json, tmp_path):
-    """When DB doesn't exist, must fall back to JSON (not crash)."""
+def test_load_watchlist_fails_closed_when_db_missing(stale_json, tmp_path):
+    """When DB doesn't exist, poller must not fall back to JSON."""
     import src.tools.market_data_poller as poller
 
     missing_db = tmp_path / "nonexistent.db"
     with _config_db_patch(missing_db), \
          patch.object(poller, "CONFIG_PATH", stale_json):
-        watchlist, settings = poller.load_watchlist_from_db()
+        with pytest.raises(RuntimeError, match="config.db"):
+            poller.load_watchlist_from_db()
 
-    assert "KR000660" in watchlist
-    assert settings.get("poll_interval") == 30
 
 
 # ─── 2. _backfill_missing_names ──────────────────────────────────────────────
