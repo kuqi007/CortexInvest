@@ -97,6 +97,10 @@ src/data/macro_summary.json
 src/data/sim_trading.db-shm
 src/data/sim_trading.db-wal
 src/data/archive/
+src/data/audit/*.jsonl
+src/data/audit/*.manifest.json
+src/data/archive/**/*.json
+src/data/backups/**/*
 
 # playwright test results & screenshots
 web/test-results/

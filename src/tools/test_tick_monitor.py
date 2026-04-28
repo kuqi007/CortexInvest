@@ -338,22 +338,23 @@ class TestRunTickMonitor:
         self, mock_write_signals, mock_conn_cls, mock_open, mock_sleep
     ):
         """
-        Simulate ticks: each trigger calls _write_signals (cooldown is now in stock_notifier).
-        tick_monitor writes every trigger; stock_notifier handles cooldown dedup.
+        Simulate ticks: tick_monitor has a 60s producer-side cooldown per order.
+        Only the first trigger writes; subsequent triggers within 60s are skipped.
+        stock_notifier adds its own 3-min cooldown on top.
         """
         mock_write_signals.return_value = True
         mock_open.return_value = True
 
         mock_conn = MagicMock()
-        # tick 1: triggers at price 84
-        # tick 2: same price, triggers again (no cooldown in tick_monitor)
-        # tick 3: after some time, triggers again
+        # tick 1: triggers at price 84 → writes (cooldown starts)
+        # tick 2: 5s later → skipped (cooldown active, 5s < 60s)
+        # tick 3: 5s later → skipped (cooldown active)
+        # sentinel: stop the loop
         mock_conn.get_latest_tick.side_effect = [
             {"price": 84.0, "direction": "BUY", "volume": 100, "time": "10:00:00"},
-            {"price": 84.0, "direction": "BUY", "volume": 100, "time": "10:01:00"},
-            {"price": 84.0, "direction": "BUY", "volume": 100, "time": "10:06:00"},
-            # sentinel: stop the loop after 3 iterations
-            {"price": 84.0, "direction": "BUY", "volume": 100, "time": "10:07:00"},
+            {"price": 84.0, "direction": "BUY", "volume": 100, "time": "10:00:05"},
+            {"price": 84.0, "direction": "BUY", "volume": 100, "time": "10:00:10"},
+            {"price": 84.0, "direction": "BUY", "volume": 100, "time": "10:00:15"},
         ]
         mock_conn_cls.return_value = mock_conn
 
@@ -384,13 +385,15 @@ class TestRunTickMonitor:
 
         mock_sleep.side_effect = counting_sleep
 
+        # Reset module-level cooldown dict so test is isolated
+        tm._order_cooldown.clear()
+
         with patch.object(tm, "load_tick_monitor_plans", return_value=plans):
             with pytest.raises(StopIteration):
                 tm.run_tick_monitor(poll_interval=5)
 
-        # _write_signals should be called 4 times (once per trigger including sentinel)
-        # Cooldown dedup is handled by stock_notifier, not tick_monitor
-        assert mock_write_signals.call_count == 4
+        # Only the first trigger writes; 60s cooldown blocks the rest
+        assert mock_write_signals.call_count == 1
 
     @patch("src.tools.tick_monitor.time.sleep")
     @patch("src.tools.tick_monitor.is_any_market_open")

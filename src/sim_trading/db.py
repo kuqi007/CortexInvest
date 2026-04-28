@@ -2,7 +2,7 @@
 
 Split from single sim_trading.db into:
 - config.db: monitor config tables (DELETE mode for OneDrive sync)
-- trading.db: all operational data (DELETE mode for OneDrive sync)
+- trading.db: all operational data (WAL mode)
 """
 
 import sqlite3
@@ -73,6 +73,83 @@ CREATE INDEX IF NOT EXISTS idx_pcl_symbol ON position_change_log(symbol);
 CREATE INDEX IF NOT EXISTS idx_pcl_ts ON position_change_log(ts);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_pcl_unique
     ON position_change_log(symbol, ts, source, shares_from, shares_to, cost_from, cost_to);
+
+CREATE TABLE IF NOT EXISTS poller_leader_lease (
+    name TEXT PRIMARY KEY,
+    holder_id TEXT NOT NULL,
+    hostname TEXT NOT NULL,
+    pid INTEGER,
+    generation INTEGER NOT NULL,
+    lease_until_ms INTEGER NOT NULL,
+    heartbeat_ts_ms INTEGER NOT NULL,
+    CHECK (lease_until_ms >= heartbeat_ts_ms)
+);
+
+CREATE TABLE IF NOT EXISTS l2_strategy_config (
+    strategy TEXT PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    config_json TEXT NOT NULL DEFAULT '{}',
+    updated_at_ms INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS signal_rules (
+    rule_id TEXT PRIMARY KEY,
+    rule_json TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    updated_at_ms INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS config_audit_outbox (
+    event_id TEXT PRIMARY KEY,
+    schema_version INTEGER NOT NULL DEFAULT 1,
+    correlation_id TEXT,
+    ts TEXT NOT NULL,
+    ts_ms INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    action TEXT NOT NULL,
+    entity TEXT NOT NULL,
+    key TEXT NOT NULL,
+    db TEXT NOT NULL DEFAULT 'config.db' CHECK (db = 'config.db'),
+    payload_json TEXT NOT NULL,
+    flushed_at TEXT,
+    flushed_at_ms INTEGER,
+    flush_id TEXT,
+    flush_started_at_ms INTEGER,
+    CHECK (length(trim(payload_json)) > 0)
+);
+CREATE INDEX IF NOT EXISTS idx_config_audit_outbox_pending
+    ON config_audit_outbox(ts_ms, event_id)
+    WHERE flushed_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_config_audit_outbox_correlation
+    ON config_audit_outbox(correlation_id, ts_ms)
+    WHERE correlation_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS config_restore_sessions (
+    restore_id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    source_path TEXT NOT NULL,
+    source_sha256 TEXT NOT NULL,
+    target_db TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('started', 'completed', 'failed')),
+    phase TEXT NOT NULL DEFAULT 'created'
+        CHECK (phase IN ('created', 'backup_verified', 'replay_started', 'verified', 'completed', 'aborted')),
+    started_at_ms INTEGER NOT NULL,
+    completed_at_ms INTEGER,
+    backup_path TEXT NOT NULL,
+    git_commit TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_config_restore_sessions_incomplete
+    ON config_restore_sessions(status, started_at_ms)
+    WHERE status != 'completed';
+
+CREATE TABLE IF NOT EXISTS config_restore_applied_events (
+    event_id TEXT PRIMARY KEY,
+    restore_id TEXT NOT NULL,
+    source_sha256 TEXT NOT NULL,
+    event_hash TEXT NOT NULL,
+    applied_at_ms INTEGER NOT NULL,
+    FOREIGN KEY (restore_id) REFERENCES config_restore_sessions(restore_id)
+);
 """
 
 TRADING_SCHEMA = """
@@ -395,6 +472,100 @@ CREATE TABLE IF NOT EXISTS market_amo_history (
     total_yuan REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_amo_history_date ON market_amo_history(date);
+
+CREATE TABLE IF NOT EXISTS trade_plans (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('active', 'paused')),
+    scope TEXT NOT NULL DEFAULT 'real',
+    created_at TEXT NOT NULL,
+    orders_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_trade_plans_symbol ON trade_plans(symbol);
+CREATE INDEX IF NOT EXISTS idx_trade_plans_status ON trade_plans(status);
+
+CREATE TABLE IF NOT EXISTS tick_monitor_state (
+    key TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL,
+    updated_at_ms INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS trading_calendar_cache (
+    date TEXT PRIMARY KEY,
+    calendar_json TEXT NOT NULL,
+    updated_at_ms INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sentiment_cache (
+    cache_key TEXT PRIMARY KEY,
+    payload_json TEXT NOT NULL,
+    updated_at_ms INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS daily_summaries (
+    date TEXT PRIMARY KEY,
+    summary_json TEXT NOT NULL,
+    updated_at_ms INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS morning_briefings (
+    date TEXT PRIMARY KEY,
+    briefing_json TEXT NOT NULL,
+    updated_at_ms INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS trading_audit_outbox (
+    event_id TEXT PRIMARY KEY,
+    schema_version INTEGER NOT NULL DEFAULT 1,
+    correlation_id TEXT,
+    ts TEXT NOT NULL,
+    ts_ms INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    action TEXT NOT NULL,
+    entity TEXT NOT NULL,
+    key TEXT NOT NULL,
+    db TEXT NOT NULL DEFAULT 'trading.db' CHECK (db = 'trading.db'),
+    payload_json TEXT NOT NULL,
+    flushed_at TEXT,
+    flushed_at_ms INTEGER,
+    flush_id TEXT,
+    flush_started_at_ms INTEGER,
+    CHECK (length(trim(payload_json)) > 0)
+);
+CREATE INDEX IF NOT EXISTS idx_trading_audit_outbox_pending
+    ON trading_audit_outbox(ts_ms, event_id)
+    WHERE flushed_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_trading_audit_outbox_correlation
+    ON trading_audit_outbox(correlation_id, ts_ms)
+    WHERE correlation_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS trading_restore_sessions (
+    restore_id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    source_path TEXT NOT NULL,
+    source_sha256 TEXT NOT NULL,
+    target_db TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('started', 'completed', 'failed')),
+    phase TEXT NOT NULL DEFAULT 'created'
+        CHECK (phase IN ('created', 'backup_verified', 'replay_started', 'verified', 'completed', 'aborted')),
+    started_at_ms INTEGER NOT NULL,
+    completed_at_ms INTEGER,
+    backup_path TEXT NOT NULL,
+    git_commit TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_trading_restore_sessions_incomplete
+    ON trading_restore_sessions(status, started_at_ms)
+    WHERE status != 'completed';
+
+CREATE TABLE IF NOT EXISTS trading_restore_applied_events (
+    event_id TEXT PRIMARY KEY,
+    restore_id TEXT NOT NULL,
+    source_sha256 TEXT NOT NULL,
+    event_hash TEXT NOT NULL,
+    applied_at_ms INTEGER NOT NULL,
+    FOREIGN KEY (restore_id) REFERENCES trading_restore_sessions(restore_id)
+);
 """
 
 # Backward compat
@@ -412,33 +583,29 @@ def get_config_connection() -> sqlite3.Connection:
 
     use_uri = path.startswith("file:")
     conn = sqlite3.connect(path, timeout=10, uri=use_uri, isolation_level=None)
-    # Only set DELETE mode when using the real config.db path.
-    # In test mode with _db_path_override, skip to avoid WAL/DELETE conflict
-    # on the same file.
+    # Skip DELETE when config falls back to _db_path_override so legacy
+    # single-file tests do not fight trading's journal mode on one DB file.
     if _config_db_path_override is not None or _db_path_override is None:
         conn.execute("PRAGMA journal_mode=DELETE")
-    conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout=15000")
     conn.row_factory = sqlite3.Row
     return conn
 
 
 def get_connection() -> sqlite3.Connection:
-    """Trading DB — DELETE mode for OneDrive cross-machine sync.
-
-    使用 DELETE 模式替代 WAL：跨机器文件同步场景下，WAL 模式存在中间状态风险。
-    DELETE 模式每次写入是完整文件替换，不会有部分写入的中间状态。
-    see: https://www.sqlite.org/draft/wal.html#avoiding_cross_machine_synchronization_problems
-    """
+    """Trading DB — WAL mode for operational runtime data."""
     path = _db_path_override if _db_path_override is not None else str(TRADING_DB_PATH)
     use_uri = path.startswith("file:")
     conn = sqlite3.connect(path, timeout=10, uri=use_uri, isolation_level=None)
-    conn.execute("PRAGMA journal_mode=DELETE")
-    conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout=15000")
     conn.row_factory = sqlite3.Row
     return conn
 
 
-def init_config_db():
+def init_config_db() -> None:
     """Create config tables if they don't exist."""
     conn = get_config_connection()
     conn.executescript(CONFIG_SCHEMA)
@@ -491,7 +658,7 @@ def init_config_db():
     conn.close()
 
 
-def init_trading_db():
+def init_trading_db() -> None:
     """Create all trading tables if they don't exist."""
     conn = get_connection()
     conn.executescript(TRADING_SCHEMA)
@@ -538,13 +705,13 @@ def init_trading_db():
     conn.close()
 
 
-def init_db():
+def init_db() -> None:
     """Backward compatible init for existing tests. Initializes both."""
     init_config_db()
     init_trading_db()
 
 
-def init_all_dbs():
+def init_all_dbs() -> None:
     """Explicitly initialize both databases (used in main)."""
     init_config_db()
     init_trading_db()
