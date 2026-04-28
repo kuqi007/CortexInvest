@@ -117,6 +117,8 @@ CREATE TABLE IF NOT EXISTS price_snapshots (
     prev_close REAL,
     amo1 REAL,
     amo2 REAL,
+    main_net_inflow REAL,
+    main_net_inflow_pct REAL,
     UNIQUE(ts, code)
 );
 CREATE INDEX IF NOT EXISTS idx_price_date_code ON price_snapshots(date, code);
@@ -515,6 +517,21 @@ def init_trading_db():
     except sqlite3.OperationalError:
         try:
             conn.execute("ALTER TABLE live_state ADD COLUMN atr_at_entry REAL DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
+    # Migration: add main_net_inflow columns to price_snapshots if missing
+    try:
+        conn.execute("SELECT main_net_inflow FROM price_snapshots LIMIT 1")
+    except sqlite3.OperationalError:
+        try:
+            conn.execute("ALTER TABLE price_snapshots ADD COLUMN main_net_inflow REAL")
+        except sqlite3.OperationalError:
+            pass
+    try:
+        conn.execute("SELECT main_net_inflow_pct FROM price_snapshots LIMIT 1")
+    except sqlite3.OperationalError:
+        try:
+            conn.execute("ALTER TABLE price_snapshots ADD COLUMN main_net_inflow_pct REAL")
         except sqlite3.OperationalError:
             pass
     conn.commit()

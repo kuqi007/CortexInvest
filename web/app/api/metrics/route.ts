@@ -37,6 +37,8 @@ type PriceSnapshot = {
   prev_close: number;
   amo1: number;
   amo2: number;
+  main_net_inflow: number | null;
+  main_net_inflow_pct: number | null;
 };
 
 type MarketTurnover = {
@@ -121,7 +123,7 @@ function readLatestPriceSnapshots(): { snapshots: PriceSnapshot[]; ts: number } 
   try {
     const rows = db
       .prepare(
-        `SELECT ts, code, name, price, volume, amount, change_pct, chg_amt, amp, turnover, vol_ratio, high, low, open, prev_close, amo1, amo2
+        `SELECT ts, code, name, price, volume, amount, change_pct, chg_amt, amp, turnover, vol_ratio, high, low, open, prev_close, amo1, amo2, main_net_inflow, main_net_inflow_pct
          FROM price_snapshots
          WHERE (code, ts) IN (
            SELECT code, MAX(ts) FROM price_snapshots GROUP BY code
@@ -236,6 +238,8 @@ export async function GET() {
         prevClose: s.prev_close ?? 0,
         amo1: s.amo1 ?? 0,
         amo2: s.amo2 ?? 0,
+        mainNetInflow: s.main_net_inflow ?? null,
+        mainNetInflowPct: s.main_net_inflow_pct ?? null,
         type,
         cost,
         shares,
@@ -278,6 +282,8 @@ export async function GET() {
         prevClose: 0,
         amo1: 0,
         amo2: 0,
+        mainNetInflow: null,
+        mainNetInflowPct: null,
         type,
         cost,
         shares,

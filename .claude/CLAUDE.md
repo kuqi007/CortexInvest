@@ -6,8 +6,8 @@ A-share/HK real-time stock monitoring + simulated trading system. Python backend
 
 ```
 market_data_poller ──→ src/data/market_data.json (30s轮询)
-stock_notifier ──────→ sim_trading.db:alert_events (DeltaAlertEngine)
-l2_strategy_daemon ──→ sim_trading.db (3s轮询, Futu OpenD)
+stock_notifier ──────→ trading.db:alert_events (DeltaAlertEngine)
+l2_strategy_daemon ──→ trading.db (3s轮询, Futu OpenD)
 web (port 3120) ─────→ read-only JSON + DB
 ```
 
@@ -24,9 +24,21 @@ web (port 3120) ─────→ read-only JSON + DB
 
 | File | Mode | Purpose |
 |------|------|---------|
-| `data/config.db` | DELETE | monitor_watchlist, signals, alert_events, sector_index |
-| `data/trading.db` | WAL | positions, trades, orders, daily_pnl, live_state |
+| `data/config.db` | DELETE | monitor_watchlist（真实持仓/自选）, monitor_settings, tag_meta |
+| `data/trading.db` | WAL | **纯模拟交易**: trades, live_state, alert_events, signals, sector_rotation |
 | `data/sim_trading.db` | WAL | legacy (migrating to trading.db) |
+
+### ⚠️ 真实 vs 模拟 数据区分
+
+| 数据源 | 内容 | 投资决策/复盘时 |
+|--------|------|----------------|
+| `config.db:monitor_watchlist` | 用户手动维护的真实持仓 | ✅ **唯一真实持仓来源** |
+| `market_data.json` | 实时行情 | ✅ 计算浮盈浮亏 |
+| `trading.db:trades` | FutOpenD 模拟成交 | ❌ **复盘不看** |
+| `trading.db:live_state` | 模拟持仓 | ❌ **复盘不看** |
+| `trading.db:alert_events` | 真实行情告警（DeltaAlertEngine） | ✅ 复盘参考 |
+
+**规则：复盘和投资决策只看真实账户（config.db），不查 trading.db 的模拟数据。**
 
 Use `init_db()` from each module's db util. Config DB-first: Python reads via `read_monitor_config()`, never raw JSON.
 
@@ -60,6 +72,7 @@ cd web && npm run dev                                    # frontend :3120
 - `src/tools/` — Polling, alerting, L2 execution, sector rotation
 - `src/sim_trading/` — Trading engine, brokers, position management
 - `web/` — Next.js dashboard, API routes, UI components
+- `stocks/` — **AI 投资参考数据**（股票分析、研报、mx-data 缓存），必须提交 Git，是投资决策的重要参考
 
 详见 [CLAUDE.md](./CLAUDE.md) for full project documentation.
 
@@ -96,10 +109,11 @@ cd web && npm run dev                                    # frontend :3120
 用户问投资问题
     ↓
 1. 读取上下文（并行）
-   - config.db: 持仓状态 (list_type, cost, shares, star)
+   - config.db:monitor_watchlist: 真实持仓状态 (list_type, cost, shares, star)
    - market_data.json: 最新行情
    - .claude/notes/{CODE}.md: 历史分析（如果存在）
    - trade_plans.json: 已有计划
+   ⚠️ 不读 trading.db（纯模拟，复盘不看）
     ↓
 2. 外部研究（按需并行委托 specialist）
    - 资讯搜索 → @explorer 或 @librarian

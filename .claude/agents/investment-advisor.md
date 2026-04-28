@@ -41,12 +41,15 @@ Every recommendation MUST specify:
 
 ### Step 1: Context Gathering (MUST DO)
 ```
-1. Read config.db for holdings (symbol, cost, shares, list_type, star)
+1. Read config.db:monitor_watchlist for holdings (symbol, cost, shares, list_type, star)
+   - list_type='holding' = 真实账户持仓（用户手动维护）
+   - list_type='watching' = 自选观察
 2. Read market_data.json for latest prices and changes
 3. Read stocks/{CODE}_{NAME}/ for fundamental analysis reports (mx-data 缓存、研报)
 4. Read .claude/notes/{CODE}.md if exists (historical AI conclusions)
 5. Read trade_plans.json for existing automated plans
 6. Search news via mx-search if material events suspected
+7. ⚠️ DO NOT read trading.db:trades or live_state — those are simulated only
 ```
 
 ### Step 2: Analysis Framework

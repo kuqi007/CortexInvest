@@ -6,8 +6,8 @@ A-share/HK real-time stock monitoring + simulated trading system. Python backend
 
 ```
 market_data_poller ──→ src/data/market_data.json (30s轮询)
-stock_notifier ──────→ sim_trading.db:alert_events (DeltaAlertEngine)
-l2_strategy_daemon ──→ sim_trading.db (3s轮询, Futu OpenD)
+stock_notifier ──────→ trading.db:alert_events (DeltaAlertEngine)
+l2_strategy_daemon ──→ trading.db (3s轮询, Futu OpenD)
 web (port 3120) ─────→ read-only JSON + DB
 ```
 
@@ -24,9 +24,21 @@ web (port 3120) ─────→ read-only JSON + DB
 
 | File | Mode | Purpose |
 |------|------|---------|
-| `data/config.db` | DELETE | monitor_watchlist, signals, alert_events, sector_index |
-| `data/trading.db` | WAL | positions, trades, orders, daily_pnl, live_state |
+| `data/config.db` | DELETE | monitor_watchlist（真实持仓/自选）, monitor_settings, tag_meta |
+| `data/trading.db` | WAL | **纯模拟交易**: trades, live_state, alert_events, signals, sector_rotation |
 | `data/sim_trading.db` | WAL | legacy (migrating to trading.db) |
+
+### ⚠️ 真实 vs 模拟 数据区分
+
+| 数据源 | 内容 | 投资决策/复盘时 |
+|--------|------|----------------|
+| `config.db:monitor_watchlist` | 用户手动维护的真实持仓 | ✅ **唯一真实持仓来源** |
+| `market_data.json` | 实时行情 | ✅ 计算浮盈浮亏 |
+| `trading.db:alert_events` | 真实行情告警（DeltaAlertEngine） | ✅ 复盘参考 |
+| `trading.db:trades` | FutOpenD 模拟成交 | ❌ **复盘不看** |
+| `trading.db:live_state` | 模拟持仓 | ❌ **复盘不看** |
+
+**规则：复盘和投资决策只看真实账户（config.db），不查 trading.db 的模拟成交/持仓。**
 
 Use `init_db()` from each module's db util. Config DB-first: Python reads via `read_monitor_config()`, never raw JSON.
 

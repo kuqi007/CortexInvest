@@ -63,8 +63,9 @@ def _write_price_snapshots(services: list[dict], ts: int, date_str: str) -> None
                 """
                 INSERT OR REPLACE INTO price_snapshots
                 (ts, date, code, name, price, volume, amount, change_pct,
-                 chg_amt, amp, turnover, vol_ratio, high, low, open, prev_close, amo1, amo2)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 chg_amt, amp, turnover, vol_ratio, high, low, open, prev_close, amo1, amo2,
+                 main_net_inflow, main_net_inflow_pct)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     ts,
@@ -85,6 +86,8 @@ def _write_price_snapshots(services: list[dict], ts: int, date_str: str) -> None
                     svc.get("prevClose"),
                     svc.get("amo1"),
                     svc.get("amo2"),
+                    svc.get("mainNetInflow"),
+                    svc.get("mainNetInflowPct"),
                 ),
             )
         conn.commit()
@@ -145,7 +148,8 @@ def _get_latest_services_from_db(codes: list[str]) -> list[dict]:
         rows = conn.execute(
             f"""
             SELECT code, name, price, volume, amount, change_pct,
-                   chg_amt, amp, turnover, vol_ratio, high, low, open, prev_close, amo1, amo2
+                   chg_amt, amp, turnover, vol_ratio, high, low, open, prev_close, amo1, amo2,
+                   main_net_inflow, main_net_inflow_pct
             FROM price_snapshots
             WHERE code IN ({placeholders})
               AND ts = (SELECT MAX(ts) FROM price_snapshots)
@@ -172,6 +176,8 @@ def _get_latest_services_from_db(codes: list[str]) -> list[dict]:
                     "prevClose": row["prev_close"] or 0,
                     "amo1": row["amo1"] or 1.0,
                     "amo2": row["amo2"] or 1.0,
+                    "mainNetInflow": row["main_net_inflow"],
+                    "mainNetInflowPct": row["main_net_inflow_pct"],
                 }
             )
         return services
