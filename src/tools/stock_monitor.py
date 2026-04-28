@@ -1072,11 +1072,12 @@ def notify(
         stock_info: 结构化股票信息，飞书卡片使用
     """
     # ── 飞书通知（先发，不阻塞 macOS 通知） ──
-    # 过滤策略：只推需要立即操作的交易计划（买入/卖出/止盈/止损触发）
-    # 其余 alert（panic_sell、threshold、price_alert、L2_signal、drift 等）
-    # 只在 macOS + web 显示，不推飞书减少手机噪音
+    # 过滤策略：只推需要立即操作的两类 alert：
+    #   1. trade_plan — 交易计划（买入/卖出/止盈/止损触发）
+    #   2. tick_monitor — 短线逐笔触发（精确价格条件）
+    # 其余 alert 只在 macOS + web 显示，不推飞书减少手机噪音
     should_feishu = False
-    if stock_info and stock_info.get("_kind") == "trade_plan":
+    if stock_info and stock_info.get("_kind") in ("trade_plan", "tick_monitor"):
         should_feishu = True
     # 无 stock_info（CLI 看板 alerts / 系统消息）→ 不推飞书
 

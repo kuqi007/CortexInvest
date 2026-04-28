@@ -39,6 +39,7 @@ from src.utils.config_reader import read_monitor_config
 ALERT_CONFIG_PATH = PROJECT_ROOT / "src" / "data" / "alert_config.json"
 L2_SIGNALS_PATH = PROJECT_ROOT / "src" / "data" / "l2_strategy_signals.json"
 
+
 ARCHIVE_DIR = PROJECT_ROOT / "src" / "data" / "archive"
 
 # ── Poll intervals ──
@@ -1403,6 +1404,8 @@ def write_alert_events(alerts: list[dict]):
             display = a.get("display", a.get("message", ""))
         elif kind == "trade_plan":
             display = a.get("display", a.get("message", ""))
+        elif kind == "tick_monitor":
+            display = a.get("display", a.get("message", ""))
         else:
             # title 格式: "股票名 ↑+4.5% → 217.45"，直接用
             title = a.get("title", "")
@@ -1557,6 +1560,29 @@ def _load_seen_today_from_db() -> set:
 check_l2_signals._seen_today = _load_seen_today_from_db()
 
 
+# ══════════════════════════════════════════
+# 5c. tick_monitor signal consumption
+# ══════════════════════════════════════════
+
+
+def check_tick_monitor_signals() -> tuple[list[dict], list[dict]]:
+    """从 trading.db 读取未处理的 tick_monitor 信号（tick_monitor 直接写 DB）。
+
+    tick_monitor 写 DB → notifier 消费 → 统一 dispatch。
+
+    Returns:
+        (alerts_to_dispatch, alerts_web_only):
+            - alerts_to_dispatch: L1 alerts → stealth_dispatch with sound
+            - alerts_web_only: L3 alerts → write to DB only
+    """
+    try:
+        from src.tools.tick_monitor import get_pending_tick_signals
+        return get_pending_tick_signals()
+    except Exception as e:
+        logger.warning(f"check_tick_monitor_signals failed: {e}")
+        return [], []
+
+
 def stealth_dispatch(alerts: list[dict], *, sound: str = ""):
     """Batch alerts into 1~2 stealth notifications.
 
@@ -1586,7 +1612,7 @@ def stealth_dispatch(alerts: list[dict], *, sound: str = ""):
     # ── Per-stock alerts → 1 notification ──
     if stock_alerts:
         # Sort by severity: threshold > pnl > big_move > l2_strategy
-        priority = {"threshold": 0, "pnl": 1, "big_move": 2, "l2_strategy": 3}
+        priority = {"threshold": 0, "pnl": 1, "big_move": 2, "l2_strategy": 3, "tick_monitor": 0}
         stock_alerts.sort(key=lambda a: priority.get(a.get("_kind", ""), 9))
 
         lines = []
@@ -3037,6 +3063,16 @@ def run():
                             write_alert_events(l2_web_only)
                         # l2_notify 加入 all_alerts（后面统一写入+分发）
                         all_alerts.extend(l2_notify)
+
+                    # ── tick_monitor signals (from tick_monitor daemon) ──
+                    tick_alerts_dispatch, tick_web_only = (
+                        [] if in_auction else check_tick_monitor_signals()
+                    )
+                    if tick_web_only:
+                        write_alert_events(tick_web_only)
+                    # tick alerts 加入 all_alerts 统一写入+分发（不移除）
+                    if tick_alerts_dispatch:
+                        all_alerts.extend(tick_alerts_dispatch)
 
                     # ── Trade plan conditions ──
                     plan_alerts = [] if in_auction else plan_engine.check(quotes)

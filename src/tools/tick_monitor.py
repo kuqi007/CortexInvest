@@ -62,7 +62,6 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.tools.stock_monitor import feishu_send
 from src.tools.stock_notifier import is_any_market_open
 from src.utils.futu_codes import to_futu_code
 from src.utils.logging_config import setup_logger
@@ -72,6 +71,38 @@ logger = setup_logger("tick_monitor")
 # ── 配置 ──
 TRADE_PLANS_PATH = PROJECT_ROOT / "src" / "data" / "trade_plans.json"
 STATE_PATH = PROJECT_ROOT / "src" / "data" / "tick_monitor_state.json"
+
+# DB table SQL for tick_monitor_events
+_TICK_EVENTS_TABLE_SQL = (
+    "CREATE TABLE IF NOT EXISTS tick_monitor_events ("
+    "    id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "    ts INTEGER NOT NULL,"
+    "    date TEXT NOT NULL,"
+    "    time TEXT NOT NULL,"
+    "    symbol TEXT NOT NULL,"
+    "    plan_name TEXT NOT NULL,"
+    "    order_id TEXT NOT NULL,"
+    "    side TEXT NOT NULL,"
+    "    op TEXT NOT NULL DEFAULT '<=',"
+    "    label TEXT,"
+    "    trigger_price REAL NOT NULL,"
+    "    tick_price REAL NOT NULL,"
+    "    tick_time TEXT NOT NULL,"
+    "    direction TEXT,"
+    "    volume REAL,"
+    "    title TEXT,"
+    "    message TEXT,"
+    "    level INTEGER DEFAULT 1,"
+    "    dispatched INTEGER DEFAULT 0,"
+    "    UNIQUE(ts, symbol, order_id)"
+    ")"
+)
+
+_TICK_EVENTS_INDEX_SQL = (
+    "CREATE INDEX IF NOT EXISTS idx_tick_monitor_dispatched "
+    "ON tick_monitor_events(dispatched, ts)"
+)
+
 OPEND_HOST = "127.0.0.1"
 OPEND_PORT = 11111
 RECONNECT_COOLDOWN = 60
@@ -79,10 +110,6 @@ POLL_INTERVAL = 5  # 秒
 COOLDOWN_SEC = 300  # 同一订单触发后冷却 5 分钟
 BACKOFF_AFTER_FAIL = 30  # 连续失败后的退避间隔
 MAX_CONSECUTIVE_FAIL = 3  # 超过此次连续失败后进入退避
-
-# 飞书防刷屏：同一 symbol 30 分钟内只推一次，每天全局最多 20 条
-FEISHU_SYMBOL_COOLDOWN_SEC = 1800
-FEISHU_DAILY_MAX = 20
 
 
 # ══════════════════════════════════════════
@@ -271,40 +298,150 @@ def check_trigger(order: dict, tick_price: float) -> bool:
 
 
 # ══════════════════════════════════════════
-# 飞书通知
+# 信号写入 (stock_notifier 统一分发)
 # ══════════════════════════════════════════
 
 
-# 全局飞书每日计数和 symbol 冷却
-_feishu_symbol_cooldown: dict[str, float] = {}
-_feishu_daily_count = 0
-_feishu_daily_date = datetime.now().strftime("%Y-%m-%d")
+def _ensure_tick_events_table():
+    """确保 tick_monitor_events 表和索引存在。"""
+    try:
+        from src.sim_trading.db import get_connection
+        conn = get_connection()
+        # Create table (ignore error if already exists)
+        conn.executescript(_TICK_EVENTS_TABLE_SQL)
+        # Add op column if missing (for existing tables before this schema update)
+        try:
+            conn.execute("ALTER TABLE tick_monitor_events ADD COLUMN op TEXT NOT NULL DEFAULT '<='")
+        except Exception:
+            pass  # column already exists
+        # Create index (ignore error if already exists)
+        conn.executescript(_TICK_EVENTS_INDEX_SQL)
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning(f"Failed to create tick_monitor_events table: {e}")
 
 
-def _check_feishu_cooldown(symbol: str) -> bool:
-    """检查 symbol 是否可以通过飞书冷却。返回 True = 可以发送。"""
-    global _feishu_daily_count, _feishu_daily_date
+def _write_signals(alerts: list[dict]) -> bool:
+    """将触发信号直接写入 trading.db:tick_monitor_events，供 stock_notifier 消费。"""
+    if not alerts:
+        return True
+    try:
+        from src.sim_trading.db import get_connection
+        _ensure_tick_events_table()
 
-    # 每日重置
-    today = datetime.now().strftime("%Y-%m-%d")
-    if today != _feishu_daily_date:
-        _feishu_daily_date = today
-        _feishu_daily_count = 0
-        _feishu_symbol_cooldown.clear()
+        conn = get_connection()
+        ts_base = int(time.time() * 1000)
+        today = datetime.now().strftime("%Y-%m-%d")
+        t = datetime.now().strftime("%H:%M:%S")
 
-    # 全局上限
-    if _feishu_daily_count >= FEISHU_DAILY_MAX:
+        rows = []
+        for i, alert in enumerate(alerts):
+            rows.append((
+                ts_base + i,
+                today,
+                t,
+                alert.get("symbol", ""),
+                alert.get("plan_name", ""),
+                alert.get("order_id", ""),
+                alert.get("side", "buy"),
+                alert.get("op", "<="),
+                alert.get("label", ""),
+                alert.get("trigger_price", 0),
+                alert.get("tick_price", 0),
+                alert.get("time", t),
+                alert.get("direction", ""),
+                alert.get("volume", 0),
+                alert.get("title", ""),
+                alert.get("message", ""),
+                alert.get("_level", 1),
+            ))
+
+        conn.executemany(
+            "INSERT OR IGNORE INTO tick_monitor_events "
+            "(ts, date, time, symbol, plan_name, order_id, side, op, label, trigger_price, tick_price, tick_time, direction, volume, title, message, level) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+        conn.commit()
+        conn.close()
+        logger.debug(f"Written {len(alerts)} signals to tick_monitor_events DB")
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to write tick_monitor_events: {e}")
         return False
 
-    # symbol 冷却
-    now = time.time()
-    last = _feishu_symbol_cooldown.get(symbol, 0)
-    if now - last < FEISHU_SYMBOL_COOLDOWN_SEC:
-        return False
 
-    _feishu_symbol_cooldown[symbol] = now
-    _feishu_daily_count += 1
-    return True
+def get_pending_tick_signals() -> tuple[list[dict], list[dict]]:
+    """从 trading.db 读取未处理的 tick_monitor 信号，返回并标记已分发。
+
+    Returns:
+        (alerts_to_dispatch, alerts_web_only): 按 level 分流
+    """
+    try:
+        from src.sim_trading.db import get_connection
+        conn = get_connection()
+
+        # 读取未分发信号
+        rows = conn.execute(
+            "SELECT id, ts, symbol, plan_name, order_id, side, op, label, trigger_price, "
+            "tick_price, tick_time, direction, volume, title, message, level "
+            "FROM tick_monitor_events WHERE dispatched = 0 ORDER BY ts"
+        ).fetchall()
+
+        if not rows:
+            conn.close()
+            return [], []
+
+        # 标记为已分发
+        ids = [r[0] for r in rows]
+        placeholders = ",".join("?" * len(ids))
+        conn.execute(f"UPDATE tick_monitor_events SET dispatched = 1 WHERE id IN ({placeholders})", ids)
+        conn.commit()
+        conn.close()
+
+        alerts_to_dispatch = []
+        alerts_web_only = []
+
+        for r in rows:
+            (id_, ts, symbol, plan_name, order_id, side, op, label,
+             trigger_price, tick_price, tick_time, direction,
+             volume, title, message, level) = r
+
+            side_str = "买入" if side == "buy" else "卖出"
+            op_str = "≤" if op == "<=" else "≥" if op == ">=" else op
+
+            stealth = f"{symbol} {side_str}触发 {label} {op_str}{trigger_price} → {tick_price}"
+            display = f"🎯 {plan_name} | {label} | {side_str}价{op_str}{trigger_price} 现价{tick_price}"
+
+            alert = {
+                "symbol": symbol,
+                "title": title or f"🎯 短线盯盘触发: {plan_name}",
+                "message": message,
+                "display": display,
+                "_kind": "tick_monitor",
+                "_level": level,
+                "_change_pct": 0.0,
+                "_name": plan_name,
+                "_stealth": stealth,
+                "_price": tick_price,
+                "_tick_time": tick_time,
+                "_direction": direction,
+                "_volume": volume,
+                "_trigger_price": trigger_price,
+                "_tick_price": tick_price,
+            }
+
+            if level == 1:
+                alerts_to_dispatch.append(alert)
+            else:
+                alerts_web_only.append(alert)
+
+        return alerts_to_dispatch, alerts_web_only
+
+    except Exception as e:
+        logger.warning(f"Failed to get_pending_tick_signals: {e}")
+        return [], []
 
 
 def send_tick_notification(
@@ -313,40 +450,50 @@ def send_tick_notification(
     order: dict,
     tick: dict,
 ) -> bool:
-    """发送飞书逐笔触发通知（带防刷屏冷却）"""
-    # 飞书冷却检查
-    if not _check_feishu_cooldown(symbol):
-        logger.info(f"Feishu cooldown for {symbol}, skip notification")
-        return True  # 返回 True 表示已处理（不重复触发）
-
+    """将逐笔触发通知写入 tick_monitor_signals.json，由 stock_notifier 统一分发。"""
     side = order.get("side", "buy")
     op = order.get("op", "<=")
     trigger_price = order.get("price", 0)
     label = order.get("label", "")
     tick_price = tick.get("price", 0)
+    order_id = order.get("id", "")
 
     side_str = "买入" if side == "buy" else "卖出"
     op_str = "≤" if op == "<=" else "≥" if op == ">=" else op
 
-    title = f"🎯 短线盯盘触发: {plan_name}"
-    message = (
-        f"**{side_str}信号** | {symbol}\n"
+    # 构造通知文本
+    msg = (
+        f"{side_str}信号 | {symbol}\n"
         f"触发条件: 价格 {op_str} {trigger_price}\n"
         f"当前价格: **{tick_price}**\n"
         f"方向: {tick.get('direction', '')} | 成交量: {tick.get('volume', 0)}\n"
         f"时间: {tick.get('time', datetime.now().strftime('%H:%M:%S'))}"
     )
 
-    stock_info = {
-        "name": plan_name,
-        "code": symbol,
-        "price": str(tick_price),
-        "change_pct": 0.0,
-        "level": f"Tick {side_str}",
-        "time": tick.get("time", ""),
+    # tick_monitor 的信号统一经由 stock_notifier 的 stealth_dispatch 分发
+    # _kind="tick_monitor" 标识来源，_level=1 表示高优先级（需弹窗+声音）
+    alert = {
+        "symbol": symbol,
+        "plan_name": plan_name,
+        "order_id": order_id,
+        "side": side,
+        "op": op,
+        "label": label,
+        "trigger_price": trigger_price,
+        "tick_price": tick_price,
+        "time": tick.get("time", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        "direction": tick.get("direction", ""),
+        "volume": tick.get("volume", 0),
+        "title": f"🎯 短线盯盘触发: {plan_name}",
+        "message": msg,
+        "_kind": "tick_monitor",
+        "_level": 1,  # L1: 高优先级弹窗+声音
+        "_change_pct": 0.0,
+        "_name": plan_name,
+        "_stealth": f"{symbol} {side_str}触发 {label} {op_str}{trigger_price} → {tick_price}",
     }
 
-    return feishu_send(title, message, stock_info=stock_info)
+    return _write_signals([alert])
 
 
 # ══════════════════════════════════════════
