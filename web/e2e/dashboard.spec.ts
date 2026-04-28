@@ -178,3 +178,55 @@ test.describe("Dashboard 新增功能", () => {
     }
   });
 });
+
+test.describe("主力列 HK/A股 tab 切换", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("text=/refresh #[1-9]/", { timeout: 15_000 });
+  });
+
+  test("A股 tab 不显示主力列表头", async ({ page }) => {
+    // Check if A-share tab exists and click it if not already active
+    const aShareTab = page.locator("text=A-share").first();
+    if (await aShareTab.isVisible()) {
+      const isActive = await aShareTab.getAttribute("aria-selected");
+      if (isActive !== "true") {
+        await aShareTab.click();
+        await page.waitForTimeout(2000);
+      }
+    }
+
+    // Verify "主力" header is NOT visible on A-share tab
+    const mainForceHeader = page.locator("text=主力").first();
+    if (await mainForceHeader.isVisible()) {
+      await expect(mainForceHeader).not.toBeVisible();
+    }
+  });
+
+  test("HK tab 显示主力列表头", async ({ page }) => {
+    // Click HK tab
+    const hkTab = page.locator("text=HK").first();
+    if (await hkTab.isVisible()) {
+      await hkTab.click();
+      await page.waitForTimeout(2000);
+      await page.waitForSelector("text=/refresh #[1-9]/", { timeout: 15_000 });
+    }
+
+    // Verify "主力" header IS visible in HK tab
+    await expect(page.locator("text=主力").first()).toBeVisible();
+
+    // Switch back to A-share tab
+    const aShareTab = page.locator("text=A-share").first();
+    if (await aShareTab.isVisible()) {
+      await aShareTab.click();
+      await page.waitForTimeout(2000);
+      await page.waitForSelector("text=/refresh #[1-9]/", { timeout: 15_000 });
+    }
+
+    // Verify "主力" header is NOT visible again on A-share tab
+    const mainForceHeader = page.locator("text=主力").first();
+    if (await mainForceHeader.isVisible()) {
+      await expect(mainForceHeader).not.toBeVisible();
+    }
+  });
+});

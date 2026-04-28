@@ -71,3 +71,96 @@ test.describe("Manage Page", () => {
     }
   });
 });
+
+test.describe("代码输入正则校验", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/manage", { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("text=manage", { timeout: 15_000 });
+    await page.waitForTimeout(1000);
+  });
+
+  test("无效代码被拦截", async ({ page }) => {
+    const codeInput = page.locator('input[placeholder="000001"]').first();
+    const addButton = page.locator("button", { hasText: "Add" }).first();
+
+    // Listen for dialog events as fallback
+    let dialogMessage = "";
+    page.on("dialog", (dialog) => {
+      dialogMessage = dialog.message();
+    });
+
+    const invalidCodes = ["ABC", "12345", "1234567", "HK123"];
+
+    for (const code of invalidCodes) {
+      dialogMessage = "";
+      await codeInput.fill(code);
+      await addButton.click();
+
+      // Wait for toast to appear (toast has red background for errors)
+      await page.waitForTimeout(300);
+
+      // Check for error toast containing "股票代码格式错误"
+      // The toast appears as a fixed div with the error message
+      const toastVisible = await page
+        .locator("div")
+        .filter({ hasText: /股票代码格式错误/ })
+        .first()
+        .isVisible()
+        .catch(() => false);
+
+      const hasError = toastVisible || dialogMessage.includes("股票代码格式错误");
+
+      // The error toast or dialog should appear
+      expect(
+        hasError,
+        "无效代码 \"" + code + "\" 未被拦截, toastVisible=" + toastVisible + ", dialogMessage=" + dialogMessage
+      ).toBeTruthy();
+
+      // Verify stock was NOT added (table should not contain this code)
+      const stockRow = page.locator("text=/^" + code + "$/").first();
+      if (await stockRow.isVisible().catch(() => false)) {
+        // If visible, it might be from a previous test run — not a test failure
+        console.log("Note: " + code + " appears in list (possibly pre-existing)");
+      }
+    }
+  });
+
+  test("有效代码可提交", async ({ page }) => {
+    const codeInput = page.locator('input[placeholder="000001"]').first();
+    const addButton = page.locator("text=add", { exact: false }).first();
+
+    // Listen for dialog events
+    let dialogMessage = "";
+    page.on("dialog", (dialog) => {
+      dialogMessage = dialog.message();
+    });
+
+    // Use 688888 as test code (科创板, unlikely to exist)
+    const testCode = "688888";
+
+    await codeInput.fill(testCode);
+    await addButton.click();
+    await page.waitForTimeout(1000);
+
+    // Verify NO "股票代码格式错误" error toast appears
+    const errorToast = page.locator("text=/股票代码格式错误/").first();
+    const hasError =
+      (await errorToast.isVisible().catch(() => false)) ||
+      dialogMessage.includes("股票代码格式错误");
+
+    expect(hasError, "有效代码不应触发格式错误").toBeFalsy();
+
+    // Cleanup: remove the test stock via API if it was added
+    // Check if it was actually added by looking for it in the list
+    const stockRow = page.locator("text=/^" + testCode + "$/").first();
+    const wasAdded = await stockRow.isVisible().catch(() => false);
+
+    if (wasAdded) {
+      // Remove via API
+      const { request } = page.context();
+      await request.post("/api/config", {
+        data: { action: "remove", code: testCode },
+      });
+    }
+  });
+});

@@ -70,3 +70,47 @@ test.describe("StockDrawer 交互", () => {
     await expect(stockRow).toBeVisible({ timeout: 5_000 });
   });
 });
+
+test.describe("Drawer 转自选/转持仓", () => {
+  test.setTimeout(60_000);
+
+  test("holding 股票 drawer 显示转自选按钮", async ({ page }) => {
+    await page.goto("/", { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await page.waitForSelector("text=/refresh #[1-9]/", { timeout: 30_000 });
+
+    // 点击持仓行
+    const stockRow = page.locator('[title="点击查看详情"]').first();
+    await expect(stockRow).toBeVisible({ timeout: 10_000 });
+    await stockRow.click();
+
+    // 等待 drawer 出现
+    const drawer = page.locator('div[style*="z-index: 201"]').first();
+    await expect(drawer).toBeVisible({ timeout: 5_000 });
+
+    // 验证转自选按钮可见
+    await expect(page.getByText("转自选")).toBeVisible({ timeout: 5_000 });
+
+    // 验证转持仓按钮不可见（holding 不应显示转持仓）
+    await expect(page.getByText("转持仓")).not.toBeVisible({ timeout: 3_000 });
+  });
+
+  test("watching 股票 drawer 显示转持仓按钮", async ({ page }) => {
+    await page.goto("/watching", { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await page.waitForTimeout(3000);
+
+    // 等待任意一个 stock row 出现
+    const stockRow = page.locator('[title="点击查看详情"]').first();
+    await expect(stockRow).toBeVisible({ timeout: 10_000 });
+    await stockRow.click();
+
+    // 等待 drawer 出现
+    const drawer = page.locator('div[style*="z-index: 201"]').first();
+    await expect(drawer).toBeVisible({ timeout: 5_000 });
+
+    // 验证转持仓按钮可见
+    await expect(page.getByText("转持仓")).toBeVisible({ timeout: 5_000 });
+
+    // 验证转自选按钮不可见（watching 不应显示转自选）
+    await expect(page.getByText("转自选")).not.toBeVisible({ timeout: 3_000 });
+  });
+});

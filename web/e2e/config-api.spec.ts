@@ -181,3 +181,65 @@ test.describe("Config API", () => {
     expect(data.success).toBe(false);
   });
 });
+
+test.describe("类型变更 + cost/shares 清空", () => {
+  test("holding→watching 清空 cost/shares", async ({ request }) => {
+    const demoteCode = `DEMOTE${Date.now().toString(36).toUpperCase().slice(-6)}`;
+
+    // 添加为 holding，带 cost/shares
+    await request.post("/api/config", {
+      data: { action: "add", code: demoteCode, data: { type: "holding", cost: 25.5, shares: 500 } },
+    });
+
+    // 变更为 watching，同时清空 cost/shares
+    const updateRes = await request.post("/api/config", {
+      data: { action: "update", code: demoteCode, data: { type: "watching", cost: null, shares: null } },
+    });
+    expect(updateRes.ok()).toBeTruthy();
+    const updateData = await updateRes.json();
+    expect(updateData.success).toBe(true);
+
+    // 验证
+    const getRes = await request.get("/api/config");
+    const getData = await getRes.json();
+    const entry = getData.watchlist[demoteCode];
+    expect(entry.type === "watching" || entry.type === undefined).toBe(true);
+    expect(entry.cost === null || entry.cost === undefined).toBe(true);
+    expect(entry.shares === null || entry.shares === undefined).toBe(true);
+
+    // 清理
+    await request.post("/api/config", {
+      data: { action: "remove", code: demoteCode },
+    });
+  });
+
+  test("watching→holding 设置 cost/shares", async ({ request }) => {
+    const promoteCode = `PROMOTE${Date.now().toString(36).toUpperCase().slice(-6)}`;
+
+    // 添加为 watching
+    await request.post("/api/config", {
+      data: { action: "add", code: promoteCode, data: { type: "watching" } },
+    });
+
+    // 变更为 holding，设置 cost/shares
+    const updateRes = await request.post("/api/config", {
+      data: { action: "update", code: promoteCode, data: { type: "holding", cost: 35.96, shares: 1000 } },
+    });
+    expect(updateRes.ok()).toBeTruthy();
+    const updateData = await updateRes.json();
+    expect(updateData.success).toBe(true);
+
+    // 验证
+    const getRes = await request.get("/api/config");
+    const getData = await getRes.json();
+    const entry = getData.watchlist[promoteCode];
+    expect(entry.type).toBe("holding");
+    expect(entry.cost).toBe(35.96);
+    expect(entry.shares).toBe(1000);
+
+    // 清理
+    await request.post("/api/config", {
+      data: { action: "remove", code: promoteCode },
+    });
+  });
+});
