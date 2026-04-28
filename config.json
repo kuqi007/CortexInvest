@@ -1,0 +1,41 @@
+{
+  "agent": {
+    "orchestrator": {
+      "model": "minimax/MiniMax-M2.7-highspeed",
+      "variant": "medium",
+      "options": {},
+      "permission": {}
+    },
+    "oracle": {
+      "model": "glm/glm-5",
+      "variant": "high",
+      "options": {},
+      "permission": {}
+    },
+    "librarian": {
+      "model": "minimax/MiniMax-M2.7-highspeed",
+      "variant": "low",
+      "options": {},
+      "permission": {}
+    },
+    "explorer": {
+      "model": "minimax/MiniMax-M2.7-highspeed",
+      "variant": "low",
+      "options": {},
+      "permission": {}
+    },
+    "designer": {
+      "model": "minimax/MiniMax-M2.7-highspeed",
+      "variant": "medium",
+      "options": {},
+      "permission": {}
+    },
+    "fixer": {
+      "model": "minimax/MiniMax-M2.7-highspeed",
+      "variant": "low",
+      "options": {},
+      "permission": {}
+    }
+  },
+  "$schema": "https://opencode.ai/config.json"
+}

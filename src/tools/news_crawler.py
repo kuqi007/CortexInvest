@@ -13,6 +13,7 @@ _project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 load_dotenv(os.path.join(_project_root, ".env"), override=True)
 
 from src.utils.llm_clients import LLMClientFactory
+from src.sim_trading.db import get_connection, init_trading_db
 
 # 导入新的搜索模块
 try:
@@ -484,33 +485,11 @@ def get_news_sentiment(news_list: list, num_of_news: int = 5,
     if not news_list:
         return 0.0
 
-    # 检查是否有缓存的情感分析结果
-    cache_file = "src/data/sentiment_cache.json"
-    os.makedirs(os.path.dirname(cache_file), exist_ok=True)
-
-    # 生成新闻内容的唯一标识（含结构化输出标识，避免缓存版本冲突）
-    cache_suffix = "_v2" if use_structured_output else "_v1"
-    news_key = "|".join([
-        f"{news['title']}|{news['content'][:100]}|{news['publish_time']}"
-        for news in news_list[:num_of_news]
-    ]) + cache_suffix
-
-    # 检查缓存
-    if os.path.exists(cache_file):
-        print("发现情感分析缓存文件")
-        try:
-            with open(cache_file, 'r', encoding='utf-8') as f:
-                cache = json.load(f)
-                if news_key in cache:
-                    print("使用缓存的情感分析结果")
-                    return cache[news_key]
-                print("未找到匹配的情感分析缓存")
-        except Exception as e:
-            print(f"读取情感分析缓存出错: {e}")
-            cache = {}
-    else:
-        print("未找到情感分析缓存文件，将创建新文件")
-        cache = {}
+    news_key = _sentiment_cache_key(news_list, num_of_news, use_structured_output)
+    cached_score = _read_sentiment_cache(news_key)
+    if cached_score is not None:
+        print("使用缓存的情感分析结果")
+        return cached_score
 
     # 准备系统消息
     system_message = {
@@ -594,7 +573,7 @@ def get_news_sentiment(news_list: list, num_of_news: int = 5,
                 print("Error: LLM returned None")
                 return 0.0
 
-            parsed = _json.loads(result)
+            parsed = json.loads(result)
             sentiment_score = float(parsed["score"])
             confidence = float(parsed.get("confidence", 0.5))
             factors = parsed.get("key_factors", [])
@@ -603,12 +582,7 @@ def get_news_sentiment(news_list: list, num_of_news: int = 5,
             print(f"情感分析: score={sentiment_score:.2f}, "
                   f"confidence={confidence:.2f}, factors={factors}")
 
-            cache[news_key] = sentiment_score
-            try:
-                with open(cache_file, 'w', encoding='utf-8') as f:
-                    _json.dump(cache, f, ensure_ascii=False, indent=2)
-            except Exception as e:
-                print(f"Error writing cache: {e}")
+            _write_sentiment_cache(news_key, sentiment_score)
 
             return sentiment_score
 
@@ -637,15 +611,67 @@ def get_news_sentiment(news_list: list, num_of_news: int = 5,
 
         sentiment_score = max(-1.0, min(1.0, sentiment_score))
 
-        cache[news_key] = sentiment_score
-        try:
-            with open(cache_file, 'w', encoding='utf-8') as f:
-                json.dump(cache, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f"Error writing cache: {e}")
+        _write_sentiment_cache(news_key, sentiment_score)
 
         return sentiment_score
 
     except Exception as e:
         print(f"Error analyzing news sentiment: {e}")
         return 0.0
+
+
+def _sentiment_cache_key(
+    news_list: list, num_of_news: int = 5, use_structured_output: bool = True
+) -> str:
+    """Build stable sentiment cache key from news content."""
+    cache_suffix = "_v2" if use_structured_output else "_v1"
+    return "|".join([
+        f"{news['title']}|{news['content'][:100]}|{news['publish_time']}"
+        for news in news_list[:num_of_news]
+    ]) + cache_suffix
+
+
+def _read_sentiment_cache(cache_key: str) -> float | None:
+    conn = None
+    try:
+        init_trading_db()
+        conn = get_connection()
+        row = conn.execute(
+            "SELECT payload_json FROM sentiment_cache WHERE cache_key = ?",
+            (cache_key,),
+        ).fetchone()
+        if not row:
+            return None
+        payload = json.loads(row["payload_json"])
+        return float(payload["score"])
+    except Exception as e:
+        print(f"读取情感分析缓存出错: {e}")
+        return None
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def _write_sentiment_cache(cache_key: str, score: float) -> None:
+    conn = None
+    try:
+        init_trading_db()
+        conn = get_connection()
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO sentiment_cache
+                (cache_key, payload_json, updated_at_ms)
+            VALUES (?, ?, ?)
+            """,
+            (
+                cache_key,
+                json.dumps({"score": score}, ensure_ascii=False, separators=(",", ":")),
+                int(time.time() * 1000),
+            ),
+        )
+        conn.commit()
+    except Exception as e:
+        print(f"Error writing sentiment cache: {e}")
+    finally:
+        if conn is not None:
+            conn.close()

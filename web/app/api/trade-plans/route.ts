@@ -57,29 +57,6 @@ function ensureScopeColumn(db: ReturnType<typeof openTradingDb>) {
   }
 }
 
-function migrateScopeFromJson(db: ReturnType<typeof openTradingDb>) {
-  try {
-    const hasNullScope = db.prepare("SELECT 1 FROM trade_plans WHERE scope IS NULL OR scope = '' LIMIT 1").get();
-    if (!hasNullScope) return;
-
-    const fs = require("fs");
-    const path = require("path");
-    const jsonPath = path.join(process.cwd(), "..", "src", "data", "trade_plans.json");
-    if (!fs.existsSync(jsonPath)) return;
-
-    const raw = JSON.parse(fs.readFileSync(jsonPath, "utf-8"));
-    const plans = raw?.plans || {};
-    for (const [id, plan] of Object.entries(plans)) {
-      const p = plan as { scope?: string };
-      if (p.scope) {
-        try {
-          db.prepare("UPDATE trade_plans SET scope = ? WHERE id = ? AND (scope IS NULL OR scope = '' OR scope = 'real')").run(p.scope, id);
-        } catch { /* ignore per-row errors */ }
-      }
-    }
-  } catch { /* ignore migration errors */ }
-}
-
 /* ── GET ── */
 
 export async function GET() {
@@ -87,7 +64,6 @@ export async function GET() {
   const cdb = openConfigDb(true);
   try {
     ensureScopeColumn(tdb);
-    migrateScopeFromJson(tdb);
 
     // Read all trade plans
     const planRows = tdb

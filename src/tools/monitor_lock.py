@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Poller leader lease backed by config.db."""
+"""Shared monitor leader lease backed by config.db."""
 
 import logging
 import os
@@ -15,7 +15,7 @@ from src.sim_trading.db import get_config_connection, init_config_db
 
 logger = logging.getLogger(__name__)
 
-LOCK_NAME = "market_data_poller"
+LOCK_NAME = "monitor_lock"
 HEARTBEAT_INTERVAL = 30
 LEASE_TTL_MS = 90_000
 
@@ -54,10 +54,21 @@ class MonitorLock:
                 ).fetchone()
 
                 if row:
-                    if row["hostname"] == self.hostname or row["lease_until_ms"] < now_ms:
-                        generation = int(row["generation"]) + (
-                            1 if row["hostname"] != self.hostname else 0
+                    if row["hostname"] == self.hostname and row["lease_until_ms"] >= now_ms:
+                        conn.execute(
+                            """
+                            UPDATE poller_leader_lease
+                            SET lease_until_ms = ?, heartbeat_ts_ms = ?
+                            WHERE name = ?
+                            """,
+                            (lease_until_ms, now_ms, LOCK_NAME),
                         )
+                        conn.execute("COMMIT")
+                        self.is_leader = True
+                        return True
+
+                    if row["lease_until_ms"] < now_ms:
+                        generation = int(row["generation"]) + 1
                         conn.execute(
                             """
                             UPDATE poller_leader_lease
@@ -125,9 +136,9 @@ class MonitorLock:
                 """
                 UPDATE poller_leader_lease
                 SET heartbeat_ts_ms = ?, lease_until_ms = ?
-                WHERE name = ? AND holder_id = ?
+                WHERE name = ? AND hostname = ?
                 """,
-                (now_ms, lease_until_ms, LOCK_NAME, self.holder_id),
+                (now_ms, lease_until_ms, LOCK_NAME, self.hostname),
             )
             if cursor.rowcount == 1:
                 return True

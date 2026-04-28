@@ -69,6 +69,24 @@ def test_refresh_heartbeat_returns_false_when_db_update_fails(monkeypatch):
     assert lock.refresh_heartbeat() is False
 
 
+def test_same_host_processes_share_lease_heartbeat(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "_config_db_path_override", str(tmp_path / "config.db"))
+    monkeypatch.setattr(db, "_db_path_override", str(tmp_path / "trading.db"))
+    monkeypatch.setattr(monitor_lock, "_hostname", lambda: "local-host")
+
+    first = monitor_lock.MonitorLock()
+    first.pid = 111
+    first.holder_id = "local-host:111"
+    second = monitor_lock.MonitorLock()
+    second.pid = 222
+    second.holder_id = "local-host:222"
+
+    assert first.try_acquire() is True
+    assert second.try_acquire() is True
+    assert second.get_lock_holder() == ("local-host", 111)
+    assert first.refresh_heartbeat() is True
+
+
 def test_try_acquire_closes_connection(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "_config_db_path_override", str(tmp_path / "config.db"))
     monkeypatch.setattr(db, "_db_path_override", str(tmp_path / "trading.db"))

@@ -15,6 +15,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 # Import after path setup
 import src.tools.tick_monitor as tm
+import src.sim_trading.db as db
 
 
 # ══════════════════════════════════════════
@@ -26,19 +27,46 @@ import src.tools.tick_monitor as tm
 def reset_globals():
     """Reset module-level cache before each test."""
     tm._plans_cache = None
-    tm._plans_mtime = 0
     yield
     tm._plans_cache = None
-    tm._plans_mtime = 0
 
 
 @pytest.fixture
-def tmp_trade_plans(tmp_path):
-    """Return a temporary TRADE_PLANS_PATH pointing to a tmp file."""
-    orig = tm.TRADE_PLANS_PATH
-    tm.TRADE_PLANS_PATH = tmp_path / "trade_plans.json"
-    yield tm.TRADE_PLANS_PATH
-    tm.TRADE_PLANS_PATH = orig
+def tmp_trading_db(tmp_path, monkeypatch):
+    """Return a temporary trading.db with the canonical schema."""
+    monkeypatch.setattr(db, "_db_path_override", str(tmp_path / "trading.db"))
+    monkeypatch.setattr(db, "_config_db_path_override", str(tmp_path / "config.db"))
+    db.init_trading_db()
+    return tmp_path / "trading.db"
+
+
+def _insert_trade_plan(
+    plan_id: str,
+    *,
+    name: str,
+    symbol: str,
+    status: str,
+    scope: str,
+    orders: list[dict] | None = None,
+):
+    conn = db.get_connection()
+    conn.execute(
+        """
+        INSERT INTO trade_plans (id, name, symbol, status, scope, created_at, orders_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            plan_id,
+            name,
+            symbol,
+            status,
+            scope,
+            "2026-04-28",
+            json.dumps(orders or []),
+        ),
+    )
+    conn.commit()
+    conn.close()
 
 
 # ══════════════════════════════════════════
@@ -95,79 +123,55 @@ class TestCheckTrigger:
 
 
 class TestLoadTickMonitorPlans:
-    def test_empty_when_file_missing(self, tmp_path):
-        tm.TRADE_PLANS_PATH = tmp_path / "nonexistent.json"
-        tm._plans_cache = None
+    def test_empty_when_no_db_plans(self, tmp_trading_db):
         assert tm.load_tick_monitor_plans() == {}
 
-    def test_filters_by_scope_and_status(self, tmp_trade_plans):
-        data = {
-            "plans": {
-                "plan_a": {
-                    "name": "A",
-                    "symbol": "HK00001",
-                    "status": "active",
-                    "scope": "tick_monitor",
-                },
-                "plan_b": {
-                    "name": "B",
-                    "symbol": "HK00002",
-                    "status": "inactive",
-                    "scope": "tick_monitor",
-                },
-                "plan_c": {
-                    "name": "C",
-                    "symbol": "HK00003",
-                    "status": "active",
-                    "scope": "l2_strategy",
-                },
-            }
-        }
-        tmp_trade_plans.write_text(json.dumps(data), encoding="utf-8")
+    def test_filters_by_scope_and_status(self, tmp_trading_db):
+        _insert_trade_plan(
+            "plan_a",
+            name="A",
+            symbol="HK00001",
+            status="active",
+            scope="tick_monitor",
+            orders=[{"id": "buy"}],
+        )
+        _insert_trade_plan(
+            "plan_b",
+            name="B",
+            symbol="HK00002",
+            status="paused",
+            scope="tick_monitor",
+        )
+        _insert_trade_plan(
+            "plan_c",
+            name="C",
+            symbol="HK00003",
+            status="active",
+            scope="l2_strategy",
+        )
+
         plans = tm.load_tick_monitor_plans()
+
         assert set(plans.keys()) == {"plan_a"}
         assert plans["plan_a"]["name"] == "A"
+        assert plans["plan_a"]["orders"] == [{"id": "buy"}]
 
-    def test_uses_mtime_cache(self, tmp_trade_plans):
-        data = {
-            "plans": {
-                "p1": {
-                    "name": "Cached",
-                    "symbol": "HK00001",
-                    "status": "active",
-                    "scope": "tick_monitor",
-                }
-            }
-        }
-        tmp_trade_plans.write_text(json.dumps(data), encoding="utf-8")
-        first = tm.load_tick_monitor_plans()
-        # overwrite file with different content
-        data["plans"]["p1"]["name"] = "Updated"
-        tmp_trade_plans.write_text(json.dumps(data), encoding="utf-8")
-        # force same mtime (simulate cache hit)
-        original_mtime = tmp_trade_plans.stat().st_mtime
-        tm._plans_mtime = original_mtime
-        second = tm.load_tick_monitor_plans()
-        # because mtime is unchanged we get cached version
-        assert second["p1"]["name"] == "Cached"
+    def test_reads_latest_db_without_file_mtime_cache(self, tmp_trading_db):
+        _insert_trade_plan(
+            "p1",
+            name="Initial",
+            symbol="HK00001",
+            status="active",
+            scope="tick_monitor",
+        )
+        assert tm.load_tick_monitor_plans()["p1"]["name"] == "Initial"
 
-    def test_returns_cached_on_parse_error(self, tmp_trade_plans):
-        data = {
-            "plans": {
-                "p1": {
-                    "name": "Fallback",
-                    "symbol": "HK00001",
-                    "status": "active",
-                    "scope": "tick_monitor",
-                }
-            }
-        }
-        tmp_trade_plans.write_text(json.dumps(data), encoding="utf-8")
-        tm.load_tick_monitor_plans()
-        # corrupt file
-        tmp_trade_plans.write_text("not json", encoding="utf-8")
-        result = tm.load_tick_monitor_plans()
-        assert result["p1"]["name"] == "Fallback"
+        conn = db.get_connection()
+        conn.execute("UPDATE trade_plans SET name = ? WHERE id = ?", ("Updated", "p1"))
+        conn.commit()
+        conn.close()
+
+        assert tm.load_tick_monitor_plans()["p1"]["name"] == "Updated"
 
 
 # ══════════════════════════════════════════

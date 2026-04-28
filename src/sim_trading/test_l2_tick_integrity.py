@@ -331,6 +331,51 @@ class TestL2TickIntegrity:
         for line in all_stocks_micro:
             assert "无微观数据" in line
 
+    def test_load_trade_plans_from_db_ignores_trade_plans_json(self, tmp_path, monkeypatch):
+        """Daily summary should load trade plans from trading.db only."""
+        import src.sim_trading.db as db_module
+        import src.tools.daily_summary_generator as dsg
+
+        monkeypatch.setattr(db_module, "_db_path_override", str(tmp_path / "trading.db"))
+        monkeypatch.setattr(dsg, "TRADING_DB_PATH", str(tmp_path / "trading.db"))
+        monkeypatch.setattr(
+            dsg, "TRADE_PLANS_PATH", tmp_path / "missing_trade_plans.json", raising=False
+        )
+        db_module.init_trading_db()
+        conn = db_module.get_connection()
+        conn.execute(
+            """
+            INSERT INTO trade_plans (id, name, symbol, status, scope, created_at, orders_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "plan-db",
+                "DB Plan",
+                "HK00700",
+                "active",
+                "real",
+                "2026-04-28",
+                json.dumps([{"id": "entry", "side": "buy"}]),
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        plans = dsg._load_trade_plans_from_db()
+
+        assert plans == {
+            "plans": {
+                "plan-db": {
+                    "name": "DB Plan",
+                    "symbol": "HK00700",
+                    "status": "active",
+                    "scope": "real",
+                    "created_at": "2026-04-28",
+                    "orders": [{"id": "entry", "side": "buy"}],
+                }
+            }
+        }
+
     def test_digest_direction_score_calculation(self, mock_db, monkeypatch):
         """Test direction score calculation with tick imbalance."""
         db_path, conn = mock_db

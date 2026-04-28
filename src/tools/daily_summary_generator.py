@@ -43,7 +43,6 @@ DATA_DIR = PROJECT_ROOT / "src" / "data"
 from src.utils.config_reader import read_monitor_config
 
 L2_SIGNALS_PATH = DATA_DIR / "l2_strategy_signals.json"
-TRADE_PLANS_PATH = DATA_DIR / "trade_plans.json"
 
 CONFIG_DB_PATH = DATA_DIR / "config.db"
 TRADING_DB_PATH = DATA_DIR / "trading.db"
@@ -93,6 +92,44 @@ def _read_market_data_from_db() -> dict:
     finally:
         if conn:
             conn.close()
+
+
+def _load_trade_plans_from_db() -> dict:
+    """Read trade plans from trading.db in the legacy prompt shape."""
+    conn = None
+    try:
+        conn = sqlite3.connect(TRADING_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT id, name, symbol, status, scope, created_at, orders_json
+            FROM trade_plans
+            ORDER BY id
+            """
+        ).fetchall()
+    except Exception as e:
+        logger.warning(f"读取 trade_plans 失败: {e}")
+        return {"plans": {}}
+    finally:
+        if conn:
+            conn.close()
+
+    plans: dict[str, dict] = {}
+    for row in rows:
+        try:
+            orders = json.loads(row["orders_json"] or "[]")
+        except json.JSONDecodeError:
+            logger.warning(f"trade_plans.orders_json 无效: {row['id']}")
+            continue
+        plans[row["id"]] = {
+            "name": row["name"],
+            "symbol": row["symbol"],
+            "status": row["status"],
+            "scope": row["scope"],
+            "created_at": row["created_at"],
+            "orders": orders if isinstance(orders, list) else [],
+        }
+    return {"plans": plans}
 
 
 def _read_alert_rules_from_db() -> dict:
@@ -1355,7 +1392,7 @@ def generate_daily_summary(date_str: str | None = None) -> dict | None:
         return None
 
     # ── Read trade plans ──
-    trade_plans = _read_json(TRADE_PLANS_PATH)
+    trade_plans = _load_trade_plans_from_db()
 
     # ── Compute L2 daily digest early (needed for direction in per_stock) ──
     l2_digests_early = _compute_l2_digest(today)

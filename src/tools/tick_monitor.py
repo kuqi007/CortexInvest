@@ -9,9 +9,9 @@ Tick Monitor — 短线盯盘 Daemon
   - 轻量级: 只监控 2-3 只短线股票，3-5 秒轮询
   - 独立进程: 不依赖 l2_strategy_engine，直接调用 Futu API
   - 复用 feishu_send() 通知通道
-  - 配置从 trade_plans.json 中 scope="tick_monitor" 的计划读取
+  - 配置从 trading.db trade_plans 中 scope="tick_monitor" 的计划读取
 
-配置格式 (trade_plans.json):
+配置格式 (trade_plans.orders_json):
   "HK03296_tick": {
     "name": "华勤技术短线盯盘",
     "symbol": "HK03296",
@@ -61,6 +61,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.tools.stock_notifier import is_any_market_open
+from src.sim_trading.db import get_connection, init_trading_db
 from src.utils.futu_codes import to_futu_code
 from src.utils.logging_config import setup_logger
 
@@ -68,9 +69,6 @@ logger = setup_logger("tick_monitor")
 
 # ── 生产者侧冷却 (防止同一 order 频繁重复写入) ──
 _order_cooldown: dict[str, float] = {}  # key: "plan_id.order_id", value: last trigger time
-
-# ── 配置 ──
-TRADE_PLANS_PATH = PROJECT_ROOT / "src" / "data" / "trade_plans.json"
 
 # DB table SQL for tick_monitor_events
 _TICK_EVENTS_TABLE_SQL = (
@@ -200,40 +198,49 @@ class FutuConnection:
 
 
 # ══════════════════════════════════════════
-# 配置加载 (带 mtime 缓存)
+# 配置加载
 # ══════════════════════════════════════════
 
 _plans_cache: dict[str, dict] | None = None
-_plans_mtime: float = 0
 
 
 def load_tick_monitor_plans() -> dict[str, dict]:
-    """从 trade_plans.json 加载 scope='tick_monitor' 的计划，带缓存"""
-    global _plans_cache, _plans_mtime
-
-    if not TRADE_PLANS_PATH.exists():
-        logger.warning(f"trade_plans.json not found: {TRADE_PLANS_PATH}")
-        return _plans_cache or {}
-
+    """从 trading.db 加载 scope='tick_monitor' 且 active 的计划。"""
+    global _plans_cache
+    conn = None
     try:
-        current_mtime = TRADE_PLANS_PATH.stat().st_mtime
-        if _plans_cache is not None and current_mtime == _plans_mtime:
-            return _plans_cache
-
-        with open(TRADE_PLANS_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        _plans_mtime = current_mtime
+        init_trading_db()
+        conn = get_connection()
+        rows = conn.execute(
+            """
+            SELECT id, name, symbol, status, scope, created_at, orders_json
+            FROM trade_plans
+            WHERE scope = 'tick_monitor' AND status = 'active'
+            ORDER BY id
+            """
+        ).fetchall()
     except Exception as e:
-        logger.warning(f"Failed to load trade_plans.json: {e}")
+        logger.warning(f"Failed to load tick monitor plans from trading.db: {e}")
         return _plans_cache or {}
+    finally:
+        if conn is not None:
+            conn.close()
 
-    plans = data.get("plans", {})
     tick_plans = {}
-    for plan_id, plan in plans.items():
-        scope = (plan.get("scope") or "").strip().lower()
-        if scope == "tick_monitor" and plan.get("status") == "active":
-            tick_plans[plan_id] = plan
+    for row in rows:
+        try:
+            orders = json.loads(row["orders_json"] or "[]")
+        except json.JSONDecodeError:
+            logger.warning(f"Invalid orders_json for tick monitor plan {row['id']}")
+            continue
+        tick_plans[row["id"]] = {
+            "name": row["name"],
+            "symbol": row["symbol"],
+            "status": row["status"],
+            "scope": row["scope"],
+            "created_at": row["created_at"],
+            "orders": orders if isinstance(orders, list) else [],
+        }
 
     _plans_cache = tick_plans
     return tick_plans

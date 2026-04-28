@@ -1,6 +1,6 @@
 """Trading calendar via Futu OpenD — shared module.
 
-Provides is_trading_day(market, date) with file-based cache.
+Provides is_trading_day(market, date) with SQLite-backed cache.
 Falls back to weekday check if Futu is unavailable.
 
 Usage:
@@ -10,13 +10,12 @@ Usage:
 """
 
 import json
-import os
 import socket
 import time
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Optional
 
+from src.sim_trading.db import get_connection, init_trading_db
 from src.utils.logging_config import setup_logger
 
 logger = setup_logger("trading_calendar")
@@ -24,55 +23,71 @@ logger = setup_logger("trading_calendar")
 OPEND_HOST = "127.0.0.1"
 OPEND_PORT = 11111
 
-# Cache file location (absolute path)
-_CACHE_DIR = Path(__file__).parent.parent / "data"
-CACHE_FILE = _CACHE_DIR / "trading_calendar_cache.json"
-
 # Cache: {(market, month_key): {date_str: trade_type}}
 # Refreshed once per day per market, covers current month ± 7 days
 _cache: dict[tuple[str, str], dict[str, str]] = {}
 _cache_date: str = ""  # date when cache was last refreshed
 
 
-def _load_cache_from_file() -> bool:
-    """Load cache from local file. Returns True if loaded successfully."""
+def _load_cache_from_db() -> bool:
+    """Load cache from trading.db. Returns True if loaded successfully."""
     global _cache, _cache_date
-    if not CACHE_FILE.exists():
-        return False
+    conn = None
     try:
-        with open(CACHE_FILE, "r") as f:
-            data = json.load(f)
+        init_trading_db()
+        conn = get_connection()
+        rows = conn.execute(
+            "SELECT date, calendar_json, updated_at_ms FROM trading_calendar_cache"
+        ).fetchall()
         _cache = {}
-        for k, v in data.get("cache", {}).items():
-            parts = k.split("|||")
+        latest_ms = 0
+        for row in rows:
+            parts = row["date"].split("|||")
             if len(parts) == 2:
-                _cache[(parts[0], parts[1])] = v
-        _cache_date = data.get("cache_date", "")
-        logger.info(f"Loaded trading calendar from file: {CACHE_FILE}")
-        return True
+                payload = json.loads(row["calendar_json"])
+                days = payload.get("days", {})
+                if isinstance(days, dict):
+                    _cache[(parts[0], parts[1])] = days
+                latest_ms = max(latest_ms, int(row["updated_at_ms"] or 0))
+        if latest_ms:
+            _cache_date = datetime.fromtimestamp(latest_ms / 1000).strftime("%Y-%m-%d")
+        return bool(rows)
     except Exception as e:
         logger.debug(f"Failed to load trading calendar cache: {e}")
         return False
+    finally:
+        if conn is not None:
+            conn.close()
 
 
-def _save_cache_to_file():
-    """Save cache to local file."""
+def _save_cache_to_db():
+    """Save cache to trading.db."""
     global _cache, _cache_date
+    conn = None
     try:
-        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        # Convert tuple keys to strings for JSON
-        data = {
-            "cache": {f"{k[0]}|||{k[1]}": v for k, v in _cache.items()},
-            "cache_date": _cache_date,
-        }
-        # Atomic write: temp file then rename
-        tmp = CACHE_FILE.with_suffix(".tmp")
-        with open(tmp, "w") as f:
-            json.dump(data, f)
-        tmp.rename(CACHE_FILE)
-        logger.debug(f"Saved trading calendar to file: {CACHE_FILE}")
+        init_trading_db()
+        conn = get_connection()
+        updated_at_ms = int(time.time() * 1000)
+        for (market, month_key), days in _cache.items():
+            payload = {"market": market, "month": month_key, "days": days}
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO trading_calendar_cache
+                    (date, calendar_json, updated_at_ms)
+                VALUES (?, ?, ?)
+                """,
+                (
+                    f"{market}|||{month_key}",
+                    json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                    updated_at_ms,
+                ),
+            )
+        conn.commit()
     except Exception as e:
         logger.debug(f"Failed to save trading calendar cache: {e}")
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def _fetch_trading_days(market: str, start: str, end: str) -> Optional[dict[str, str]]:
@@ -118,9 +133,9 @@ def _ensure_cache(market: str):
     """Refresh cache if needed (once per day)."""
     global _cache, _cache_date
 
-    # Load from file on first call
+    # Load from DB on first call
     if not _cache_date:
-        _load_cache_from_file()
+        _load_cache_from_db()
 
     today = datetime.now().strftime("%Y-%m-%d")
     month_key = today[:7]  # "2026-03"
@@ -137,7 +152,7 @@ def _ensure_cache(market: str):
     if data is not None:
         _cache[cache_key] = data
         _cache_date = today
-        _save_cache_to_file()
+        _save_cache_to_db()
         logger.info(f"Trading calendar cached: {market} {len(data)} days ({start}~{end})")
 
 
