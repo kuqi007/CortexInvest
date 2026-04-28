@@ -87,42 +87,18 @@ _feishu_symbol_cooldown: dict[str, float] = {}
 
 
 def load_config() -> dict:
-    """加载配置 — DB 优先，JSON 作为备份"""
+    """加载配置 — 只读 config.db，禁止 JSON fallback。"""
     from src.utils.config_reader import read_monitor_config
 
-    # 优先从 DB 读取
-    try:
-        cfg = read_monitor_config(prefer_db=True)
-        if cfg.get("watchlist"):
-            return cfg
-    except Exception:
-        pass
-
-    # 回退到 JSON（兼容旧数据）
-    json_path = PROJECT_ROOT / "src" / "data" / "monitor_config.json"
-    if json_path.exists():
-        with open(json_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-
-    # 初始化默认配置
-    config = {
-        "watchlist": {code: {"name": name, "type": "watching"} for code, name in AIDC_WATCHLIST.items()},
-        "settings": DEFAULT_SETTINGS.copy(),
-    }
-    save_config(config)
-    return config
+    return read_monitor_config(prefer_db=True)
 
 
 def _get_db_conn() -> sqlite3.Connection:
     """获取 config.db 连接，确保表已初始化。"""
-    from src.sim_trading.db import init_config_db
+    from src.sim_trading.db import get_config_connection, init_config_db
 
     init_config_db()
-    conn = sqlite3.connect(str(CONFIG_DB_PATH), timeout=10, isolation_level=None)
-    conn.execute("PRAGMA journal_mode=DELETE")
-    conn.execute("PRAGMA busy_timeout=5000")
-    conn.row_factory = sqlite3.Row
-    return conn
+    return get_config_connection()
 
 
 def save_config(config: dict):

@@ -14,6 +14,30 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from src.tools.stock_monitor import notify
 
 
+def test_load_config_reads_db_only(monkeypatch):
+    import src.tools.stock_monitor as stock_monitor
+    import src.utils.config_reader as config_reader
+
+    expected = {"watchlist": {"HK09988": {"name": "阿里巴巴"}}, "settings": {}}
+    monkeypatch.setattr(config_reader, "read_monitor_config", lambda prefer_db=True: expected)
+
+    assert stock_monitor.load_config() == expected
+
+
+def test_load_config_does_not_create_default_or_json_fallback(monkeypatch):
+    import src.tools.stock_monitor as stock_monitor
+    import src.utils.config_reader as config_reader
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("config.db unavailable")
+
+    monkeypatch.setattr(config_reader, "read_monitor_config", fail)
+    monkeypatch.setattr(stock_monitor, "save_config", lambda config: (_ for _ in ()).throw(AssertionError("must not save default config")))
+
+    with pytest.raises(RuntimeError, match="config.db unavailable"):
+        stock_monitor.load_config()
+
+
 # ══════════════════════════════════════════
 # Feishu filtering in notify()
 # ══════════════════════════════════════════

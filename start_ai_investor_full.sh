@@ -141,13 +141,13 @@ do_start() {
     echo "Poller  启动  pid=$!  日志=logs/poller-$TODAY.log"
   fi
 
-  # Notifier (等 poller 先写一次数据)
+  # Notifier (给 poller 一个短暂启动窗口)
   _ensure_no_orphan "$NOTIFIER_PID" "stock_notifier.py"
   if _is_running "$NOTIFIER_PID"; then
     echo "Notifier 已在运行 (pid=$(_read_pid "$NOTIFIER_PID"))，跳过"
   else
     cd "$DIR"
-    sleep 2  # 等 poller 首次写入 market_data.json
+    sleep 2
     nohup uv run python src/tools/stock_notifier.py >> "$NOTIFIER_LOG" 2>&1 &
     echo $! > "$NOTIFIER_PID"
     echo "Notifier 启动  pid=$!  日志=logs/notifier-$TODAY.log"

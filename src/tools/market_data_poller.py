@@ -42,8 +42,6 @@ logger = setup_logger("market_data_poller")
 # Futu L2 增强器 — 全局单例，懒连接，失败不影响主流程
 _futu_enricher = FutuL2Enricher()
 
-CONFIG_PATH = PROJECT_ROOT / "src" / "data" / "monitor_config.json"
-
 # 确保数据库 schema 包含所有表（包括新增的 market_amo_history）
 init_db()
 
@@ -435,6 +433,7 @@ def _backfill_missing_names(stocks: list[dict], watchlist: dict) -> bool:
         conn.commit()
     except Exception as e:
         logger.warning(f"backfill names DB write failed: {e}")
+        return False
     finally:
         if conn is not None:
             conn.close()
