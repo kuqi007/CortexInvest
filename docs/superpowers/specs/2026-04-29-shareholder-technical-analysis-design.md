@@ -44,7 +44,7 @@ Step 6:   最终校验
 
 | # | 数据项 | mx-data 查询语句 | 说明 |
 |---|--------|----------------|------|
-| F1 | 机构持股比例合计 | `{股票}近3年报 机构持股比例合计` | 季度/年度序列，计算散户占比 |
+| F1 | 机构持股比例合计 | `{股票}近3年报 机构持股比例合计` | 季度/年度序列，计算非机构持股比例 |
 | F2 | 股东户数 | `{股票}股东户数总股本流通股本` | 取最新一期和上期，计算环比变化 |
 | F3 | 十大流通股东明细 | `{股票}十大流通股东` | 含股东性质（证券投资基金/私募/券商等），分析主力动向 |
 
@@ -57,8 +57,9 @@ Step 6:   最终校验
   - rawTable['headName'] = ['2026一季报', '2025年报', ...]
   - rawTable['100000000003145'] = ['72.548', '74.143', ...]  # 数值（无%）
 
-散户占比 = 1 - 机构持股比例合计
+非机构持股比例 = 1 - 机构持股比例合计
   - 贵州茅台 2026一季报: 1 - 72.55% = 27.45%
+  ⚠️ 此为非机构持股比例上限，实际散户比例可能更低（不含控股股东、战略投资者、限售股等）
 ```
 
 **HKSCC 处理**：
@@ -118,13 +119,17 @@ rawTable['收盘价'] = ['1401.17', '1405', ...]  # 纯数值，用这个
 
 | 指标 | 计算方式 | HIGH 风险 | MEDIUM 风险 |
 |------|---------|-----------|-------------|
-| **散户占比** | `1 - 机构持股比例合计` | > 35% | 25% ~ 35% |
+| **非机构持股比例** | `1 - 机构持股比例合计` | A股>35%，港股>50% | A股25%~35%，港股35%~50% |
 | **机构持股环比变化** | `(本期 - 上期) / 上期 × 100%` | < -5pp（连续撤离） | -3pp ~ -5pp |
 | **股东户数环比变化** | `(本期户数 - 上期户数) / 上期户数 × 100%` | > 30% | 15% ~ 30% |
+| **十大股东集中度** | 十大股东持股合计 | > 85% | 75% ~ 85% |
+| **控股股东持股** | 控股股东单独持股 | > 70% | 55% ~ 70% |
 
-**触发逻辑**：任一指标触发 HIGH 即 HIGH；三项均触发 MEDIUM 也升为 HIGH。
+**触发逻辑**：任一指标触发 HIGH 即 HIGH；任一指标触发 MEDIUM 时，结合其他指标综合判断。
 
-**港股特殊处理**：
+**市场差异化阈值**：
+- 非机构持股比例判断时，先识别市场类型（A股/港股），使用对应阈值
+- 港股特殊处理：
 - 机构持股环比变化：因半年报粒度，< -10pp 才触发 HIGH（允许更大波动）
 - HKSCC 持股变化单独列示，不参与上述指标计算
 
@@ -139,6 +144,7 @@ rawTable['收盘价'] = ['1401.17', '1405', ...]  # 纯数值，用这个
   - 私募/券商/信托: 持股合计 %
   - 社保/保险: 持股合计 %
   - HKSCC: 持股合计 %（港股）
+⚠️ 注意：HKSCC 持股通过港股通每日变动，非季报静态数据，环比变化仅供参考
   - 其他: 持股合计 %
 
 变动方向：
@@ -151,7 +157,7 @@ rawTable['收盘价'] = ['1401.17', '1405', ...]  # 纯数值，用这个
 ```json
 {
   "shareholder_signal": {
-    "retail_ratio_pct": 27.45,
+    "non_institutional_ratio_pct": 27.45,
     "institutional_ratio_qoq_change_pp": -1.59,
     "shareholder_count_qoq_change_pct": 3.2,
     "risk_level": "LOW",
@@ -182,13 +188,13 @@ rawTable['收盘价'] = ['1401.17', '1405', ...]  # 纯数值，用这个
 ### 2.5-F.1 筹码集中度评估
 | 指标 | 数值 | 风险 |
 |------|------|------|
-| 散户占比 | 27.45% | ✅ LOW |
+| 非机构持股比例 | 27.45% | ✅ LOW |
 | 机构持股环比 | -1.59pp | ⚠️ MEDIUM |
 | 股东户数环比 | +3.2% | ✅ LOW |
 
 **综合风险等级**: LOW
 
-> 解读：贵州茅台筹码高度集中（控股股东持股54.40%），散户占比27.45%处于正常区间。
+> 解读：贵州茅台筹码高度集中（控股股东持股54.40%），非机构持股比例27.45%处于正常区间。
 > 机构持股近一季度小幅下降1.59pp，主要因指数基金被动减持，非主动撤离信号。
 
 ### 2.5-F.2 十大流通股东结构
@@ -269,6 +275,20 @@ AI 综合以下因素给出综合信号：
 
 **信号一致性评分**：统计各指标方向一致性，如 5 个指标中 4 个看多 = 强势，3:2 = 中性，1:4 = 弱势。
 
+**5 指标计分算法**：
+```
+指标列表: [RSI方向, MACD方向, KDJ方向, MA排列, 成交量方向]
+看多=+1, 看空=-1, 中性=0
+
+总分 = sum(各指标得分)
+
+if 总分 >= 3: BULLISH
+elif 总分 <= -3: BEARISH
+else: NEUTRAL
+```
+
+例如：RSI中性(0) + MACD金叉(+1) + KDJ中性(0) + MA多头(+1) + 缩量(-1) = 1 → NEUTRAL
+
 ### 5.4 入场参考价位
 
 | 类型 | 计算方式 |
@@ -283,14 +303,16 @@ AI 综合以下因素给出综合信号：
 
 **核心原则**：技术服从基本面。
 
-| 基本面信号 | 技术信号 | 操作 |
-|-----------|---------|------|
-| 买入/增持 | 技术看多 | 标准仓位，共振做多 |
-| 买入/增持 | 技术中性 | 标准仓位，不等技术回调 |
-| 买入/增持 | 技术看空 | 减仓或等待，不追高；不改变止损位 |
-| 持有/观望 | 技术看空 | 不新建仓；现有仓位严格止损 |
-| 卖出/减持 | 技术看多 | 忽略技术；基本面优先 |
-| 卖出/减持 | 技术看空 | 强化卖出信心 |
+| fundamental_signal.direction | 技术信号 | 操作 |
+|-----------------------------|---------|------|
+| BUY | 技术看多 | 标准仓位，共振做多 |
+| BUY | 技术中性 | 标准仓位，不等技术回调 |
+| BUY | 技术看空 | 减仓或等待，不追高；不改变止损位 |
+| HOLD | 技术看空 | 不新建仓；现有仓位严格止损 |
+| SELL | 技术看多 | 忽略技术；基本面优先 |
+| SELL | 技术看空 | 强化卖出信心 |
+
+**冲突检测逻辑**：`technical_signal.conflicts_with_fundamentals = (technical_signal.synthesis_signal == "BEARISH" AND fundamental_signal.direction == "BUY") OR (technical_signal.synthesis_signal == "BULLISH" AND fundamental_signal.direction == "SELL")`
 
 **禁止**：技术信号不得抬高基本面止损位，不得覆盖基本面卖出信号。
 
@@ -370,7 +392,7 @@ AI 综合以下因素给出综合信号：
 | MA系统 | 5日>10日>20日>60日 | **多头排列** |
 | 成交量 | 量比0.85 | 缩量，观望 |
 
-**综合信号**: 中性偏多（3/5 指标看多）
+**综合信号**: 中性（3/5 指标看多）
 
 ### 3.5.2 入场参考价位
 
@@ -387,7 +409,7 @@ AI 综合以下因素给出综合信号：
 | 维度 | 方向 | 说明 |
 |------|------|------|
 | 基本面方向 | 买入 | PE处于历史低位，机构目标价较现价有30%空间 |
-| 技术面方向 | 中性偏多 | MA多头排列，但RSI中性、成交量萎缩 |
+| 技术面方向 | 中性 | MA多头排列，但RSI中性、成交量萎缩 |
 | **综合结论** | **分歧，服从基本面** | 基本面支持买入；技术面非必需回调，可在现价或1398-1420区间分批建仓 |
 
 > 技术止损位（1370元）不低于基本面止损位（1350元）。若基本面逻辑未变，技术回调不触发止损。
@@ -403,9 +425,11 @@ AI 综合以下因素给出综合信号：
 {
   // Step 2.5-F 新增
   "shareholder_signal": {
-    "retail_ratio_pct": "number",           // 散户占比 %
+    "non_institutional_ratio_pct": "number",  // 非机构持股比例 %（含控股股东等，上限）
     "institutional_ratio_qoq_change_pp": "number",  // 机构持股环比变化 pp
     "shareholder_count_qoq_change_pct": "number",   // 股东户数环比变化 %
+    "top10_concentration_pct": "number",  // 十大股东集中度
+    "controlling_shareholder_pct": "number",  // 控股股东持股比例
     "risk_level": "HIGH | MEDIUM | LOW",
     "trigger_conditions": ["string"],
     "top10_holders": [{
@@ -451,6 +475,13 @@ AI 综合以下因素给出综合信号：
     },
     "conflicts_with_fundamentals": "boolean",
     "data_source": "string"
+  },
+
+  // 基本面信号（用于技术面冲突检测）
+  "fundamental_signal": {
+    "direction": "BUY | HOLD | SELL",      // 从估值结论得出
+    "conviction": "HIGH | MEDIUM | LOW",
+    "rationale": "string"
   }
 }
 ```
@@ -501,6 +532,8 @@ def parse_institutional_ratio(raw_json_path: str) -> dict:
     raw = dt['rawTable']
 
     col_id = '100000000003145'
+    if col_id not in raw:
+        raise ValueError(f"Column {col_id} not found in mx-data response")
     ratios = raw[col_id]           # ['72.548', '74.143', ...]
     dates = raw['headName']         # ['2026一季报', '2025年报', ...]
 
@@ -512,7 +545,7 @@ def parse_institutional_ratio(raw_json_path: str) -> dict:
         'latest_ratio_pct': latest_ratio,
         'prev_ratio_pct': prev_ratio,
         'qoq_change_pp': (latest_ratio - prev_ratio) if prev_ratio else None,
-        'retail_ratio_pct': 100 - latest_ratio,
+        'non_institutional_ratio_pct': 100 - latest_ratio,  # 非机构持股比例（含控股股东等不可自由流通股份，上限）
         'all_dates': list(zip(dates, ratios))
     }
 ```
@@ -543,9 +576,13 @@ def parse_kline_ohlcv(raw_json_path: str) -> list[dict]:
         row = {'date': date}
         for f in fields:
             val_str = raw[f][i]
-            # 去除单位: '348.1万股' -> 348.1, '1401.17元' -> 1401.17
-            val_clean = float(val_str.replace('万股', '').replace('万手', '')
-                              .replace('元', '').replace('%', ''))
+            # 去除单位: '348.1万股' -> 348.1, '1401.17元' -> 1401.17, '1,234.56' -> 1234.56
+            val_clean = val_str \
+                .replace('万股', '').replace('万手', '').replace('手', '') \
+                .replace('元', '').replace('%', '').replace(',', '').replace(' ', '')
+            if val_clean == '':
+                continue  # 跳过空值
+            val_clean = float(val_clean)
             row[dt['nameMap'][f]] = val_clean
         rows.append(row)
 
@@ -557,26 +594,69 @@ def parse_kline_ohlcv(raw_json_path: str) -> list[dict]:
 ```python
 import numpy as np
 
-def calc_rsi(closes: list[float], period: int = 14) -> float:
-    """计算 RSI(14)"""
-    deltas = np.diff(closes)
-    gains = np.where(deltas > 0, deltas, 0)
-    losses = np.where(deltas < 0, -deltas, 0)
-    avg_gain = np.mean(gains[-period:])
-    avg_loss = np.mean(losses[-period:])
+def calc_rsi(closes: list[float], period: int = 14) -> float | None:
+    """计算 RSI(14) — 使用 Wilder 平滑公式"""
+    closes_arr = np.array(closes)
+    deltas = np.diff(closes_arr)
+    gains = np.where(deltas > 0, deltas, 0.0)
+    losses = np.where(deltas < 0, -deltas, 0.0)
+
+    # Issue 2 Fix: 确保有足够数据
+    if len(gains) < period:
+        return None  # 数据不足
+
+    # Issue 3 Fix: 使用 Wilder 平滑 (EMA 形式)
+    # 首次平均使用 SMA
+    avg_gain = np.mean(gains[:period])
+    avg_loss = np.mean(losses[:period])
+
+    # 后续使用 Wilder 平滑公式
+    for i in range(period, len(gains)):
+        avg_gain = avg_gain * (period - 1) / period + gains[i] / period
+        avg_loss = avg_loss * (period - 1) / period + losses[i] / period
+
     if avg_loss == 0:
         return 100
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
 def calc_macd(closes: list[float], fast: int = 12, slow: int = 26, signal: int = 9) -> dict:
-    """计算 MACD(12,26,9)"""
+    """计算 MACD(12,26,9) — 含背离检测"""
     closes_arr = np.array(closes)
     ema_fast = _ema(closes_arr, fast)
     ema_slow = _ema(closes_arr, slow)
     dif = ema_fast - ema_slow
-    dea = _ema(np.array([dif]), signal)[-1] if len(dif) >= signal else dif[-1]
-    return {'dif': round(float(dif[-1]), 2), 'dea': round(float(dea), 2), 'histogram': round(float(dif[-1] - dea), 2)}
+    dea = _ema(np.array(dif), signal)
+
+    # Issue 7 Fix: MACD 背离检测
+    # 计算价格和 MACD 的趋势
+    divergence = 'none'
+    if len(dif) >= 20:  # 至少需要 20 个数据点才做背离检测
+        price_trend = closes_arr[-1] - closes_arr[-20]
+        macd_trend = dif[-1] - dif[-20]
+
+        # 底背离: 价格新低但 MACD 未新低
+        if price_trend < 0 and macd_trend > 0:
+            divergence = 'bullish'
+        # 顶背离: 价格新高但 MACD 未新高
+        elif price_trend > 0 and macd_trend < 0:
+            divergence = 'bearish'
+
+    # 金叉/死叉检测
+    crossover = 'none'
+    if len(dif) >= 2:
+        if dif[-2] < dea[-2] and dif[-1] > dea[-1]:
+            crossover = 'golden'
+        elif dif[-2] > dea[-2] and dif[-1] < dea[-1]:
+            crossover = 'death'
+
+    return {
+        'dif': round(float(dif[-1]), 2),
+        'dea': round(float(dea[-1]), 2),
+        'histogram': round(float(dif[-1] - dea[-1]), 2),
+        'crossover': crossover,
+        'divergence': divergence
+    }
 
 def _ema(arr: np.ndarray, period: int) -> np.ndarray:
     """计算 EMA"""
@@ -587,8 +667,10 @@ def _ema(arr: np.ndarray, period: int) -> np.ndarray:
     return np.array(ema)
 
 def calc_kdj(highs: list[float], lows: list[float], closes: list[float], n: int = 9) -> dict:
-    """计算 KDJ(9,3,3) — 标准递归 EMA 公式"""
-    highs_arr, lows_arr = np.array(highs), np.array(lows)
+    """计算 KDJ(9,3,3) — 返回完整时间序列"""
+    # Issue 1 Fix: 将 closes 转为 numpy 数组
+    highs_arr, lows_arr, closes_arr = np.array(highs), np.array(lows), np.array(closes)
+
     # RSV = (C - LowN) / (HighN - LowN) × 100
     rsv_values = []
     for i in range(n - 1, len(closes)):
@@ -597,18 +679,112 @@ def calc_kdj(highs: list[float], lows: list[float], closes: list[float], n: int 
         rsv = (closes_arr[i] - low_n) / (high_n - low_n + 1e-9) * 100
         rsv_values.append(rsv)
 
-    # K, D 递归 EMA，初始值 50
+    # Issue 6 Fix: 返回完整时间序列 K/D/J
+    k_series, d_series = [], []
     k, d = 50.0, 50.0
     for rsv in rsv_values:
-        k = 2 / 3 * k + 1 / 3 * rsv
-        d = 2 / 3 * d + 1 / 3 * k
-    j = 3 * k - 2 * d
-    return {'k': round(float(k), 1), 'd': round(float(d), 1), 'j': round(float(j), 1)}
+        k = 2 / 3 * k + 1 / 3 * rsv  # K 使用当前 RSV 计算
+        d = 2 / 3 * d + 1 / 3 * k    # D 使用当前 K (已正确)
+        k_series.append(k)
+        d_series.append(d)
+
+    j_series = [3 * k_i - 2 * d_i for k_i, d_i in zip(k_series, d_series)]
+
+    # 当前值
+    k, d, j = k_series[-1], d_series[-1], j_series[-1]
+
+    # 金叉/死叉检测
+    crossover = 'none'
+    if len(k_series) >= 2:
+        if k_series[-2] < d_series[-2] and k_series[-1] > d_series[-1]:
+            crossover = 'golden'
+        elif k_series[-2] > d_series[-2] and k_series[-1] < d_series[-1]:
+            crossover = 'death'
+
+    return {
+        'k': round(float(k), 1),
+        'd': round(float(d), 1),
+        'j': round(float(j), 1),
+        'k_series': [round(float(v), 1) for v in k_series],
+        'd_series': [round(float(v), 1) for v in d_series],
+        'j_series': [round(float(v), 1) for v in j_series],
+        'crossover': crossover
+    }
+
+def calc_atr(highs: list[float], lows: list[float], closes: list[float], period: int = 14) -> float | None:
+    """Issue 4 Fix: 计算 ATR (Average True Range) — 使用 Wilder 平滑"""
+    highs_arr, lows_arr, closes_arr = np.array(highs), np.array(lows), np.array(closes)
+
+    if len(closes) < period + 1:
+        return None
+
+    # 计算 True Range
+    tr_values = []
+    for i in range(1, len(closes)):
+        high_low = highs_arr[i] - lows_arr[i]
+        high_pc = abs(highs_arr[i] - closes_arr[i - 1])
+        low_pc = abs(lows_arr[i] - closes_arr[i - 1])
+        tr = max(high_low, high_pc, low_pc)
+        tr_values.append(tr)
+
+    if len(tr_values) < period:
+        return None
+
+    # 首次 ATR 使用 SMA
+    atr = np.mean(tr_values[:period])
+
+    # 后续使用 Wilder 平滑
+    for i in range(period, len(tr_values)):
+        atr = atr * (period - 1) / period + tr_values[i] / period
+
+    return round(float(atr), 2)
+
+def calc_bollinger_bands(closes: list[float], period: int = 20, std_dev: float = 2) -> dict | None:
+    """Issue 5 Fix: 计算布林带"""
+    closes_arr = np.array(closes)
+
+    if len(closes) < period:
+        return None
+
+    # MA20 = SMA(closes, 20)
+    ma = np.mean(closes_arr[-period:])
+
+    # STD = sqrt(sum((close - MA)^2) / period)
+    std = np.sqrt(np.sum((closes_arr[-period:] - ma) ** 2) / period)
+
+    upper = ma + std_dev * std
+    lower = ma - std_dev * std
+
+    return {
+        'middle': round(float(ma), 2),
+        'upper': round(float(upper), 2),
+        'lower': round(float(lower), 2),
+        'std': round(float(std), 2)
+    }
 ```
 
 ---
 
-## 9. 实现检查清单
+## 9. 错误处理
+
+### 9.1 机构持股数据缺失
+- 若 `col_id` 列不存在：标注"数据受限，无法计算股东风险"
+- 若仅有单一报告期：无法计算环比变化，标注"数据不足"
+
+### 9.2 股东户数数据缺失
+- 若股东户数数据不可用：跳过股东户数环比计算，不影响整体风险评级
+
+### 9.3 K线数据不足
+- 若有效交易日 < 20：标注"数据不足，技术信号仅供参考"
+- 技术信号仍正常输出，但需在报告中明确标注数据局限
+
+### 9.4 十大流通股东数据
+- 不足10个：正常情况，照常列出（许多股票实际流通股东较少）
+- 若不足5个：标注"十大股东信息有限"
+
+---
+
+## 10. 实现检查清单
 
 ### Phase 1 数据收集新增
 
@@ -621,26 +797,29 @@ def calc_kdj(highs: list[float], lows: list[float], closes: list[float], n: int 
 
 ### Step 2.5-F
 
-- [ ] 散户占比计算函数
+- [ ] 非机构持股比例计算函数
 - [ ] 环比变化计算函数（区分 A股/港股粒度）
 - [ ] 十大股东类型分类逻辑
+- [ ] 十大股东集中度 + 控股股东持股计算
 - [ ] HKSCC 特殊处理
-- [ ] 风险等级判断函数
+- [ ] 风险等级判断函数（含市场差异化阈值）
 - [ ] valuation_result.json 字段写入
 - [ ] 报告章节输出
 
 ### Step 3.5
 
-- [ ] RSI 计算函数（含参数 14）
-- [ ] MACD 计算函数（含参数 12,26,9）
-- [ ] KDJ 计算函数（含参数 9,3,3）
+- [ ] RSI 计算函数（Wilder 平滑，参数 14）
+- [ ] MACD 计算函数（含背离检测，参数 12,26,9）
+- [ ] KDJ 计算函数（含完整时间序列，参数 9,3,3）
 - [ ] MA 系统计算函数（5/10/20/60）
 - [ ] 成交量分析函数（量比、趋势）
+- [ ] ATR 计算函数（Wilder 平滑，参数 14）
+- [ ] 布林带计算函数（MA20 + 2σ）
 - [ ] 信号判断逻辑（RSI 超买超卖、金叉死叉、背离）
-- [ ] 综合信号评分逻辑
+- [ ] 5 指标计分算法
 - [ ] 入场价位计算（支撑/阻力/止损/目标）
 - [ ] 信号有效期逻辑（+5交易日）
-- [ ] 基本面 vs 技术面冲突处理规则
+- [ ] fundamental_signal 冲突检测逻辑
 - [ ] valuation_result.json 字段写入
 - [ ] 报告章节输出
 
@@ -650,7 +829,7 @@ def calc_kdj(highs: list[float], lows: list[float], closes: list[float], n: int 
 
 ---
 
-## 10. 待实测确认项 [PENDING_VERIFY]
+## 11. 待实测确认项 [PENDING_VERIFY]
 
 以下项需在实现阶段实测验证：
 
@@ -665,8 +844,9 @@ def calc_kdj(highs: list[float], lows: list[float], closes: list[float], n: int 
 
 ---
 
-## 11. 变更日志
+## 12. 变更日志
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
 | v1.9 | 2026-04-29 | 初始版本。基于实测结果确定：股东数据全可用（散户占比=1-机构持股），日K线可获取（近N日每日OHLCV）。港股数据待实测。 |
+| v1.9.1 | 2026-04-29 | Review 修复：(CRITICAL) KDJ closes_arr 未定义修复、RSI Wilder 平滑、fundamental_signal 字段添加；(HIGH) 非机构持股比例重命名、ATR/布林带计算、MACD 背离检测；(MEDIUM) 港股差异化阈值、HKSCC 提示、十大股东集中度、5 指标计分算法；(LOW) 列 ID 校验、单位剥离增强、错误处理章节。 |
