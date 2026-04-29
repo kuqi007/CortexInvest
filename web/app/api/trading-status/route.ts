@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { join } from "path";
 
 export const dynamic = "force-dynamic";
 
@@ -50,10 +51,10 @@ print(json.dumps(result))
 
     return new Promise<NextResponse>((resolve) => {
       const py = spawn(
-        "poetry",
+        "uv",
         ["run", "python", "-c", pythonCode],
         {
-          cwd: process.cwd(),
+          cwd: join(process.cwd(), ".."),
           stdio: ["pipe", "pipe", "ignore"],
         }
       );

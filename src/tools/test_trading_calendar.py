@@ -9,6 +9,7 @@ def test_calendar_cache_loads_from_db_without_json(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "_config_db_path_override", str(tmp_path / "config.db"))
     db.init_trading_db()
     today = datetime.now().strftime("%Y-%m-%d")
+    now_ms = int(datetime.now().timestamp() * 1000)
     month_key = today[:7]
     conn = db.get_connection()
     conn.execute(
@@ -19,7 +20,7 @@ def test_calendar_cache_loads_from_db_without_json(tmp_path, monkeypatch):
         (
             f"HK|||{month_key}",
             '{"market":"HK","month":"%s","days":{"%s":"WHOLE"}}' % (month_key, today),
-            1777376520000,
+                now_ms,
         ),
     )
     conn.commit()
