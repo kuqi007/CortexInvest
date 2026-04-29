@@ -31,10 +31,25 @@ def test_dip_buy_terminal_notification_records_audit(tmp_path, monkeypatch):
     rows = conn.execute("SELECT payload_json FROM trading_audit_outbox").fetchall()
     conn.close()
 
-    assert len(rows) == 1
-    payload = json.loads(rows[0]["payload_json"])
-    assert payload["after"]["channel"] == "terminal"
-    assert "message" not in payload["after"]
-    assert payload["after"]["message_hash"].startswith("sha256:")
-    assert payload["after"]["metadata"]["kind"] == "dip_buy"
-    assert payload["after"]["metadata"]["symbol"] == "HK00700"
+    # Two audit entries: notification sent + alert_events created
+    assert len(rows) == 2, f"Expected 2 audit entries, got {len(rows)}: {[r['payload_json'][:100] for r in rows]}"
+
+    # Parse both entries
+    payloads = [json.loads(row["payload_json"]) for row in rows]
+    actions = {p["action"] for p in payloads}
+    assert actions == {"sent", "create"}, f"Expected actions {{sent, create}}, got {actions}"
+
+    # Find notification audit entry
+    notif = next(p for p in payloads if p["action"] == "sent")
+    assert notif["after"]["channel"] == "terminal"
+    assert "message" not in notif["after"]
+    assert notif["after"]["message_hash"].startswith("sha256:")
+    assert notif["after"]["metadata"]["kind"] == "dip_buy"
+    assert notif["after"]["metadata"]["symbol"] == "HK00700"
+
+    # Find alert_events audit entry
+    alert = next(p for p in payloads if p["action"] == "create")
+    assert alert["entity"] == "alert_events"
+    assert alert["after"]["symbol"] == "HK00700"
+    assert alert["after"]["kind"] == "dip_buy"
+    assert alert["after"]["level"] == "L1"

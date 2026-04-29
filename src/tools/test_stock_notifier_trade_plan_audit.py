@@ -56,7 +56,7 @@ def test_trade_plan_engine_save_records_trading_audit(tmp_path, monkeypatch):
             ("plan-audit",),
         ).fetchone()
         audit_row = conn.execute(
-            "SELECT payload_json FROM trading_audit_outbox ORDER BY ts_ms DESC LIMIT 1"
+            "SELECT payload_json FROM trading_audit_outbox WHERE action = 'save' AND entity = 'trade_plans'"
         ).fetchone()
         event_row = conn.execute(
             "SELECT plan_id, event_type, condition_id FROM trade_plan_events WHERE plan_id = ?",
