@@ -53,6 +53,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.tools.api import get_stock_prefix
 from src.tools.stock_data_fetcher import AIDC_WATCHLIST
+from src.utils.notification_audit import record_notification_sent
 
 EM_UT = "fa5fd1943c7b386f172d6893dbfba10b"
 from src.utils.logging_config import setup_logger
@@ -1027,6 +1028,24 @@ class TechnicalSignalEngine:
 WEB_DASHBOARD_URL = "http://localhost:3120/alerts"
 
 
+def _record_notification_audit_safe(
+    channel: str,
+    title: str,
+    message: str,
+    metadata: dict | None = None,
+) -> None:
+    """Best-effort audit record for successfully sent notifications."""
+    try:
+        record_notification_sent(
+            channel=channel,
+            title=title,
+            message=message,
+            metadata=metadata,
+        )
+    except Exception as e:
+        logger.warning(f"notification audit write failed: {e}")
+
+
 def notify(
     title: str,
     message: str,
@@ -1049,13 +1068,19 @@ def notify(
         stock_info: 结构化股票信息，飞书卡片使用
     """
     # ── 飞书通知（先发，不阻塞 macOS 通知） ──
-    # 过滤策略：只推需要立即操作的两类 alert：
-    #   1. trade_plan — 交易计划（买入/卖出/止盈/止损触发）
-    #   2. tick_monitor — 短线逐笔触发（精确价格条件）
-    # 其余 alert 只在 macOS + web 显示，不推飞书减少手机噪音
+    # 过滤策略：只推 L1 和关键 L2，避免手机噪音。
     should_feishu = False
-    if stock_info and stock_info.get("_kind") in ("trade_plan", "tick_monitor"):
-        should_feishu = True
+    if stock_info:
+        kind = stock_info.get("_kind")
+        level_value = stock_info.get("level")
+        try:
+            level_num = int(str(level_value).replace("L", "").split()[0])
+        except (TypeError, ValueError, IndexError):
+            level_num = None
+        if level_num == 1 and kind in ("star", "trade_plan", "l2_notify", "tick_monitor"):
+            should_feishu = True
+        elif level_num == 2 and kind in ("panic_sell", "threshold", "tick_monitor"):
+            should_feishu = True
     # 无 stock_info（CLI 看板 alerts / 系统消息）→ 不推飞书
     # _skip_feishu 标记表示已在外部发了 batch Feishu，跳过
     if stock_info and stock_info.get("_skip_feishu"):
@@ -1094,7 +1119,7 @@ def notify(
             timeout=3,
         )
         if result.returncode == 0:
-            subprocess.run(
+            result = subprocess.run(
                 [
                     "terminal-notifier",
                     "-title",
@@ -1111,8 +1136,24 @@ def notify(
                 capture_output=True,
                 timeout=5,
             )
-            logger.info(f"通知已发送(terminal-notifier): [{title}] {message}")
-            return
+            if result.returncode == 0:
+                logger.info(f"通知已发送(terminal-notifier): [{title}] {message}")
+                _record_notification_audit_safe(
+                    "terminal",
+                    title,
+                    message,
+                    {
+                        "method": "terminal-notifier",
+                        "sound": sound,
+                        "group": group,
+                        "symbol": (stock_info or {}).get("code"),
+                        "kind": (stock_info or {}).get("_kind"),
+                        "level": level,
+                        "change_pct": change_pct,
+                        "is_portfolio": is_portfolio,
+                    },
+                )
+                return
     except Exception:
         pass
 
@@ -1126,6 +1167,20 @@ def notify(
         )
         if result.returncode == 0:
             logger.info(f"通知已发送(osascript): [{title}] {message}")
+            _record_notification_audit_safe(
+                "terminal",
+                title,
+                message,
+                {
+                    "method": "osascript-notification",
+                    "sound": sound,
+                    "symbol": (stock_info or {}).get("code"),
+                    "kind": (stock_info or {}).get("_kind"),
+                    "level": level,
+                    "change_pct": change_pct,
+                    "is_portfolio": is_portfolio,
+                },
+            )
             return
     except Exception:
         pass
@@ -1133,12 +1188,26 @@ def notify(
     # 方式3: osascript 弹窗（始终可见，不依赖通知权限）
     try:
         script = f'display dialog "{safe_msg}" with title "{safe_title}" buttons {{"OK"}} giving up after 5'
-        subprocess.run(
+        result = subprocess.run(
             ["osascript", "-e", script],
             capture_output=True,
             timeout=8,
         )
-        logger.info(f"通知已发送(dialog): [{title}] {message}")
+        if result.returncode == 0:
+            logger.info(f"通知已发送(dialog): [{title}] {message}")
+            _record_notification_audit_safe(
+                "terminal",
+                title,
+                message,
+                {
+                    "method": "osascript-dialog",
+                    "symbol": (stock_info or {}).get("code"),
+                    "kind": (stock_info or {}).get("_kind"),
+                    "level": level,
+                    "change_pct": change_pct,
+                    "is_portfolio": is_portfolio,
+                },
+            )
     except Exception as e:
         logger.error(f"发送通知失败: {e}")
 
@@ -1278,6 +1347,17 @@ def feishu_send(
             logger.warning(f"飞书消息发送失败: {result}")
             return False
         logger.info(f"飞书通知已发送: [{title}] {message[:50]}")
+        _record_notification_audit_safe(
+            "feishu",
+            title,
+            message,
+            {
+                "method": "message-card",
+                "symbol": (stock_info or {}).get("code"),
+                "kind": (stock_info or {}).get("_kind"),
+                "change_pct": change_pct,
+            },
+        )
         return True
     except Exception as e:
         logger.warning(f"飞书消息发送异常: {e}")
@@ -1372,6 +1452,18 @@ def feishu_send_tick_batch(alerts: list[dict]) -> bool:
                 success = False
             else:
                 logger.info(f"飞书批量通知已发送: {name} ({n}条)")
+                _record_notification_audit_safe(
+                    "feishu",
+                    header_content,
+                    body,
+                    {
+                        "method": "tick-batch-card",
+                        "symbol": stock_alerts[0].get("symbol") if stock_alerts else "",
+                        "name": name,
+                        "count": n,
+                        "kind": "tick_monitor",
+                    },
+                )
         except Exception as e:
             logger.warning(f"飞书批量消息发送异常: {e}")
             success = False

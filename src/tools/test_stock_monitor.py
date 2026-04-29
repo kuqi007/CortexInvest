@@ -14,6 +14,15 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from src.tools.stock_monitor import notify
 
 
+@pytest.fixture(autouse=True)
+def isolate_notification_audit_db(tmp_path, monkeypatch):
+    import src.sim_trading.db as db
+
+    monkeypatch.setattr(db, "_db_path_override", str(tmp_path / "trading.db"))
+    monkeypatch.setattr(db, "_config_db_path_override", str(tmp_path / "config.db"))
+    db.init_trading_db()
+
+
 def test_load_config_reads_db_only(monkeypatch):
     import src.tools.stock_monitor as stock_monitor
     import src.utils.config_reader as config_reader

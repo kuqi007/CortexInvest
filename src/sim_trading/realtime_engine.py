@@ -30,6 +30,7 @@ logger = logging.getLogger("l2_daemon.rt_sim")
 
 # Config read from config.db only.
 from src.utils.config_reader import read_monitor_config
+from src.utils.notification_audit import record_notification_sent
 
 PARAM_VERSION = "live"
 
@@ -907,7 +908,7 @@ class RealtimeSimEngine:
         ]
         title = titles[now_ts % len(titles)]
         try:
-            subprocess.run(
+            result = subprocess.run(
                 [
                     "terminal-notifier",
                     "-title",
@@ -922,6 +923,23 @@ class RealtimeSimEngine:
                 capture_output=True,
                 timeout=5,
             )
+            if result.returncode == 0:
+                try:
+                    record_notification_sent(
+                        channel="terminal",
+                        title=title,
+                        message=msg,
+                        metadata={
+                            "method": "terminal-notifier",
+                            "symbol": code,
+                            "kind": "dip_buy",
+                            "price": price,
+                            "score": score,
+                            "drawdown_pct": drawdown_pct,
+                        },
+                    )
+                except Exception as audit_err:
+                    logger.warning(f"Dip-buy notification audit failed: {audit_err}")
         except Exception as e:
             logger.debug(f"Dip-buy notification failed: {e}")
 

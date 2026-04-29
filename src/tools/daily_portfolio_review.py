@@ -32,6 +32,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.utils.logging_config import setup_logger
+from src.utils.notification_audit import record_notification_sent
 
 logger = setup_logger("daily_portfolio_review")
 
@@ -98,6 +99,15 @@ def _feishu_send(title: str, message: str) -> bool:
             logger.warning(f"Feishu send failed: {result}")
             return False
         logger.info(f"Feishu sent: [{title}]")
+        try:
+            record_notification_sent(
+                channel="feishu",
+                title=title,
+                message=message,
+                metadata={"method": "daily-portfolio-review", "kind": "daily_review"},
+            )
+        except Exception as e:
+            logger.warning(f"Feishu audit write failed: {e}")
         return True
     except Exception as e:
         logger.warning(f"Feishu send exception: {e}")
