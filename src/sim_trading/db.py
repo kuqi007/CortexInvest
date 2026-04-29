@@ -513,6 +513,17 @@ CREATE TABLE IF NOT EXISTS sentiment_cache (
     updated_at_ms INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS stock_data_fetch_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fetch_date TEXT NOT NULL,
+    fetch_time TEXT NOT NULL,
+    mode TEXT NOT NULL CHECK (mode IN ('quick', 'full')),
+    payload_json TEXT NOT NULL,
+    created_at_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_stock_data_fetch_snapshots_date
+    ON stock_data_fetch_snapshots(fetch_date, created_at_ms);
+
 CREATE TABLE IF NOT EXISTS daily_summaries (
     date TEXT PRIMARY KEY,
     summary_json TEXT NOT NULL,

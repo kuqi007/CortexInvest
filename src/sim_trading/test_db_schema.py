@@ -27,6 +27,7 @@ REQUIRED_TRADING_TABLES = {
     "tick_monitor_state",
     "trading_calendar_cache",
     "sentiment_cache",
+    "stock_data_fetch_snapshots",
     "daily_summaries",
     "morning_briefings",
 }

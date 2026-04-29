@@ -2,7 +2,7 @@
 AIDC电力基建股票数据批量采集脚本
 
 带完善限流控制的批量数据采集，支持实时行情、历史K线、财务数据、个股新闻。
-终端使用 rich 渲染彩色表格，同时输出 JSON 文件。
+终端使用 rich 渲染彩色表格，同时保存采集快照到 SQLite。
 
 Usage:
     poetry run python src/tools/stock_data_fetcher.py
@@ -13,8 +13,6 @@ Usage:
 
 import argparse
 import json
-import os
-import sys
 import time
 from datetime import datetime, timedelta
 from typing import Optional
@@ -26,6 +24,8 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich.text import Text
+
+from src.sim_trading.db import get_connection, init_trading_db
 
 # ──────────────────────────── 配置与常量 ────────────────────────────
 
@@ -44,6 +44,34 @@ AIDC_WATCHLIST = {
 }
 
 console = Console()
+
+
+def save_fetch_snapshot_to_db(output: dict) -> int:
+    """Persist ad-hoc fetch output without creating runtime JSON files."""
+    init_trading_db()
+    fetch_time = output["fetch_time"]
+    fetch_date = fetch_time[:10]
+    created_at_ms = int(datetime.fromisoformat(fetch_time).timestamp() * 1000)
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            """
+            INSERT INTO stock_data_fetch_snapshots
+                (fetch_date, fetch_time, mode, payload_json, created_at_ms)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                fetch_date,
+                fetch_time,
+                output["mode"],
+                json.dumps(output, ensure_ascii=False, separators=(",", ":"), default=str),
+                created_at_ms,
+            ),
+        )
+        conn.commit()
+        return int(cur.lastrowid)
+    finally:
+        conn.close()
 
 # ──────────────────────────── 限流控制器 ────────────────────────────
 
@@ -645,21 +673,14 @@ def main():
         console.print()
         render_news_summary(all_data)
 
-    # ─── 保存 JSON ───
-    data_dir = os.path.join(os.path.dirname(__file__), "..", "data")
-    os.makedirs(data_dir, exist_ok=True)
-    today = datetime.now().strftime("%Y%m%d")
-    out_path = os.path.join(data_dir, f"aidc_watchlist_{today}.json")
-
-    # 序列化前处理
+    # ─── 保存采集快照到 DB ───
     output = {
         "fetch_time": datetime.now().isoformat(),
         "mode": "quick" if args.quick else "full",
         "stocks": all_data,
     }
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(output, f, ensure_ascii=False, indent=2, default=str)
-    console.print(f"\n[bold green]✓ 数据已保存至 {out_path}[/]")
+    snapshot_id = save_fetch_snapshot_to_db(output)
+    console.print(f"\n[bold green]✓ 数据已保存至 trading.db:stock_data_fetch_snapshots#{snapshot_id}[/]")
 
 
 if __name__ == "__main__":
