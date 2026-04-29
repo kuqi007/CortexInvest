@@ -232,6 +232,49 @@ class TestSendTickNotification:
 
 
 # ══════════════════════════════════════════
+# _get_latest_price (reads from price_snapshots)
+# ══════════════════════════════════════════
+
+
+class TestGetLatestPrice:
+    @patch("src.sim_trading.db.get_connection")
+    def test_returns_price_and_change_pct(self, mock_get_conn):
+        """正常返回价格和涨跌幅"""
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value.fetchone.return_value = (8.0, -1.5)
+        mock_get_conn.return_value = mock_conn
+
+        result = tm._get_latest_price("HK03896")
+
+        assert result is not None
+        assert result["price"] == 8.0
+        assert result["change_pct"] == -1.5
+        assert "time" in result
+        mock_conn.close.assert_called_once()
+
+    @patch("src.sim_trading.db.get_connection")
+    def test_returns_none_when_no_data(self, mock_get_conn):
+        """无数据时返回 None"""
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value.fetchone.return_value = None
+        mock_get_conn.return_value = mock_conn
+
+        result = tm._get_latest_price("UNKNOWN")
+
+        assert result is None
+        mock_conn.close.assert_called_once()
+
+    @patch("src.sim_trading.db.get_connection")
+    def test_returns_none_on_exception(self, mock_get_conn):
+        """异常时返回 None"""
+        mock_get_conn.side_effect = Exception("DB error")
+
+        result = tm._get_latest_price("HK03896")
+
+        assert result is None
+
+
+# ══════════════════════════════════════════
 # get_pending_tick_signals
 # ══════════════════════════════════════════
 
@@ -336,10 +379,10 @@ class TestFutuConnection:
 class TestRunTickMonitor:
     @patch("src.tools.tick_monitor.time.sleep")
     @patch("src.tools.tick_monitor.is_any_market_open")
-    @patch("src.tools.tick_monitor.FutuConnection")
+    @patch("src.tools.tick_monitor._get_latest_price")
     @patch("src.tools.tick_monitor._write_signals")
     def test_triggers_and_cools_down(
-        self, mock_write_signals, mock_conn_cls, mock_open, mock_sleep
+        self, mock_write_signals, mock_get_price, mock_open, mock_sleep
     ):
         """
         Simulate ticks: tick_monitor has a 60s producer-side cooldown per order.
@@ -349,18 +392,16 @@ class TestRunTickMonitor:
         mock_write_signals.return_value = True
         mock_open.return_value = True
 
-        mock_conn = MagicMock()
         # tick 1: triggers at price 84 → writes (cooldown starts)
         # tick 2: 5s later → skipped (cooldown active, 5s < 60s)
         # tick 3: 5s later → skipped (cooldown active)
         # sentinel: stop the loop
-        mock_conn.get_latest_tick.side_effect = [
+        mock_get_price.side_effect = [
             {"price": 84.0, "direction": "BUY", "volume": 100, "time": "10:00:00"},
             {"price": 84.0, "direction": "BUY", "volume": 100, "time": "10:00:05"},
             {"price": 84.0, "direction": "BUY", "volume": 100, "time": "10:00:10"},
             {"price": 84.0, "direction": "BUY", "volume": 100, "time": "10:00:15"},
         ]
-        mock_conn_cls.return_value = mock_conn
 
         plans = {
             "p1": {

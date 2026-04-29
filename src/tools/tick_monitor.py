@@ -487,12 +487,37 @@ def _sigterm_handler(signum, frame):
     sys.exit(0)
 
 
+def _get_latest_price(symbol: str) -> dict | None:
+    """从 price_snapshots 读取最新行情（DB 是权威数据源）"""
+    try:
+        from src.sim_trading.db import get_connection
+
+        conn = get_connection()
+        row = conn.execute(
+            "SELECT price, change_pct FROM price_snapshots "
+            "WHERE code = ? AND ts = (SELECT MAX(ts) FROM price_snapshots WHERE code = ?)",
+            (symbol, symbol),
+        ).fetchone()
+        conn.close()
+        if row and row[0]:
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            return {
+                "price": float(row[0]),
+                "change_pct": float(row[1]) if row[1] else 0.0,
+                "time": now,
+                "direction": "",
+                "volume": 0,
+            }
+    except Exception as e:
+        logger.debug(f"_get_latest_price({symbol}) failed: {e}")
+    return None
+
+
 def run_tick_monitor(poll_interval: int = POLL_INTERVAL):
     """Tick Monitor 主循环"""
     logger.info("Tick Monitor 启动")
     signal.signal(signal.SIGTERM, _sigterm_handler)
 
-    conn = FutuConnection()
     fail_count = 0
 
     try:
@@ -519,8 +544,8 @@ def run_tick_monitor(poll_interval: int = POLL_INTERVAL):
                 if not symbol or not orders:
                     continue
 
-                # 获取最新 tick
-                tick = conn.get_latest_tick(symbol)
+                # 从 DB 读取最新价格
+                tick = _get_latest_price(symbol)
                 if tick is None:
                     continue
 
@@ -570,7 +595,6 @@ def run_tick_monitor(poll_interval: int = POLL_INTERVAL):
     except KeyboardInterrupt:
         logger.info("Tick Monitor 收到中断信号，退出")
     finally:
-        conn.close()
         logger.info("Tick Monitor 已停止")
 
 
