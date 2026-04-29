@@ -254,7 +254,7 @@ def test_poll_once_uses_db_watchlist(tmp_db, stale_json, tmp_path):
 
     write_args: dict[str, list] = {}
 
-    def capture_write(services, ts, date_str):
+    def capture_write(services, ts, date_str, sina_fallback=False):
         write_args["services"] = services
 
     with _config_db_patch(tmp_db), \
@@ -336,7 +336,7 @@ def test_poll_once_extracts_chiNext_kc50_to_turnover(tmp_db, stale_json, tmp_pat
     def capture_turnover(turnover, ts, date_str):
         turnover_args["turnover"] = turnover
 
-    def capture_write(services, ts, date_str):
+    def capture_write(services, ts, date_str, sina_fallback=False):
         write_args["services"] = services
 
     with _config_db_patch(tmp_db), \
@@ -560,6 +560,31 @@ def test_poll_once_index_results_empty_on_fetch_failure(tmp_db, stale_json, tmp_
 
 # ─── Bug Regression: stale data write when fetch fails ─────────────────────
 
+def test_get_last_hk_index_from_db_closes_connection(monkeypatch):
+    import src.tools.market_data_poller as poller
+
+    class FakeCursor:
+        def execute(self, *_args, **_kwargs):
+            return self
+
+        def fetchone(self):
+            return (25100.5, 0.8, 5200.2, 1.1, 1700.0)
+
+    class FakeConnection(FakeCursor):
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    conn = FakeConnection()
+    monkeypatch.setattr(poller, "get_connection", lambda: conn)
+
+    result = poller._get_last_hk_index_from_db()
+
+    assert result["hkIndex"] == 25100.5
+    assert conn.closed is True
+
+
 def test_poll_once_writes_stale_data_when_fetch_fails(tmp_db, stale_json, tmp_path):
     """
     Regression test for the stale-data-write bug (line ~729 before fix):
@@ -607,7 +632,7 @@ def test_poll_once_writes_stale_data_when_fetch_fails(tmp_db, stale_json, tmp_pa
 
     write_args: dict = {}
 
-    def capture_write(services, ts, date_str):
+    def capture_write(services, ts, date_str, sina_fallback=False):
         write_args["services"] = services
         write_args["ts"] = ts
         write_args["date_str"] = date_str
@@ -660,7 +685,7 @@ def test_amo_uses_actual_amount_not_vol_price(tmp_db, stale_json, tmp_path):
 
     write_args: dict = {}
 
-    def capture_write(services, ts, date_str):
+    def capture_write(services, ts, date_str, sina_fallback=False):
         write_args["services"] = services
 
     # EM returns stock with actual amount=5e7 (50M yuan) AND vol*price would be 1e7
@@ -750,3 +775,160 @@ def test_amo_uses_actual_amount_not_vol_price(tmp_db, stale_json, tmp_path):
     # After fix: amount should be actual EM amount = 80M
     assert svc["amount"] == 80000000.0, \
         f"AMO must use actual EM amount=80M, not vol*price=50M. Got {svc['amount']}"
+
+
+# ─── Bug Regression: _get_latest_services_from_db per-code MAX(ts) ─────────────
+
+def test_get_latest_services_from_db_resolves_per_code_max_ts(tmp_path):
+    """
+    Regression test for the per-code MAX(ts) bug in _get_latest_services_from_db.
+
+    Bug: SQL subquery (SELECT MAX(ts) FROM price_snapshots) found the GLOBAL max ts,
+    not the per-code max. If the requested code's latest record had an older ts than
+    another stock's global max, the query returned no result for that code — causing
+    vol_ratio/turnover to be lost during Sina fallback inheritance.
+
+    Scenario:
+        002080: last updated at ts=1700000000000 (older)
+        000001: last updated at ts=1800000000000 (global max)
+    When asking for 002080 alone, old code would look for ts=1800000000000 (global max)
+    and find nothing → returned empty list.
+
+    After fix: JOIN subquery finds per-code MAX(ts), 002080 is found correctly.
+    """
+    import sqlite3
+    import src.tools.market_data_poller as poller
+
+    trading_db = tmp_path / "trading.db"
+    conn = sqlite3.connect(str(trading_db))
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS price_snapshots (
+            ts INTEGER, date TEXT, code TEXT, name TEXT, price REAL,
+            volume REAL, amount REAL, change_pct REAL, chg_amt REAL,
+            amp REAL, turnover REAL, vol_ratio REAL, high REAL, low REAL,
+            open REAL, prev_close REAL, amo1 REAL, amo2 REAL,
+            main_net_inflow REAL, main_net_inflow_pct REAL
+        )
+    """)
+    # 002080 updated at ts=1700000000000 (older)
+    conn.execute(
+        """INSERT INTO price_snapshots
+        (ts, date, code, name, price, volume, amount, change_pct, chg_amt,
+         amp, turnover, vol_ratio, high, low, open, prev_close, amo1, amo2,
+         main_net_inflow, main_net_inflow_pct)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (1700000000000, "2024-01-01", "002080", "中材科技", 50.0, 1000000,
+         50000000.0, 1.5, 0.75, 3.0, 1.2, 1.5, 51.0, 49.0, 49.5, 49.25,
+         2.5, 3.1, 1000000.0, 5.2),
+    )
+    # 000001 updated at ts=1800000000000 (global max)
+    conn.execute(
+        """INSERT INTO price_snapshots
+        (ts, date, code, name, price, volume, amount, change_pct, chg_amt,
+         amp, turnover, vol_ratio, high, low, open, prev_close, amo1, amo2,
+         main_net_inflow, main_net_inflow_pct)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (1800000000000, "2024-01-01", "000001", "平安银行", 10.0, 500000,
+         5000000.0, 0.5, 0.05, 1.0, 0.8, 2.0, 10.5, 9.5, 9.8, 9.75,
+         1.2, 1.5, 500000.0, 2.5),
+    )
+    conn.commit()
+    conn.close()
+
+    import src.sim_trading.db as db_mod
+    patcher = patch.object(db_mod, "_db_path_override", str(trading_db))
+
+    with patcher:
+        result = poller._get_latest_services_from_db(["002080"])
+
+    assert len(result) == 1, f"Expected 1 record for 002080, got {len(result)} (per-code MAX bug)"
+    assert result[0]["id"] == "002080"
+    assert result[0]["turnover"] == 1.2
+    assert result[0]["volRatio"] == 1.5
+
+    # Also verify it still works when asking for both
+    with patcher:
+        result2 = poller._get_latest_services_from_db(["002080", "000001"])
+    assert len(result2) == 2
+    codes = {r["id"] for r in result2}
+    assert codes == {"002080", "000001"}
+
+
+def test_sina_fallback_preserves_db_turnover_in_write(tmp_path):
+    """
+    Regression: Sina fallback must NOT overwrite DB turnover/vol_ratio with 0.
+
+    Bug: When Sina fallback wrote turnover=0/vol_ratio=0 to DB, it contaminated
+    the historical correct values. Subsequent polls would inherit the 0s from DB.
+
+    Fix: _write_price_snapshots with sina_fallback=True reads existing DB values
+    for turnover/vol_ratio and preserves them when the incoming value is 0.
+    """
+    import sqlite3
+    import src.tools.market_data_poller as poller
+
+    trading_db = tmp_path / "trading.db"
+    conn = sqlite3.connect(str(trading_db))
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS price_snapshots (
+            ts INTEGER, date TEXT, code TEXT, name TEXT, price REAL,
+            volume REAL, amount REAL, change_pct REAL, chg_amt REAL,
+            amp REAL, turnover REAL, vol_ratio REAL, high REAL, low REAL,
+            open REAL, prev_close REAL, amo1 REAL, amo2 REAL,
+            main_net_inflow REAL, main_net_inflow_pct REAL
+        )
+    """)
+    # Old record with valid turnover/vol_ratio
+    conn.execute(
+        """INSERT INTO price_snapshots
+        (ts, date, code, name, price, volume, amount, change_pct, chg_amt,
+         amp, turnover, vol_ratio, high, low, open, prev_close, amo1, amo2,
+         main_net_inflow, main_net_inflow_pct)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (1700000000000, "2024-01-01", "002080", "中材科技", 50.0, 1000000,
+         50000000.0, 1.5, 0.75, 3.0, 5.38, 1.23, 51.0, 49.0, 49.5, 49.25,
+         2.5, 3.1, 1000000.0, 5.2),
+    )
+    conn.commit()
+    conn.close()
+
+    import src.sim_trading.db as db_mod
+    patcher = patch.object(db_mod, "_db_path_override", str(trading_db))
+
+    # Sina fallback returns turnover=0/vol_ratio=0
+    sina_service = {
+        "id": "002080",
+        "name": "中材科技",
+        "price": 50.5,
+        "change": 1.0,
+        "chgAmt": 0.75,
+        "vol": 1100000,
+        "amount": 55550000.0,
+        "amp": 3.0,
+        "turnover": 0,  # Sina doesn't provide turnover
+        "volRatio": 0,  # Sina doesn't provide vol_ratio
+        "high": 51.5,
+        "low": 49.5,
+        "open": 49.5,
+        "prevClose": 49.25,
+        "amo1": 2.5,
+        "amo2": 3.1,
+    }
+
+    with patcher:
+        poller._write_price_snapshots(
+            [sina_service], 1800000000000, "2024-01-02", sina_fallback=True
+        )
+
+    # Verify DB preserved the old turnover/vol_ratio
+    conn2 = sqlite3.connect(str(trading_db))
+    row = conn2.execute(
+        "SELECT turnover, vol_ratio FROM price_snapshots WHERE code='002080' ORDER BY ts DESC LIMIT 1"
+    ).fetchone()
+    conn2.close()
+
+    assert row is not None, "Record should exist"
+    # Before fix: would be 0 (Sina value overwrote DB)
+    # After fix: should be 5.38 (preserved from DB)
+    assert row[0] == 5.38, f"turnover must be preserved as 5.38, got {row[0]}"
+    assert row[1] == 1.23, f"vol_ratio must be preserved as 1.23, got {row[1]}"

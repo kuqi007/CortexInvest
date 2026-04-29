@@ -36,6 +36,8 @@ from src.tools.stock_monitor import (
     is_kr_symbol,
 )
 from src.utils.logging_config import setup_logger
+from src.utils.audit_system import make_actor
+from src.utils.audit_writer import record_db_change_best_effort
 
 logger = setup_logger("market_data_poller")
 
@@ -46,8 +48,13 @@ _futu_enricher = FutuL2Enricher()
 init_db()
 
 
-def _write_price_snapshots(services: list[dict], ts: int, date_str: str) -> None:
-    """将个股行情写入 price_snapshots 表（UPSERT）。"""
+def _write_price_snapshots(
+    services: list[dict], ts: int, date_str: str, sina_fallback: bool = False
+) -> None:
+    """将个股行情写入 price_snapshots 表（UPSERT）。
+
+    Sina fallback 时：保留 DB 中已有的 turnover/vol_ratio，防止 0 值覆盖正确历史数据。
+    """
     if not services:
         return
     conn = get_connection()
@@ -57,6 +64,21 @@ def _write_price_snapshots(services: list[dict], ts: int, date_str: str) -> None
             code = svc.get("id", "")
             if not code:
                 continue
+            turnover = svc.get("turnover")
+            vol_ratio = svc.get("volRatio")
+
+            # Sina fallback 且当前值为 0 时，从 DB 保留历史值
+            if sina_fallback:
+                if not turnover:
+                    row = conn.execute(
+                        "SELECT turnover, vol_ratio FROM price_snapshots "
+                        "WHERE code = ? ORDER BY ts DESC LIMIT 1",
+                        (code,),
+                    ).fetchone()
+                    if row:
+                        turnover = row["turnover"] or 0
+                        vol_ratio = row["vol_ratio"] or 0
+
             cur.execute(
                 """
                 INSERT OR REPLACE INTO price_snapshots
@@ -76,8 +98,8 @@ def _write_price_snapshots(services: list[dict], ts: int, date_str: str) -> None
                     svc.get("change"),
                     svc.get("chgAmt"),
                     svc.get("amp"),
-                    svc.get("turnover"),
-                    svc.get("volRatio"),
+                    turnover,
+                    vol_ratio,
                     svc.get("high"),
                     svc.get("low"),
                     svc.get("open"),
@@ -145,12 +167,16 @@ def _get_latest_services_from_db(codes: list[str]) -> list[dict]:
         placeholders = ",".join("?" * len(codes))
         rows = conn.execute(
             f"""
-            SELECT ts, code, name, price, volume, amount, change_pct,
-                   chg_amt, amp, turnover, vol_ratio, high, low, open, prev_close, amo1, amo2,
-                   main_net_inflow, main_net_inflow_pct
-            FROM price_snapshots
-            WHERE code IN ({placeholders})
-              AND ts = (SELECT MAX(ts) FROM price_snapshots)
+            SELECT p.ts, p.code, p.name, p.price, p.volume, p.amount, p.change_pct,
+                   p.chg_amt, p.amp, p.turnover, p.vol_ratio, p.high, p.low, p.open, p.prev_close, p.amo1, p.amo2,
+                   p.main_net_inflow, p.main_net_inflow_pct
+            FROM price_snapshots p
+            INNER JOIN (
+                SELECT code, MAX(ts) AS max_ts
+                FROM price_snapshots
+                WHERE code IN ({placeholders})
+                GROUP BY code
+            ) latest ON p.code = latest.code AND p.ts = latest.max_ts
             """,
             codes,
         ).fetchall()
@@ -425,12 +451,25 @@ def _backfill_missing_names(stocks: list[dict], watchlist: dict) -> bool:
         conn = get_config_connection()
         cur = conn.cursor()
         for code, name in updates.items():
+            before_name = (watchlist.get(code, {}).get("name") or "").strip()
             cur.execute(
                 "UPDATE monitor_watchlist SET name = ?, updated_at = ? "
                 "WHERE symbol = ? "
                 "AND (name IS NULL OR name = '' OR name = symbol)",
                 (name, now, code),
             )
+            if cur.rowcount:
+                record_db_change_best_effort(
+                    conn,
+                    db_name="config.db",
+                    table="monitor_watchlist",
+                    action="update",
+                    key=code,
+                    source="market_data_poller",
+                    actor=make_actor(actor_type="system", actor_id="market_data_poller"),
+                    before={"symbol": code, "name": before_name},
+                    after={"symbol": code, "name": name, "updated_at": now},
+                )
         conn.commit()
     except Exception as e:
         logger.warning(f"backfill names DB write failed: {e}")
@@ -561,6 +600,8 @@ def _get_last_hk_index_from_db() -> dict:
             }
     except Exception as e:
         logger.debug(f"读取历史港股指数失败: {e}")
+    finally:
+        conn.close()
     return {}
 
 
@@ -930,7 +971,20 @@ def poll_once() -> bool:
                 turnover["kc50Pct"] = round(pct, 2) if pct else 0
 
     # 写入 SQLite（单一数据源）
-    _write_price_snapshots(services, ts, date_str)
+    # Sina fallback 时：Sina 不提供 turnover/vol_ratio，防止 0 值覆盖 DB 中的正确历史值
+    if is_sina_fallback:
+        try:
+            stale = _get_latest_services_from_db([s["id"] for s in services])
+            stale_map = {s["id"]: s for s in stale if s.get("id")}
+            for svc in services:
+                old = stale_map.get(svc["id"])
+                if old and not svc.get("turnover") and old.get("turnover"):
+                    svc["turnover"] = old["turnover"]
+                if old and not svc.get("volRatio") and old.get("volRatio"):
+                    svc["volRatio"] = old["volRatio"]
+        except Exception:
+            pass
+    _write_price_snapshots(services, ts, date_str, sina_fallback=is_sina_fallback)
     if turnover:
         _write_market_turnover(turnover, ts, date_str)
 
