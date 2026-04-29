@@ -26,9 +26,11 @@ def compute_event_hash(event: dict[str, Any]) -> str:
     return f"sha256:{hashlib.sha256(canonical_event_bytes(event)).hexdigest()}"
 
 
-def add_hash_chain(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+def add_hash_chain(
+    events: Iterable[dict[str, Any]], *, start_prev_hash: str = GENESIS_HASH
+) -> list[dict[str, Any]]:
     chained: list[dict[str, Any]] = []
-    prev_hash = GENESIS_HASH
+    prev_hash = start_prev_hash
     for event in events:
         event_with_prev = {**event, "prev_hash": prev_hash}
         event_hash = compute_event_hash(event_with_prev)
@@ -36,6 +38,17 @@ def add_hash_chain(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
         chained.append(chained_event)
         prev_hash = event_hash
     return chained
+
+
+def verify_hash_chain(rows: list[dict[str, Any]]) -> None:
+    prev_hash = GENESIS_HASH
+    for idx, row in enumerate(rows, start=1):
+        if row.get("prev_hash") != prev_hash:
+            raise RuntimeError(f"audit hash chain prev_hash mismatch at row {idx}")
+        expected_hash = compute_event_hash(row)
+        if row.get("hash") != expected_hash:
+            raise RuntimeError(f"audit hash chain hash mismatch at row {idx}")
+        prev_hash = expected_hash
 
 
 def _file_sha256(path: Path) -> str:

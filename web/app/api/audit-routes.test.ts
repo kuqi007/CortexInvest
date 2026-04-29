@@ -33,6 +33,45 @@ function setupTradingDb() {
       chg_amt REAL,
       ts TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS portfolio_config (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+  `);
+  db.close();
+}
+
+function setupConfigDb() {
+  const db = openDb(configDbPath);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS tag_meta (
+      tag TEXT PRIMARY KEY,
+      star INTEGER DEFAULT 0,
+      watch INTEGER DEFAULT 1,
+      baseline_value REAL DEFAULT 100,
+      parent TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS monitor_watchlist (
+      symbol TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      alias TEXT,
+      list_type TEXT NOT NULL DEFAULT 'watching',
+      cost REAL,
+      shares INTEGER,
+      lot INTEGER,
+      hidden INTEGER NOT NULL DEFAULT 0,
+      star INTEGER NOT NULL DEFAULT 0,
+      dip_buy INTEGER NOT NULL DEFAULT 0,
+      tags TEXT DEFAULT '[]',
+      watch_price REAL,
+      watch_price_date TEXT,
+      pin_order INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER
+    );
   `);
   db.close();
 }
@@ -54,6 +93,7 @@ beforeEach(() => {
   process.env.AI_INVESTOR_TRADING_DB_PATH = tradingDbPath;
   process.env.AI_INVESTOR_ALLOW_TEST_DB_OVERRIDE = "1";
   setupTradingDb();
+  setupConfigDb();
   vi.resetModules();
 });
 
@@ -176,5 +216,142 @@ describe("audit route integration", () => {
       db: "trading.db",
     });
     expect(payload.after.symbol).toBe("HK00700");
+  });
+
+  it("/api/sector create-tag writes tag_meta and config audit", async () => {
+    const { POST } = await import("./sector/route");
+    const response = await POST(
+      new Request("http://localhost/api/sector", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "create-tag", tag: "AI", parent: "Tech" }),
+      }) as any,
+    );
+
+    expect(response.status).toBe(200);
+    const db = openDb(configDbPath);
+    const tagRow = db
+      .prepare("SELECT tag, parent FROM tag_meta WHERE tag = ?")
+      .get("AI") as { tag: string; parent: string };
+    const auditRow = db
+      .prepare("SELECT payload_json FROM config_audit_outbox ORDER BY ts_ms DESC LIMIT 1")
+      .get() as { payload_json: string };
+    db.close();
+
+    expect(tagRow).toEqual({ tag: "AI", parent: "Tech" });
+    const payload = JSON.parse(auditRow.payload_json);
+    expect(payload).toMatchObject({
+      schema_version: 2,
+      source: "api_sector",
+      action: "create",
+      entity: "tag_meta",
+      key: "AI",
+      db: "config.db",
+    });
+  });
+
+  it("/api/sector config writes portfolio_config and trading audit", async () => {
+    const { POST } = await import("./sector/route");
+    const response = await POST(
+      new Request("http://localhost/api/sector", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "config",
+          alertRules: { AI: { cumulative_gain_pct: 8 } },
+        }),
+      }) as any,
+    );
+
+    expect(response.status).toBe(200);
+    const db = openDb(tradingDbPath);
+    const configRow = db
+      .prepare("SELECT value FROM portfolio_config WHERE key = ?")
+      .get("sector_config.alert_rules") as { value: string };
+    const auditRow = db
+      .prepare("SELECT payload_json FROM trading_audit_outbox ORDER BY ts_ms DESC LIMIT 1")
+      .get() as { payload_json: string };
+    db.close();
+
+    expect(JSON.parse(configRow.value)).toEqual({ AI: { cumulative_gain_pct: 8 } });
+    const payload = JSON.parse(auditRow.payload_json);
+    expect(payload).toMatchObject({
+      schema_version: 2,
+      source: "api_sector",
+      action: "update",
+      entity: "portfolio_config",
+      key: "sector_config",
+      db: "trading.db",
+    });
+  });
+
+  it("/api/sector rejects empty config without audit noise", async () => {
+    const { POST } = await import("./sector/route");
+    const response = await POST(
+      new Request("http://localhost/api/sector", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "config" }),
+      }) as any,
+    );
+
+    expect(response.status).toBe(400);
+    const db = openDb(tradingDbPath);
+    const auditCount = db
+      .prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'trading_audit_outbox'")
+      .get() as { count: number };
+    db.close();
+    expect(auditCount.count).toBe(0);
+  });
+
+  it("/api/sector legacy delete returns 404 for unknown tag without audit", async () => {
+    const { POST } = await import("./sector/route");
+    const response = await POST(
+      new Request("http://localhost/api/sector", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete", id: "missing-tag" }),
+      }) as any,
+    );
+
+    expect(response.status).toBe(404);
+    const db = openDb(configDbPath);
+    const auditCount = db
+      .prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'config_audit_outbox'")
+      .get() as { count: number };
+    db.close();
+    expect(auditCount.count).toBe(0);
+  });
+
+  it("/api/earnings trigger_check writes portfolio_config and trading audit", async () => {
+    const { POST } = await import("./earnings/route");
+    const response = await POST(
+      new Request("http://localhost/api/earnings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "trigger_check" }),
+      }) as any,
+    );
+
+    expect(response.status).toBe(200);
+    const db = openDb(tradingDbPath);
+    const configRow = db
+      .prepare("SELECT value FROM portfolio_config WHERE key = ?")
+      .get("earnings_check_trigger") as { value: string };
+    const auditRow = db
+      .prepare("SELECT payload_json FROM trading_audit_outbox ORDER BY ts_ms DESC LIMIT 1")
+      .get() as { payload_json: string };
+    db.close();
+
+    expect(configRow.value).toMatch(/T/);
+    const payload = JSON.parse(auditRow.payload_json);
+    expect(payload).toMatchObject({
+      schema_version: 2,
+      source: "api_earnings",
+      action: "trigger_check",
+      entity: "portfolio_config",
+      key: "earnings_check_trigger",
+      db: "trading.db",
+    });
   });
 });

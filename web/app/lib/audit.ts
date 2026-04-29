@@ -119,6 +119,7 @@ function insertOutbox(
   if (event.db !== expectedDb) {
     throw new Error(`Expected audit event for ${expectedDb}`);
   }
+  ensureOutbox(db, table, expectedDb);
   db.prepare(
     `INSERT INTO ${table} (
       event_id, schema_version, correlation_id, ts, ts_ms, source,
@@ -138,6 +139,57 @@ function insertOutbox(
     event.db,
     JSON.stringify(event),
   );
+}
+
+function ensureOutbox(
+  db: Database.Database,
+  table: "config_audit_outbox" | "trading_audit_outbox",
+  expectedDb: AuditDbName,
+) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ${table} (
+      event_id TEXT PRIMARY KEY,
+      schema_version INTEGER NOT NULL DEFAULT 1,
+      correlation_id TEXT,
+      ts TEXT NOT NULL,
+      ts_ms INTEGER NOT NULL,
+      source TEXT NOT NULL,
+      action TEXT NOT NULL,
+      entity TEXT NOT NULL,
+      key TEXT NOT NULL,
+      db TEXT NOT NULL DEFAULT '${expectedDb}' CHECK (db = '${expectedDb}'),
+      payload_json TEXT NOT NULL,
+      flushed_at TEXT,
+      flushed_at_ms INTEGER,
+      flush_id TEXT,
+      flush_started_at_ms INTEGER,
+      CHECK (length(trim(payload_json)) > 0)
+    );
+  `);
+  const existingCols = new Set(
+    (db.pragma(`table_info(${table})`) as { name: string }[]).map((c) => c.name),
+  );
+  if (!existingCols.has("flushed_at")) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN flushed_at TEXT`);
+  }
+  if (!existingCols.has("flushed_at_ms")) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN flushed_at_ms INTEGER`);
+  }
+  if (!existingCols.has("flush_id")) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN flush_id TEXT`);
+  }
+  if (!existingCols.has("flush_started_at_ms")) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN flush_started_at_ms INTEGER`);
+  }
+  const prefix = table === "config_audit_outbox" ? "config" : "trading";
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_${prefix}_audit_outbox_pending
+      ON ${table}(ts_ms, event_id)
+      WHERE flushed_at IS NULL;
+    CREATE INDEX IF NOT EXISTS idx_${prefix}_audit_outbox_correlation
+      ON ${table}(correlation_id, ts_ms)
+      WHERE correlation_id IS NOT NULL;
+  `);
 }
 
 export function insertConfigAuditOutbox(db: Database.Database, event: AuditEventV2) {

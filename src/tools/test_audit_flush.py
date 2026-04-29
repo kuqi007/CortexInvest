@@ -111,6 +111,54 @@ def test_flush_outbox_once_recovers_when_pending_event_already_in_jsonl(
         conn.close()
 
 
+def test_flush_outbox_once_appends_to_existing_hash_chain(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "_config_db_path_override", str(tmp_path / "config.db"))
+    monkeypatch.setattr(db, "_db_path_override", str(tmp_path / "trading.db"))
+    db.init_config_db()
+    first = build_audit_event(
+        event_id="01HWNM4Z7G8E6Q9M3R2T1V0X5K",
+        ts_ms=1777376520000,
+        source="api_config",
+        action="update",
+        entity="monitor_watchlist",
+        key="HK09988",
+        db_name="config.db",
+        before=None,
+        after={"shares": 800},
+    )
+    second = build_audit_event(
+        event_id="01HWNM4Z7G8E6Q9M3R2T1V0X5L",
+        ts_ms=1777376580000,
+        source="api_config",
+        action="update",
+        entity="monitor_watchlist",
+        key="HK09988",
+        db_name="config.db",
+        before={"shares": 800},
+        after={"shares": 700},
+    )
+    conn = db.get_config_connection()
+    try:
+        insert_config_outbox(conn, first)
+        conn.commit()
+    finally:
+        conn.close()
+
+    flush_outbox_once("config", data_dir=tmp_path, now_ms=1777376521000)
+    conn = db.get_config_connection()
+    try:
+        insert_config_outbox(conn, second)
+        conn.commit()
+    finally:
+        conn.close()
+
+    flush_outbox_once("config", data_dir=tmp_path, now_ms=1777376581000)
+
+    jsonl_path = tmp_path / "audit" / "config_events.jsonl"
+    rows = [json.loads(line) for line in jsonl_path.read_text().splitlines()]
+    assert rows[1]["prev_hash"] == rows[0]["hash"]
+
+
 def test_flush_outbox_once_refuses_event_id_match_with_different_payload(
     tmp_path, monkeypatch
 ):
@@ -148,6 +196,45 @@ def test_flush_outbox_once_refuses_event_id_match_with_different_payload(
         raise AssertionError("flush should reject mismatched duplicate event_id")
     except RuntimeError as exc:
         assert "payload mismatch" in str(exc)
+
+
+def test_flush_outbox_once_refuses_tampered_existing_hash_chain(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(db, "_config_db_path_override", str(tmp_path / "config.db"))
+    monkeypatch.setattr(db, "_db_path_override", str(tmp_path / "trading.db"))
+    db.init_config_db()
+    event = build_audit_event(
+        event_id="01HWNM4Z7G8E6Q9M3R2T1V0X5K",
+        ts_ms=1777376520000,
+        source="api_config",
+        action="update",
+        entity="monitor_watchlist",
+        key="HK09988",
+        db_name="config.db",
+        before=None,
+        after={"shares": 800},
+    )
+    conn = db.get_config_connection()
+    try:
+        insert_config_outbox(conn, event)
+        conn.commit()
+    finally:
+        conn.close()
+
+    audit_dir = tmp_path / "audit"
+    audit_dir.mkdir()
+    chained = add_hash_chain([{**event, "after": {"shares": 1}}])[0]
+    chained["hash"] = "sha256:bad"
+    (audit_dir / "config_events.jsonl").write_text(
+        json.dumps(chained, ensure_ascii=False) + "\n"
+    )
+
+    try:
+        flush_outbox_once("config", data_dir=tmp_path, now_ms=1777376521000)
+        raise AssertionError("flush should reject tampered existing audit chain")
+    except RuntimeError as exc:
+        assert "hash mismatch" in str(exc)
 
 
 def test_flush_outbox_once_refuses_corrupt_jsonl_tail(tmp_path, monkeypatch):

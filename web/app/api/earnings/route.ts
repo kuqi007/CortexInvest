@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "crypto";
 import { openTradingDb } from "../../lib/db";
+import { buildAuditEventV2, insertTradingAuditOutbox, makeActor } from "../../lib/audit";
 
 // GET /api/earnings — 获取财报日历列表
 export async function GET(request: NextRequest) {
@@ -67,12 +69,34 @@ export async function POST(request: NextRequest) {
     const { action } = body;
 
     if (action === "trigger_check") {
+      const before = db
+        .prepare("SELECT value FROM portfolio_config WHERE key = ?")
+        .get("earnings_check_trigger") as { value: string } | undefined;
+      const triggerAt = new Date().toISOString();
       // Store trigger flag in portfolio_config table
-      db.prepare(
-        `INSERT INTO portfolio_config (key, value, updated_at)
-         VALUES ('earnings_check_trigger', ?, datetime('now'))
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
-      ).run(new Date().toISOString());
+      db.transaction(() => {
+        db.prepare(
+          `INSERT INTO portfolio_config (key, value, updated_at)
+           VALUES ('earnings_check_trigger', ?, datetime('now'))
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+        ).run(triggerAt);
+        insertTradingAuditOutbox(
+          db,
+          buildAuditEventV2({
+            eventId: randomUUID(),
+            tsMs: Date.now(),
+            correlationId: randomUUID(),
+            source: "api_earnings",
+            actor: makeActor({ type: "user", id: "local-ui" }),
+            action: "trigger_check",
+            entity: "portfolio_config",
+            key: "earnings_check_trigger",
+            dbName: "trading.db",
+            before: before ? { value: before.value } : null,
+            after: { value: triggerAt },
+          }),
+        );
+      })();
 
       return NextResponse.json({ success: true, message: "检查已触发" });
     }

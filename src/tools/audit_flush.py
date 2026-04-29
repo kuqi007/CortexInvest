@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import fcntl
 import json
 import os
 from pathlib import Path
 import uuid
 
 from src.sim_trading import db as db_mod
-from src.utils.audit_hash import add_hash_chain, write_jsonl_manifest
+from src.utils.audit_hash import GENESIS_HASH, add_hash_chain, verify_hash_chain, write_jsonl_manifest
 
 
 @dataclass(frozen=True)
@@ -49,6 +51,18 @@ def _append_jsonl(target: Path, rows: list[dict]) -> None:
     _fsync_directory(target.parent)
 
 
+@contextmanager
+def _audit_flush_lock(audit_dir: Path, db_kind: str):
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = audit_dir / f".{db_kind}.flush.lock"
+    with lock_path.open("w", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
 def _read_existing_jsonl(target: Path) -> list[dict]:
     if not target.exists():
         return []
@@ -64,6 +78,7 @@ def _read_existing_jsonl(target: Path) -> list[dict]:
                 raise RuntimeError(
                     f"corrupt JSONL at {target}:{line_no}; refusing audit flush"
                 ) from exc
+    verify_hash_chain(rows)
     return rows
 
 
@@ -137,40 +152,72 @@ def flush_outbox_once(
     jsonl_path = audit_dir / config["jsonl_name"]
     flush_id = uuid.uuid4().hex
 
-    conn = config["connection"]()
-    conn.execute("BEGIN IMMEDIATE")
-    try:
-        existing_rows = _read_existing_jsonl(jsonl_path)
-        rows = conn.execute(
-            f"""
-            SELECT event_id, payload_json
-            FROM {config['table']}
-            WHERE flushed_at IS NULL
-            ORDER BY ts_ms, event_id
-            LIMIT ?
-            """,
-            (batch_limit,),
-        ).fetchall()
-        if not rows:
-            conn.execute("COMMIT")
-            return FlushResult(db_kind, 0, None, None)
+    with _audit_flush_lock(audit_dir, db_kind):
+        conn = config["connection"]()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            existing_rows = _read_existing_jsonl(jsonl_path)
+            rows = conn.execute(
+                f"""
+                SELECT event_id, payload_json
+                FROM {config['table']}
+                WHERE flushed_at IS NULL
+                ORDER BY ts_ms, event_id
+                LIMIT ?
+                """,
+                (batch_limit,),
+            ).fetchall()
+            if not rows:
+                conn.execute("COMMIT")
+                return FlushResult(db_kind, 0, None, None)
 
-        event_ids = [row["event_id"] for row in rows]
-        events = [json.loads(row["payload_json"]) for row in rows]
-        existing_ids = {row.get("event_id") for row in existing_rows}
-        already_flushed_ids = [event_id for event_id in event_ids if event_id in existing_ids]
-        if already_flushed_ids:
-            if set(already_flushed_ids) != set(event_ids):
-                raise RuntimeError(
-                    "partial pending batch already exists in JSONL; manual audit repair required"
+            event_ids = [row["event_id"] for row in rows]
+            events = [json.loads(row["payload_json"]) for row in rows]
+            existing_ids = {row.get("event_id") for row in existing_rows}
+            already_flushed_ids = [
+                event_id for event_id in event_ids if event_id in existing_ids
+            ]
+            if already_flushed_ids:
+                if set(already_flushed_ids) != set(event_ids):
+                    raise RuntimeError(
+                        "partial pending batch already exists in JSONL; manual audit repair required"
+                    )
+                _assert_existing_payload_matches(
+                    existing_rows=existing_rows,
+                    pending_events=events,
                 )
-            _assert_existing_payload_matches(
-                existing_rows=existing_rows,
-                pending_events=events,
+                write_jsonl_manifest(
+                    jsonl_path,
+                    existing_rows,
+                    generated_at_ms=now_ms,
+                    generator_version="audit_flush:1",
+                )
+                _mark_flushed(
+                    conn,
+                    table=config["table"],
+                    event_ids=event_ids,
+                    flush_id=flush_id,
+                    now_ms=now_ms,
+                )
+                conn.execute("COMMIT")
+                return FlushResult(db_kind, len(event_ids), flush_id, jsonl_path)
+
+            placeholders = ",".join("?" for _ in event_ids)
+            conn.execute(
+                f"""
+                UPDATE {config['table']}
+                SET flush_id = ?, flush_started_at_ms = ?
+                WHERE event_id IN ({placeholders})
+                """,
+                (flush_id, now_ms, *event_ids),
             )
+            start_prev_hash = existing_rows[-1]["hash"] if existing_rows else GENESIS_HASH
+            chained_events = add_hash_chain(events, start_prev_hash=start_prev_hash)
+
+            _append_jsonl(jsonl_path, chained_events)
             write_jsonl_manifest(
                 jsonl_path,
-                existing_rows,
+                [*existing_rows, *chained_events],
                 generated_at_ms=now_ms,
                 generator_version="audit_flush:1",
             )
@@ -183,39 +230,11 @@ def flush_outbox_once(
             )
             conn.execute("COMMIT")
             return FlushResult(db_kind, len(event_ids), flush_id, jsonl_path)
-
-        placeholders = ",".join("?" for _ in event_ids)
-        conn.execute(
-            f"""
-            UPDATE {config['table']}
-            SET flush_id = ?, flush_started_at_ms = ?
-            WHERE event_id IN ({placeholders})
-            """,
-            (flush_id, now_ms, *event_ids),
-        )
-        chained_events = add_hash_chain(events)
-
-        _append_jsonl(jsonl_path, chained_events)
-        write_jsonl_manifest(
-            jsonl_path,
-            [*existing_rows, *chained_events],
-            generated_at_ms=now_ms,
-            generator_version="audit_flush:1",
-        )
-        _mark_flushed(
-            conn,
-            table=config["table"],
-            event_ids=event_ids,
-            flush_id=flush_id,
-            now_ms=now_ms,
-        )
-        conn.execute("COMMIT")
-        return FlushResult(db_kind, len(event_ids), flush_id, jsonl_path)
-    except Exception:
-        conn.execute("ROLLBACK")
-        raise
-    finally:
-        conn.close()
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+        finally:
+            conn.close()
 
 
 def main() -> None:

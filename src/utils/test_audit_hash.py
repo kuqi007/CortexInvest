@@ -4,6 +4,7 @@ from src.utils.audit_hash import (
     add_hash_chain,
     canonical_event_bytes,
     compute_event_hash,
+    verify_hash_chain,
     write_jsonl_manifest,
 )
 
@@ -91,6 +92,55 @@ def test_add_hash_chain_links_events_from_genesis():
     assert chained[0]["hash"].startswith("sha256:")
     assert chained[1]["prev_hash"] == chained[0]["hash"]
     assert chained[1]["hash"].startswith("sha256:")
+
+
+def test_add_hash_chain_can_continue_from_existing_tail():
+    events = [
+        {
+            "event_id": "e2",
+            "schema_version": 1,
+            "ts": "2026-04-28T03:43:00Z",
+            "ts_ms": 1777376580000,
+            "source": "api_config",
+            "action": "update",
+            "entity": "monitor_watchlist",
+            "key": "HK09988",
+            "before": {"shares": 800},
+            "after": {"shares": 700},
+            "db": "config.db",
+        },
+    ]
+
+    chained = add_hash_chain(events, start_prev_hash="sha256:previous")
+
+    assert chained[0]["prev_hash"] == "sha256:previous"
+
+
+def test_verify_hash_chain_rejects_tampered_row():
+    rows = add_hash_chain(
+        [
+            {
+                "event_id": "e1",
+                "schema_version": 1,
+                "ts": "2026-04-28T03:42:00Z",
+                "ts_ms": 1777376520000,
+                "source": "api_config",
+                "action": "update",
+                "entity": "monitor_watchlist",
+                "key": "HK09988",
+                "before": None,
+                "after": {"shares": 800},
+                "db": "config.db",
+            }
+        ]
+    )
+    rows[0]["after"] = {"shares": 1}
+
+    try:
+        verify_hash_chain(rows)
+        raise AssertionError("tampered audit row should fail hash verification")
+    except RuntimeError as exc:
+        assert "hash mismatch" in str(exc)
 
 
 def test_write_jsonl_manifest_contains_no_payload(tmp_path):

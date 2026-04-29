@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import Database from "better-sqlite3";
+import { randomUUID } from "crypto";
 
 import { openConfigDb, openTradingDb } from "../../lib/db";
+import {
+  buildAuditEventV2,
+  insertConfigAuditOutbox,
+  insertTradingAuditOutbox,
+  makeActor,
+} from "../../lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +43,117 @@ interface AlertRow {
   r_squared: number;
   message: string;
   display: string;
+}
+
+type TagAuditRow = {
+  tag: string;
+  star: number | null;
+  watch: number | null;
+  baseline_value: number | null;
+  parent: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+function readTagAuditRow(db: InstanceType<typeof Database>, tag: string) {
+  return db
+    .prepare("SELECT tag, star, watch, baseline_value, parent, created_at, updated_at FROM tag_meta WHERE tag = ?")
+    .get(tag) as TagAuditRow | undefined;
+}
+
+function tagToAudit(row: TagAuditRow | undefined): Record<string, unknown> | null {
+  if (!row) return null;
+  return {
+    tag: row.tag,
+    star: Boolean(row.star),
+    watch: Boolean(row.watch),
+    baseline_value: row.baseline_value,
+    parent: row.parent,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+function recordConfigAudit(
+  db: InstanceType<typeof Database>,
+  args: {
+    action: string;
+    entity: string;
+    key: string;
+    before: Record<string, unknown> | null;
+    after: Record<string, unknown> | null;
+    metadata?: Record<string, unknown>;
+  },
+) {
+  insertConfigAuditOutbox(
+    db,
+    buildAuditEventV2({
+      eventId: randomUUID(),
+      tsMs: Date.now(),
+      correlationId: randomUUID(),
+      source: "api_sector",
+      actor: makeActor({ type: "user", id: "local-ui" }),
+      action: args.action,
+      entity: args.entity,
+      key: args.key,
+      dbName: "config.db",
+      before: args.before,
+      after: args.after,
+      metadata: args.metadata,
+    }),
+  );
+}
+
+function recordTradingAudit(
+  db: InstanceType<typeof Database>,
+  args: {
+    action: string;
+    entity: string;
+    key: string;
+    before: Record<string, unknown> | null;
+    after: Record<string, unknown> | null;
+    metadata?: Record<string, unknown>;
+  },
+) {
+  insertTradingAuditOutbox(
+    db,
+    buildAuditEventV2({
+      eventId: randomUUID(),
+      tsMs: Date.now(),
+      correlationId: randomUUID(),
+      source: "api_sector",
+      actor: makeActor({ type: "user", id: "local-ui" }),
+      action: args.action,
+      entity: args.entity,
+      key: args.key,
+      dbName: "trading.db",
+      before: args.before,
+      after: args.after,
+      metadata: args.metadata,
+    }),
+  );
+}
+
+function readPortfolioConfigAudit(
+  db: InstanceType<typeof Database>,
+  keys: string[],
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const key of keys) {
+    const row = db
+      .prepare("SELECT value FROM portfolio_config WHERE key = ?")
+      .get(key) as { value: string } | undefined;
+    if (!row) {
+      result[key] = null;
+      continue;
+    }
+    try {
+      result[key] = JSON.parse(row.value);
+    } catch {
+      result[key] = row.value;
+    }
+  }
+  return result;
 }
 
 interface TagMetaRow {
@@ -759,13 +877,23 @@ export async function POST(request: NextRequest) {
             { status: 400 },
           );
         }
-        db.prepare(
-          `INSERT INTO tag_meta (tag, star, watch, baseline_value, parent, created_at, updated_at)
-           VALUES (?, 0, 1, 100, ?, datetime('now'), datetime('now'))`,
-        ).run(tag.trim(), parentTag?.trim() || null);
+        const tagName = tag.trim();
+        db.transaction(() => {
+          db!.prepare(
+            `INSERT INTO tag_meta (tag, star, watch, baseline_value, parent, created_at, updated_at)
+             VALUES (?, 0, 1, 100, ?, datetime('now'), datetime('now'))`,
+          ).run(tagName, parentTag?.trim() || null);
+          recordConfigAudit(db!, {
+            action: "create",
+            entity: "tag_meta",
+            key: tagName,
+            before: null,
+            after: tagToAudit(readTagAuditRow(db!, tagName)),
+          });
+        })();
         db.close();
         db = null;
-        return NextResponse.json({ ok: true, action: "create-tag", tag: tag.trim() });
+        return NextResponse.json({ ok: true, action: "create-tag", tag: tagName });
       }
 
       case "set-parent": {
@@ -777,12 +905,25 @@ export async function POST(request: NextRequest) {
           );
         }
         db = openConfigDb();
-        const spResult = db
-          .prepare("UPDATE tag_meta SET parent = ?, updated_at = datetime('now') WHERE tag = ?")
-          .run(spParent?.trim() || null, spTag);
+        const before = tagToAudit(readTagAuditRow(db, spTag));
+        let spResult: Database.RunResult;
+        db.transaction(() => {
+          spResult = db!
+            .prepare("UPDATE tag_meta SET parent = ?, updated_at = datetime('now') WHERE tag = ?")
+            .run(spParent?.trim() || null, spTag);
+          if (spResult.changes > 0) {
+            recordConfigAudit(db!, {
+              action: "set_parent",
+              entity: "tag_meta",
+              key: spTag,
+              before,
+              after: tagToAudit(readTagAuditRow(db!, spTag)),
+            });
+          }
+        })();
         db.close();
         db = null;
-        if (spResult.changes === 0) {
+        if (spResult!.changes === 0) {
           return NextResponse.json(
             { error: `Tag "${spTag}" not found` },
             { status: 404 },
@@ -802,28 +943,27 @@ export async function POST(request: NextRequest) {
         const configDb2 = openConfigDb();
         const tradingDb2 = openTradingDb();
         try {
-          // Delete from tag_meta (config)
-          const result = configDb2
-            .prepare("DELETE FROM tag_meta WHERE tag = ?")
-            .run(tag);
-          if (result.changes === 0) {
+          const before = tagToAudit(readTagAuditRow(configDb2, tag));
+          if (!before) {
             return NextResponse.json(
               { error: `Tag "${tag}" not found` },
               { status: 404 },
             );
           }
-          // Strip tag from all stocks in monitor_watchlist (config)
-          const rows = configDb2
-            .prepare(
-              `SELECT symbol, tags FROM monitor_watchlist
-               WHERE tags IS NOT NULL AND tags != '[]'`,
-            )
-            .all() as { symbol: string; tags: string }[];
-          const updateStmt = configDb2.prepare(
-            "UPDATE monitor_watchlist SET tags = ?, updated_at = ? WHERE symbol = ?",
-          );
-          const now = Date.now();
-          const tx = configDb2.transaction(() => {
+          let strippedCount = 0;
+          configDb2.transaction(() => {
+            // Delete from tag_meta and strip tag from all stocks in monitor_watchlist.
+            configDb2.prepare("DELETE FROM tag_meta WHERE tag = ?").run(tag);
+            const rows = configDb2
+              .prepare(
+                `SELECT symbol, tags FROM monitor_watchlist
+                 WHERE tags IS NOT NULL AND tags != '[]'`,
+              )
+              .all() as { symbol: string; tags: string }[];
+            const updateStmt = configDb2.prepare(
+              "UPDATE monitor_watchlist SET tags = ?, updated_at = ? WHERE symbol = ?",
+            );
+            const now = Date.now();
             for (const row of rows) {
               try {
                 const tags: string[] = JSON.parse(row.tags || "[]");
@@ -831,11 +971,19 @@ export async function POST(request: NextRequest) {
                 if (idx !== -1) {
                   tags.splice(idx, 1);
                   updateStmt.run(JSON.stringify(tags), now, row.symbol);
+                  strippedCount += 1;
                 }
               } catch { /* invalid json */ }
             }
-          });
-          tx();
+            recordConfigAudit(configDb2, {
+              action: "delete",
+              entity: "tag_meta",
+              key: tag,
+              before,
+              after: null,
+              metadata: { stripped_count: strippedCount },
+            });
+          })();
           // Delete associated DB rows (trading)
           try {
             tradingDb2.prepare("DELETE FROM sector_daily WHERE index_id = ?").run(tag);
@@ -867,21 +1015,26 @@ export async function POST(request: NextRequest) {
             .prepare("SELECT tag FROM tag_meta WHERE tag = ?")
             .get(id) as { tag: string } | undefined;
           const tagName = tagRow?.tag || id;
-
-          // Delete from tag_meta (config)
-          configDb3.prepare("DELETE FROM tag_meta WHERE tag = ?").run(tagName);
-          // Strip tag from stocks (config)
-          const stocksWithTag = configDb3
-            .prepare(
-              `SELECT symbol, tags FROM monitor_watchlist
-               WHERE tags IS NOT NULL AND tags != '[]'`,
-            )
-            .all() as { symbol: string; tags: string }[];
-          const updStmt = configDb3.prepare(
-            "UPDATE monitor_watchlist SET tags = ?, updated_at = ? WHERE symbol = ?",
-          );
-          const nowTs = Date.now();
-          const delTx = configDb3.transaction(() => {
+          const before = tagToAudit(readTagAuditRow(configDb3, tagName));
+          if (!before) {
+            return NextResponse.json(
+              { error: `Tag "${tagName}" not found` },
+              { status: 404 },
+            );
+          }
+          let strippedCount = 0;
+          configDb3.transaction(() => {
+            configDb3.prepare("DELETE FROM tag_meta WHERE tag = ?").run(tagName);
+            const stocksWithTag = configDb3
+              .prepare(
+                `SELECT symbol, tags FROM monitor_watchlist
+                 WHERE tags IS NOT NULL AND tags != '[]'`,
+              )
+              .all() as { symbol: string; tags: string }[];
+            const updStmt = configDb3.prepare(
+              "UPDATE monitor_watchlist SET tags = ?, updated_at = ? WHERE symbol = ?",
+            );
+            const nowTs = Date.now();
             for (const row of stocksWithTag) {
               try {
                 const tags: string[] = JSON.parse(row.tags || "[]");
@@ -889,11 +1042,19 @@ export async function POST(request: NextRequest) {
                 if (tidx !== -1) {
                   tags.splice(tidx, 1);
                   updStmt.run(JSON.stringify(tags), nowTs, row.symbol);
+                  strippedCount += 1;
                 }
               } catch { /* invalid json */ }
             }
-          });
-          delTx();
+            recordConfigAudit(configDb3, {
+              action: "delete",
+              entity: "tag_meta",
+              key: tagName,
+              before,
+              after: null,
+              metadata: { legacy_action: "delete", stripped_count: strippedCount },
+            });
+          })();
           // Delete DB rows (trading)
           try {
             tradingDb3.prepare("DELETE FROM sector_daily WHERE index_id = ?").run(tagName);
@@ -917,12 +1078,25 @@ export async function POST(request: NextRequest) {
           );
         }
         db = openConfigDb();
-        const wResult = db
-          .prepare("UPDATE tag_meta SET watch = ?, updated_at = datetime('now') WHERE tag = ?")
-          .run(value ? 1 : 0, id);
+        const before = tagToAudit(readTagAuditRow(db, id));
+        let wResult: Database.RunResult;
+        db.transaction(() => {
+          wResult = db!
+            .prepare("UPDATE tag_meta SET watch = ?, updated_at = datetime('now') WHERE tag = ?")
+            .run(value ? 1 : 0, id);
+          if (wResult.changes > 0) {
+            recordConfigAudit(db!, {
+              action: "watch",
+              entity: "tag_meta",
+              key: id,
+              before,
+              after: tagToAudit(readTagAuditRow(db!, id)),
+            });
+          }
+        })();
         db.close();
         db = null;
-        if (wResult.changes === 0) {
+        if (wResult!.changes === 0) {
           return NextResponse.json(
             { error: `Tag "${id}" not found` },
             { status: 404 },
@@ -940,12 +1114,25 @@ export async function POST(request: NextRequest) {
           );
         }
         db = openConfigDb();
-        const sResult = db
-          .prepare("UPDATE tag_meta SET star = ?, updated_at = datetime('now') WHERE tag = ?")
-          .run(value ? 1 : 0, id);
+        const before = tagToAudit(readTagAuditRow(db, id));
+        let sResult: Database.RunResult;
+        db.transaction(() => {
+          sResult = db!
+            .prepare("UPDATE tag_meta SET star = ?, updated_at = datetime('now') WHERE tag = ?")
+            .run(value ? 1 : 0, id);
+          if (sResult.changes > 0) {
+            recordConfigAudit(db!, {
+              action: "star",
+              entity: "tag_meta",
+              key: id,
+              before,
+              after: tagToAudit(readTagAuditRow(db!, id)),
+            });
+          }
+        })();
         db.close();
         db = null;
-        if (sResult.changes === 0) {
+        if (sResult!.changes === 0) {
           return NextResponse.json(
             { error: `Tag "${id}" not found` },
             { status: 404 },
@@ -974,10 +1161,23 @@ export async function POST(request: NextRequest) {
             )
             .get(id) as { index_value: number } | undefined;
           const newBaseline = latestRow?.index_value || 100;
-          const rbResult = configDb4
-            .prepare("UPDATE tag_meta SET baseline_value = ?, updated_at = datetime('now') WHERE tag = ?")
-            .run(newBaseline, id);
-          if (rbResult.changes === 0) {
+          const before = tagToAudit(readTagAuditRow(configDb4, id));
+          let rbResult: Database.RunResult;
+          configDb4.transaction(() => {
+            rbResult = configDb4
+              .prepare("UPDATE tag_meta SET baseline_value = ?, updated_at = datetime('now') WHERE tag = ?")
+              .run(newBaseline, id);
+            if (rbResult.changes > 0) {
+              recordConfigAudit(configDb4, {
+                action: "reset_baseline",
+                entity: "tag_meta",
+                key: id,
+                before,
+                after: tagToAudit(readTagAuditRow(configDb4, id)),
+              });
+            }
+          })();
+          if (rbResult!.changes === 0) {
             return NextResponse.json(
               { error: `Tag "${id}" not found` },
               { status: 404 },
@@ -1003,24 +1203,45 @@ export async function POST(request: NextRequest) {
         };
         const wdb = openTradingDb();
         try {
-          const upsert = wdb.prepare(
-            "INSERT INTO portfolio_config (key, value, updated_at) VALUES (?, ?, datetime('now')) " +
-            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-          );
-          if (alertRules) {
-            const existing = wdb
-              .prepare("SELECT value FROM portfolio_config WHERE key = ?")
-              .get("sector_config.alert_rules") as { value: string } | undefined;
-            const merged = { ...(existing ? JSON.parse(existing.value) : {}), ...alertRules };
-            upsert.run("sector_config.alert_rules", JSON.stringify(merged));
+          const keys = [
+            ...(alertRules ? ["sector_config.alert_rules"] : []),
+            ...(rotation ? ["sector_config.rotation"] : []),
+          ];
+          if (keys.length === 0) {
+            return NextResponse.json(
+              { error: "Missing sector config fields" },
+              { status: 400 },
+            );
           }
-          if (rotation) {
-            const existing = wdb
-              .prepare("SELECT value FROM portfolio_config WHERE key = ?")
-              .get("sector_config.rotation") as { value: string } | undefined;
-            const merged = { ...(existing ? JSON.parse(existing.value) : {}), ...rotation };
-            upsert.run("sector_config.rotation", JSON.stringify(merged));
-          }
+          const before = readPortfolioConfigAudit(wdb, keys);
+          wdb.transaction(() => {
+            const upsert = wdb.prepare(
+              "INSERT INTO portfolio_config (key, value, updated_at) VALUES (?, ?, datetime('now')) " +
+              "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            );
+            if (alertRules) {
+              const existing = wdb
+                .prepare("SELECT value FROM portfolio_config WHERE key = ?")
+                .get("sector_config.alert_rules") as { value: string } | undefined;
+              const merged = { ...(existing ? JSON.parse(existing.value) : {}), ...alertRules };
+              upsert.run("sector_config.alert_rules", JSON.stringify(merged));
+            }
+            if (rotation) {
+              const existing = wdb
+                .prepare("SELECT value FROM portfolio_config WHERE key = ?")
+                .get("sector_config.rotation") as { value: string } | undefined;
+              const merged = { ...(existing ? JSON.parse(existing.value) : {}), ...rotation };
+              upsert.run("sector_config.rotation", JSON.stringify(merged));
+            }
+            recordTradingAudit(wdb, {
+              action: "update",
+              entity: "portfolio_config",
+              key: "sector_config",
+              before,
+              after: readPortfolioConfigAudit(wdb, keys),
+              metadata: { keys },
+            });
+          })();
         } catch (e) {
           return NextResponse.json(
             { error: `Failed to update config: ${e}` },
