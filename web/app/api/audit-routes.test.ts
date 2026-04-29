@@ -250,6 +250,53 @@ describe("audit route integration", () => {
     });
   });
 
+  it("/api/config tag-add audits auto-created tag_meta", async () => {
+    const db = openDb(configDbPath);
+    db.prepare(
+      "INSERT INTO monitor_watchlist (symbol, name, list_type, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run("HK06651", "五一视界", "holding", "[]", 0, 0);
+    db.close();
+
+    const { POST } = await import("./config/route");
+    const response = await POST(
+      new Request("http://localhost/api/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "tag-add",
+          codes: ["HK06651"],
+          tag: "AR/VR",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const checkDb = openDb(configDbPath);
+    const rows = checkDb
+      .prepare("SELECT payload_json FROM config_audit_outbox ORDER BY ts_ms, event_id")
+      .all() as { payload_json: string }[];
+    checkDb.close();
+
+    const payloads = rows.map((row) => JSON.parse(row.payload_json));
+    expect(payloads).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: "api_config",
+          action: "tag_add",
+          entity: "monitor_watchlist",
+          key: "HK06651",
+        }),
+        expect.objectContaining({
+          source: "api_config",
+          action: "create",
+          entity: "tag_meta",
+          key: "AR/VR",
+          after: expect.objectContaining({ tag: "AR/VR" }),
+        }),
+      ]),
+    );
+  });
+
   it("/api/sector config writes portfolio_config and trading audit", async () => {
     const { POST } = await import("./sector/route");
     const response = await POST(

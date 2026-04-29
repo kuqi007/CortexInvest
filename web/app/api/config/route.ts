@@ -993,7 +993,17 @@ export async function POST(request: Request) {
             }
           }
           // Auto-create tag_meta row if tag is new
-          db.prepare("INSERT OR IGNORE INTO tag_meta(tag) VALUES (?)").run(tag);
+          const tagResult = db.prepare("INSERT OR IGNORE INTO tag_meta(tag) VALUES (?)").run(tag);
+          if (tagResult.changes > 0) {
+            recordConfigAudit(db, {
+              action: "create",
+              entity: "tag_meta",
+              key: tag,
+              before: null,
+              after: { tag, star: 0, watch: 1, baseline_value: 100, parent: null },
+              metadata: { source_action: "tag-add" },
+            });
+          }
         })();
         const snapshotWarnTagAdd = exportMonitorSnapshotFromDb(db);
         return NextResponse.json({
