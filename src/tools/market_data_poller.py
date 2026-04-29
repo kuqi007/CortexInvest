@@ -145,7 +145,7 @@ def _get_latest_services_from_db(codes: list[str]) -> list[dict]:
         placeholders = ",".join("?" * len(codes))
         rows = conn.execute(
             f"""
-            SELECT code, name, price, volume, amount, change_pct,
+            SELECT ts, code, name, price, volume, amount, change_pct,
                    chg_amt, amp, turnover, vol_ratio, high, low, open, prev_close, amo1, amo2,
                    main_net_inflow, main_net_inflow_pct
             FROM price_snapshots
@@ -158,6 +158,7 @@ def _get_latest_services_from_db(codes: list[str]) -> list[dict]:
         for row in rows:
             services.append(
                 {
+                    "ts": row["ts"],  # preserve original timestamp for staleness detection
                     "id": row["code"],
                     "name": row["name"] or "",
                     "price": row["price"] or 0,
@@ -538,8 +539,75 @@ SINA_INDEX_URL = "https://hq.sinajs.cn/list=s_sh000001,s_sz399001,s_sz399006,s_s
 SINA_HEADERS = {"Referer": "https://finance.sina.com.cn"}
 
 
+def _get_last_hk_index_from_db() -> dict:
+    """从 market_turnover 表读取最近一条港股指数作为最终 fallback。"""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT hk_index, hk_index_pct, hk_tech, hk_tech_pct, hk_turnover
+            FROM market_turnover
+            WHERE hk_index IS NOT NULL AND hk_index > 0
+            ORDER BY ts DESC LIMIT 1
+            """
+        ).fetchone()
+        if row:
+            return {
+                "hkIndex": row[0] or 0,
+                "hkIndexPct": row[1] or 0,
+                "hkTech": row[2] or 0,
+                "hkTechPct": row[3] or 0,
+                "hkTurnover": row[4] or 0,
+            }
+    except Exception as e:
+        logger.debug(f"读取历史港股指数失败: {e}")
+    return {}
+
+
+def _fetch_hk_index_from_sina() -> dict:
+    """从新浪获取港股指数（恒生 + 恒生科技）作为 fallback。"""
+    result = {}
+    import re
+
+    try:
+        resp = requests.get(
+            "https://hq.sinajs.cn/list=hkHSI,hkHSTECH",
+            headers=SINA_HEADERS,
+            timeout=5,
+        )
+        resp.encoding = "gbk"
+    except Exception as e:
+        logger.debug(f"新浪港股指数获取失败: {e}")
+        return result
+
+    for line in resp.text.strip().split("\n"):
+        m = re.match(r'var hq_str_hk(\w+)="(.*)";', line.strip())
+        if not m:
+            continue
+        code = m.group(1)  # "HSI" 或 "HSTECH"
+        raw = m.group(2)
+        fields = raw.split(",")
+        if len(fields) < 6:
+            continue
+        try:
+            price = float(fields[1]) if fields[1] else 0
+            chg_ratio = float(fields[3]) if fields[3] else 0
+        except (ValueError, IndexError):
+            continue
+        if code == "HSI":
+            result["hkIndex"] = round(price, 2) if price else 0
+            result["hkIndexPct"] = round(chg_ratio, 2) if chg_ratio else 0
+        elif code == "HSTECH":
+            result["hkTech"] = round(price, 2) if price else 0
+            result["hkTechPct"] = round(chg_ratio, 2) if chg_ratio else 0
+    return result
+
+
 def fetch_hk_index_data() -> dict:
-    """从腾讯财经获取港股指数（恒生 + 恒生科技），返回 {hkIndex, hkIndexPct, hkTech, hkTechPct, hkTurnover}"""
+    """从腾讯财经获取港股指数（恒生 + 恒生科技），返回 {hkIndex, hkIndexPct, hkTech, hkTechPct, hkTurnover}
+
+    多源 fallback：腾讯 → 新浪 → DB历史值
+    """
     result = {}
     try:
         resp = requests.get(
@@ -547,36 +615,50 @@ def fetch_hk_index_data() -> dict:
             timeout=5,
         )
         resp.encoding = "gbk"
+        # 解析腾讯响应
+        for line in resp.text.strip().split("\n"):
+            if "=" not in line or '="";' in line:
+                continue
+            m = line.split("=")
+            if len(m) < 2:
+                continue
+            raw = m[1].strip().strip('"')
+            fields = raw.split("~")
+            if len(fields) < 35:
+                continue
+            try:
+                price = float(fields[3]) if fields[3] else 0
+                chg_ratio = float(fields[32]) if fields[32] else 0
+                # turnover 在字段 36，单位是"万元"，转亿元
+                raw_turnover = float(fields[36]) if fields[36] else 0
+                turnover_yi = raw_turnover / 10000  # 万元 → 亿元
+            except (ValueError, IndexError):
+                continue
+            code_full = fields[2]  # "HSI" 或 "HSTECH"
+            if code_full == "HSI":
+                result["hkIndex"] = round(price, 2) if price else 0
+                result["hkIndexPct"] = round(chg_ratio, 2) if chg_ratio else 0
+                result["hkTurnover"] = round(turnover_yi, 0) if turnover_yi else 0
+            elif code_full == "HSTECH":
+                result["hkTech"] = round(price, 2) if price else 0
+                result["hkTechPct"] = round(chg_ratio, 2) if chg_ratio else 0
     except Exception as e:
-        logger.debug(f"获取港股指数失败: {e}")
-        return result
+        logger.debug(f"腾讯港股指数获取失败: {e}")
 
-    for line in resp.text.strip().split("\n"):
-        if "=" not in line or '="";' in line:
-            continue
-        m = line.split("=")
-        if len(m) < 2:
-            continue
-        raw = m[1].strip().strip('"')
-        fields = raw.split("~")
-        if len(fields) < 35:
-            continue
-        try:
-            price = float(fields[3]) if fields[3] else 0
-            chg_ratio = float(fields[32]) if fields[32] else 0
-            # turnover 在字段 36，单位是"万元"，转亿元
-            raw_turnover = float(fields[36]) if fields[36] else 0
-            turnover_yi = raw_turnover / 10000  # 万元 → 亿元
-        except (ValueError, IndexError):
-            continue
-        code_full = fields[2]  # "HSI" 或 "HSTECH"
-        if code_full == "HSI":
-            result["hkIndex"] = round(price, 2) if price else 0
-            result["hkIndexPct"] = round(chg_ratio, 2) if chg_ratio else 0
-            result["hkTurnover"] = round(turnover_yi, 0) if turnover_yi else 0
-        elif code_full == "HSTECH":
-            result["hkTech"] = round(price, 2) if price else 0
-            result["hkTechPct"] = round(chg_ratio, 2) if chg_ratio else 0
+    # 新浪 fallback（仅当腾讯未获取到 hkIndex 时）
+    if not result.get("hkIndex"):
+        sina_result = _fetch_hk_index_from_sina()
+        if sina_result:
+            result.update(sina_result)
+            logger.info(f"港股指数(新浪兜底): hkIndex={sina_result.get('hkIndex')} hkTech={sina_result.get('hkTech')}")
+
+    # DB 历史值 fallback（所有源都失败时）
+    if not result.get("hkIndex"):
+        db_result = _get_last_hk_index_from_db()
+        if db_result:
+            result.update(db_result)
+            logger.info(f"港股指数(DB历史兜底): hkIndex={db_result.get('hkIndex')} hkTech={db_result.get('hkTech')}")
+
     return result
 
 
@@ -709,9 +791,25 @@ def poll_once() -> bool:
     date_str = datetime.now().strftime("%Y-%m-%d")
 
     if not stocks:
-        # 个股数据失败，但尝试更新大盘数据
+        # 个股数据失败（东方财富+新浪均不可达），尝试：
+        # 1. 用最后一次成功数据写入 price_snapshots（带原始时间戳，通知 notifier 数据已过时）
+        # 2. 继续更新大盘成交额
         logger.warning("个股行情获取失败（东方财富不可达），尝试更新大盘数据")
         index_results = []  # fetch_realtime_with_fallback 返回空，没有指数数据
+
+        # 写入最后一次成功的价格快照（带原始时间戳，保留 staleness 特征）
+        try:
+            stale_services = _get_latest_services_from_db(symbols)
+            if stale_services:
+                # 用每条记录原始 ts 写入，确保 watchdog 能检测到 staleness
+                for svc in stale_services:
+                    original_ts = svc.get("ts", 0)
+                    if original_ts:
+                        _write_price_snapshots([svc], original_ts, date_str)
+                logger.info(f"已写入 {len(stale_services)} 只 stale 行情（DB 无新数据）")
+        except Exception as e:
+            logger.warning(f"写入 stale 行情失败: {e}")
+
         if turnover:
             # 市场 AMO 计算：成交额(亿元) × 1e8 = 元
             total_yi = float(turnover.get("total", 0))
@@ -737,13 +835,13 @@ def poll_once() -> bool:
     stock_results = [s for s in stocks if s.get("code", "") not in index_codes_set]
     services = build_services(stock_results, watchlist)
 
-    # ── AMO 计算：每只股票 amount = vol × close（个股），更新历史后算 AMO1/AMO2 ──
+    # ── AMO 计算：每只股票 amount（东方财富 f6 成交额），更新历史后算 AMO1/AMO2 ──
     for svc in services:
         code = svc["id"]
         vol = svc.get("vol", 0) or 0
         price = svc.get("price", 0) or 0
-        # 成交额 = 成交量 × 当前价（近似，实际应为均价，此处用现价估算，单位：元）
-        amount_today = vol * price
+        # 成交额优先用 EM API 的 f6（实际成交额元），无数据时用 vol*price 估算
+        amount_today = svc.get("amount", 0) or (vol * price)
         if amount_today > AMO_MIN_AMOUNT:
             amo1, amo2 = _update_amo_for_stock(code, amount_today)
             svc["amo1"] = round(amo1, 3)

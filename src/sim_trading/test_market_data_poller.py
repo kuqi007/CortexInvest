@@ -556,3 +556,197 @@ def test_poll_once_index_results_empty_on_fetch_failure(tmp_db, stale_json, tmp_
 
     # Should return False (fetch failure) but not crash
     assert result is False
+
+
+# ─── Bug Regression: stale data write when fetch fails ─────────────────────
+
+def test_poll_once_writes_stale_data_when_fetch_fails(tmp_db, stale_json, tmp_path):
+    """
+    Regression test for the stale-data-write bug (line ~729 before fix):
+    When fetch_realtime_with_fallback returns empty AND DB already has price_snapshots,
+    poll_once must still call _write_price_snapshots with the stale DB data.
+
+    Before the fix, returning at line 798 (index_results = []) would skip
+    _write_price_snapshots entirely, causing notifier to think no data existed.
+    After fix: stale services are written with their original timestamps preserved.
+    """
+    import sqlite3
+    import src.tools.market_data_poller as poller
+
+    # Pre-populate trading.db with price_snapshots for our symbols
+    trading_db = tmp_path / "trading.db"
+    conn = sqlite3.connect(str(trading_db))
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS price_snapshots (
+            ts INTEGER, date TEXT, code TEXT, name TEXT, price REAL,
+            volume REAL, amount REAL, change_pct REAL, chg_amt REAL,
+            amp REAL, turnover REAL, vol_ratio REAL, high REAL, low REAL,
+            open REAL, prev_close REAL, amo1 REAL, amo2 REAL,
+            main_net_inflow REAL, main_net_inflow_pct REAL
+        )
+    """)
+    original_ts = 1700000000000
+    conn.execute(
+        """
+        INSERT INTO price_snapshots
+        (ts, date, code, name, price, volume, amount, change_pct, chg_amt,
+         amp, turnover, vol_ratio, high, low, open, prev_close, amo1, amo2,
+         main_net_inflow, main_net_inflow_pct)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (original_ts, "2024-01-01", "002080", "中材科技", 50.0, 1000000,
+         50000000.0, 1.5, 0.75, 3.0, 1.2, 1.5, 51.0, 49.0, 49.5, 49.25,
+         2.5, 3.1, 1000000.0, 5.2),
+    )
+    conn.commit()
+    conn.close()
+
+    # Patch db module to use our temp trading.db
+    import src.sim_trading.db as db_mod
+    db_patcher = patch.object(db_mod, "_db_path_override", str(trading_db))
+
+    write_args: dict = {}
+
+    def capture_write(services, ts, date_str):
+        write_args["services"] = services
+        write_args["ts"] = ts
+        write_args["date_str"] = date_str
+
+    def fake_realtime_fallback(symbols):
+        return ([], True)  # Empty — simulates fetch failure
+
+    with _config_db_patch(tmp_db), \
+         db_patcher, \
+         patch.object(poller, "_write_price_snapshots", side_effect=capture_write), \
+         patch.object(poller, "_write_market_turnover", return_value=None), \
+         patch("src.tools.market_data_poller.fetch_realtime_with_fallback", side_effect=fake_realtime_fallback), \
+         patch("src.tools.market_data_poller.fetch_realtime_yahoo", return_value=[]), \
+         patch("src.tools.market_data_poller.fetch_market_turnover", return_value={"total": 1000, "sh": 500, "sz": 500, "shIndex": 3000, "szIndex": 10000, "shPct": 0.5, "szPct": 1.0, "verdict": "above_avg"}), \
+         patch("src.tools.market_data_poller.fetch_hk_index_data", return_value={}), \
+         patch.object(poller._futu_enricher, "enrich", return_value=({}, {})):
+        result = poller.poll_once()
+
+    assert result is False, "poll_once should return False on fetch failure"
+
+    # Key regression: _write_price_snapshots MUST be called with stale data
+    assert "services" in write_args, \
+        "_write_price_snapshots must be called when fetch fails (was skipped before fix)"
+
+    stale = write_args["services"]
+    assert len(stale) == 1
+    assert stale[0]["id"] == "002080"
+
+    # Critical: original timestamp must be preserved, not replaced with new ts
+    assert write_args["ts"] == original_ts, \
+        f"Stale data must preserve original ts={original_ts}, got {write_args['ts']}"
+
+
+# ─── Bug Regression: AMO uses actual amount, not vol*price ─────────────────
+
+def test_amo_uses_actual_amount_not_vol_price(tmp_db, stale_json, tmp_path):
+    """
+    Regression test for the AMO calculation bug:
+    When EM returns data with actual 'amount' field (f6 field in EM API),
+    AMO must be computed using that amount directly, NOT as vol * price.
+
+    Before the fix, the code would incorrectly compute amount = vol * price
+    even when EM provided the actual amount.
+    """
+    import src.tools.market_data_poller as poller
+
+    trading_db = tmp_path / "trading.db"
+    import src.sim_trading.db as db_mod
+    db_patcher = patch.object(db_mod, "_db_path_override", str(trading_db))
+
+    write_args: dict = {}
+
+    def capture_write(services, ts, date_str):
+        write_args["services"] = services
+
+    # EM returns stock with actual amount=5e7 (50M yuan) AND vol*price would be 1e7
+    # This proves AMO uses actual amount, not vol*price
+    def fake_realtime_fallback(symbols):
+        return ([
+            {
+                "code": "002080",
+                "name": "中材科技",
+                "price": 50.0,
+                "pct": 1.5,
+                "change": 0.75,
+                "volume": 1000000,   # vol = 1M
+                "amount": 50000000.0,  # actual amount = 50M (f6 from EM)
+                "amplitude": 3.0,
+                "turnover": 1.2,
+                "vol_ratio": 1.5,
+                "high": 51.0,
+                "low": 49.0,
+                "open": 49.5,
+                "prev_close": 49.25,
+            }
+        ], False)
+
+    with _config_db_patch(tmp_db), \
+         db_patcher, \
+         patch.object(poller, "_write_price_snapshots", side_effect=capture_write), \
+         patch.object(poller, "_write_market_turnover", return_value=None), \
+         patch("src.tools.market_data_poller.fetch_realtime_with_fallback", side_effect=fake_realtime_fallback), \
+         patch("src.tools.market_data_poller.fetch_realtime_yahoo", return_value=[]), \
+         patch("src.tools.market_data_poller.fetch_market_turnover", return_value={"total": 1000, "sh": 500, "sz": 500, "shIndex": 3000, "szIndex": 10000, "shPct": 0.5, "szPct": 1.0, "verdict": "above_avg"}), \
+         patch("src.tools.market_data_poller.fetch_hk_index_data", return_value={}), \
+         patch.object(poller._futu_enricher, "enrich", return_value=({}, {})):
+        result = poller.poll_once()
+
+    assert result is True
+
+    services = write_args.get("services", [])
+    assert len(services) == 1
+
+    # The actual amount from EM (50M) should be preserved in the service record
+    # This proves AMO computation used the actual amount field, not vol*price
+    svc = services[0]
+    assert svc["amount"] == 50000000.0, \
+        f"amount field must be preserved as 50M from EM, got {svc['amount']}"
+
+    # AMO should be computed from actual 50M amount, not vol*price=50M in this case
+    # (vol=1M * price=50 = 50M, same as actual amount — need a case where they differ)
+    # Re-verify with a case where vol*price != actual amount
+    write_args.clear()
+
+    def fake_realtime_fallback_differ(tmp_symbols):
+        return ([
+            {
+                "code": "002080",
+                "name": "中材科技",
+                "price": 50.0,
+                "pct": 1.5,
+                "change": 0.75,
+                "volume": 1000000,       # vol = 1M
+                "amount": 80000000.0,    # actual amount = 80M (DIFFERS from vol*price=50M)
+                "amplitude": 3.0,
+                "turnover": 1.2,
+                "vol_ratio": 1.5,
+                "high": 51.0,
+                "low": 49.0,
+                "open": 49.5,
+                "prev_close": 49.25,
+            }
+        ], False)
+
+    with _config_db_patch(tmp_db), \
+         db_patcher, \
+         patch.object(poller, "_write_price_snapshots", side_effect=capture_write), \
+         patch.object(poller, "_write_market_turnover", return_value=None), \
+         patch("src.tools.market_data_poller.fetch_realtime_with_fallback", side_effect=fake_realtime_fallback_differ), \
+         patch("src.tools.market_data_poller.fetch_realtime_yahoo", return_value=[]), \
+         patch("src.tools.market_data_poller.fetch_market_turnover", return_value={"total": 1000, "sh": 500, "sz": 500, "shIndex": 3000, "szIndex": 10000, "shPct": 0.5, "szPct": 1.0, "verdict": "above_avg"}), \
+         patch("src.tools.market_data_poller.fetch_hk_index_data", return_value={}), \
+         patch.object(poller._futu_enricher, "enrich", return_value=({}, {})):
+        poller.poll_once()
+
+    services = write_args.get("services", [])
+    assert len(services) == 1
+    svc = services[0]
+    # If bug existed: amount would be vol*price = 1M*50 = 50M
+    # After fix: amount should be actual EM amount = 80M
+    assert svc["amount"] == 80000000.0, \
+        f"AMO must use actual EM amount=80M, not vol*price=50M. Got {svc['amount']}"

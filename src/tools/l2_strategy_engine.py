@@ -3119,7 +3119,7 @@ class L2StrategyEngine:
 
         if not self._is_port_open():
             self._last_fail_time = time.time()
-            logger.debug("OpenD not running, L2 strategy engine skipped")
+            logger.warning("L2 Strategy Engine: OpenD port not reachable at %s:%s", self._host, self._port)
             return False
 
         try:
@@ -3734,6 +3734,97 @@ class L2StrategyEngine:
             },
         }
 
+    # ── Degraded mode: Futu unavailable ───────────────────────────────────────
+
+    def _poll_degraded(self) -> tuple[list[dict], dict]:
+        """ degraded mode: Futu OpenD unavailable.
+
+        Restores last known session state from DB (if any) and marks it stale
+        so downstream consumers know L2 data is old. Returns empty signals
+        (no trading signals should be produced when data is stale).
+        """
+        logger.warning(
+            "L2 Strategy Engine: Futu OpenD unavailable, entering degraded mode"
+        )
+
+        # Try to restore last known session from DB for continuity
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        session_snapshot: dict = {}
+
+        try:
+            from src.sim_trading.db import get_connection
+
+            conn = get_connection()
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT code, session_json FROM session_snapshots
+                    WHERE date = ?
+                      AND ts = (
+                          SELECT MAX(ts) FROM session_snapshots ss
+                          WHERE ss.date = session_snapshots.date
+                            AND ss.code = session_snapshots.code
+                      )
+                    """,
+                    (today_str,),
+                ).fetchall()
+            finally:
+                conn.close()
+
+            for code, session_json in rows:
+                if code not in self._hk_holdings:
+                    continue
+                try:
+                    ctx = json.loads(session_json)
+                    if not isinstance(ctx, dict):
+                        continue
+                    # Build a stale snapshot entry (direction/score from DB,
+                    # marked stale so consumers know data is old)
+                    tick = ctx.get("tick", {})
+                    lo = ctx.get("large_order", {})
+                    cf = ctx.get("capital_flow", {})
+
+                    session_snapshot[code] = {
+                        "direction": ctx.get("direction", "neutral"),
+                        "score": ctx.get("score", 0),
+                        "tick": {
+                            "buy_vol": int(tick.get("buy_vol", 0)),
+                            "sell_vol": int(tick.get("sell_vol", 0)),
+                            "imbalance": float(tick.get("imbalance", 0)),
+                            "direction_score": int(tick.get("direction_score", 0)),
+                        },
+                        "large_order": {
+                            "buy_count": int(lo.get("buy_count", 0)),
+                            "sell_count": int(lo.get("sell_count", 0)),
+                            "buy_amount": float(lo.get("buy_amount", 0.0)),
+                            "sell_amount": float(lo.get("sell_amount", 0.0)),
+                            "net_amount": float(lo.get("net_amount", 0.0)),
+                            "direction_score": int(lo.get("direction_score", 0)),
+                            "orders": lo.get("orders", []),
+                        },
+                        "capital_flow": {
+                            "main_net_inflow": float(cf.get("main_net_inflow", 0)),
+                            "main_net_inflow_pct": float(cf.get("main_net_inflow_pct", 0)),
+                            "direction_score": int(cf.get("direction_score", 0)),
+                        },
+                        "last_seq": int(ctx.get("last_seq", 0)),
+                        "warmed_up": bool(ctx.get("warmed_up", False)),
+                        "stale": True,  # Mark as stale for downstream consumers
+                    }
+                except Exception:
+                    continue
+
+            if session_snapshot:
+                logger.info(
+                    "L2 degraded: restored stale session for %d codes from DB",
+                    len(session_snapshot),
+                )
+        except Exception as e:
+            logger.warning("L2 degraded: failed to restore session from DB: %s", e)
+
+        # No signals in degraded mode — don't produce fake L2 signals
+        return [], session_snapshot
+
     # ── Main detection loop ──
 
     def poll_once(self) -> tuple[list[dict], dict]:
@@ -3745,7 +3836,7 @@ class L2StrategyEngine:
             session_snapshot: {code: {direction, score, tick, large_order, capital_flow}}
         """
         if not self.connect():
-            return [], {}
+            return self._poll_degraded()
 
         self._subscribe()
 
