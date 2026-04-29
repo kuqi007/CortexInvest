@@ -24,6 +24,7 @@ CONFIG_SCHEMA = """
 CREATE TABLE IF NOT EXISTS monitor_watchlist (
     symbol TEXT PRIMARY KEY,
     name TEXT NOT NULL,
+    alias TEXT,
     list_type TEXT NOT NULL CHECK (list_type IN ('holding', 'watching')),
     cost REAL,
     shares INTEGER,
@@ -34,6 +35,7 @@ CREATE TABLE IF NOT EXISTS monitor_watchlist (
     tags TEXT DEFAULT '[]',
     watch_price REAL,
     watch_price_date TEXT,
+    pin_order INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
@@ -44,6 +46,13 @@ CREATE TABLE IF NOT EXISTS monitor_settings (
     key TEXT PRIMARY KEY,
     value REAL NOT NULL,
     updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS alert_rules (
+    symbol TEXT PRIMARY KEY,
+    above REAL,
+    below REAL,
+    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS tag_meta (
@@ -480,7 +489,8 @@ CREATE TABLE IF NOT EXISTS trade_plans (
     status TEXT NOT NULL CHECK (status IN ('active', 'paused')),
     scope TEXT NOT NULL DEFAULT 'real',
     created_at TEXT NOT NULL,
-    orders_json TEXT NOT NULL
+    orders_json TEXT NOT NULL,
+    updated_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_trade_plans_symbol ON trade_plans(symbol);
 CREATE INDEX IF NOT EXISTS idx_trade_plans_status ON trade_plans(status);
@@ -609,7 +619,7 @@ def init_config_db() -> None:
     """Create config tables if they don't exist."""
     conn = get_config_connection()
     conn.executescript(CONFIG_SCHEMA)
-    # Migration: add tags, watch_price, watch_price_date columns to monitor_watchlist
+    # Migration: add optional columns to monitor_watchlist
     existing_cols = {
         row[1]
         for row in conn.execute("PRAGMA table_info(monitor_watchlist)").fetchall()
@@ -617,6 +627,11 @@ def init_config_db() -> None:
     if "tags" not in existing_cols:
         try:
             conn.execute("ALTER TABLE monitor_watchlist ADD COLUMN tags TEXT DEFAULT '[]'")
+        except sqlite3.OperationalError:
+            pass
+    if "alias" not in existing_cols:
+        try:
+            conn.execute("ALTER TABLE monitor_watchlist ADD COLUMN alias TEXT")
         except sqlite3.OperationalError:
             pass
     if "watch_price" not in existing_cols:
@@ -627,6 +642,13 @@ def init_config_db() -> None:
     if "watch_price_date" not in existing_cols:
         try:
             conn.execute("ALTER TABLE monitor_watchlist ADD COLUMN watch_price_date TEXT")
+        except sqlite3.OperationalError:
+            pass
+    if "pin_order" not in existing_cols:
+        try:
+            conn.execute(
+                "ALTER TABLE monitor_watchlist ADD COLUMN pin_order INTEGER NOT NULL DEFAULT 0"
+            )
         except sqlite3.OperationalError:
             pass
     # Migration: add parent column to tag_meta if missing
@@ -701,6 +723,16 @@ def init_trading_db() -> None:
             conn.execute("ALTER TABLE price_snapshots ADD COLUMN main_net_inflow_pct REAL")
         except sqlite3.OperationalError:
             pass
+    try:
+        conn.execute("SELECT updated_at FROM trade_plans LIMIT 1")
+    except sqlite3.OperationalError:
+        try:
+            conn.execute("ALTER TABLE trade_plans ADD COLUMN updated_at INTEGER")
+        except sqlite3.OperationalError:
+            pass
+    conn.execute(
+        "UPDATE trade_plans SET updated_at = strftime('%s', 'now') WHERE updated_at IS NULL"
+    )
     conn.commit()
     conn.close()
 

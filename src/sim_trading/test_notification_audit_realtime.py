@@ -34,5 +34,7 @@ def test_dip_buy_terminal_notification_records_audit(tmp_path, monkeypatch):
     assert len(rows) == 1
     payload = json.loads(rows[0]["payload_json"])
     assert payload["after"]["channel"] == "terminal"
+    assert "message" not in payload["after"]
+    assert payload["after"]["message_hash"].startswith("sha256:")
     assert payload["after"]["metadata"]["kind"] == "dip_buy"
     assert payload["after"]["metadata"]["symbol"] == "HK00700"

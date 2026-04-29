@@ -33,6 +33,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -53,6 +54,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.tools.api import get_stock_prefix
 from src.tools.stock_data_fetcher import AIDC_WATCHLIST
+from src.utils.audit_log import insert_config_outbox
+from src.utils.audit_system import build_audit_event_v2, make_actor
 from src.utils.notification_audit import record_notification_sent
 
 EM_UT = "fa5fd1943c7b386f172d6893dbfba10b"
@@ -102,6 +105,79 @@ def _get_db_conn() -> sqlite3.Connection:
     return get_config_connection()
 
 
+def _rows_to_dicts(rows: list[sqlite3.Row]) -> list[dict]:
+    return [dict(row) for row in rows]
+
+
+def _parse_tags_for_audit(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    try:
+        tags = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return []
+    if not isinstance(tags, list):
+        return []
+    return [str(tag) for tag in tags]
+
+
+def _read_config_audit_snapshot(conn: sqlite3.Connection) -> dict:
+    watchlist = []
+    for row in _rows_to_dicts(
+        conn.execute(
+            """
+            SELECT symbol, name, alias, list_type, cost, shares, lot, hidden, star,
+                   dip_buy, tags, watch_price, watch_price_date, pin_order
+            FROM monitor_watchlist
+            ORDER BY symbol
+            """
+        ).fetchall()
+    ):
+        row["tags"] = _parse_tags_for_audit(row.get("tags"))
+        watchlist.append(row)
+    settings = _rows_to_dicts(
+        conn.execute(
+            "SELECT key, value FROM monitor_settings ORDER BY key"
+        ).fetchall()
+    )
+    return {"watchlist": watchlist, "settings": settings}
+
+
+def _read_alerts_audit_snapshot(conn: sqlite3.Connection) -> dict:
+    alerts = _rows_to_dicts(
+        conn.execute(
+            "SELECT symbol, above, below FROM alert_rules ORDER BY symbol"
+        ).fetchall()
+    )
+    return {"alerts": alerts}
+
+
+def _record_config_audit(
+    conn: sqlite3.Connection,
+    *,
+    action: str,
+    entity: str,
+    key: str,
+    before: dict | None,
+    after: dict | None,
+    metadata: dict | None = None,
+) -> None:
+    event = build_audit_event_v2(
+        event_id=uuid.uuid4().hex,
+        ts_ms=int(time.time() * 1000),
+        source="stock_monitor",
+        actor=make_actor(actor_type="system", actor_id="stock_monitor"),
+        action=action,
+        entity=entity,
+        key=key,
+        db_name="config.db",
+        before=before,
+        after=after,
+        metadata=metadata or {},
+    )
+    insert_config_outbox(conn, event)
+
+
 def save_config(config: dict):
     """保存配置到 SQLite DB（monitor_watchlist + monitor_settings）"""
     conn = _get_db_conn()
@@ -111,9 +187,11 @@ def save_config(config: dict):
 
     try:
         conn.execute("BEGIN")
+        before = _read_config_audit_snapshot(conn)
         # Upsert watchlist
         for symbol, entry in watchlist.items():
             name = entry.get("name", symbol)
+            alias = entry.get("alias")
             list_type = entry.get("type", "watching")
             cost = entry.get("cost")
             shares = entry.get("shares")
@@ -124,16 +202,18 @@ def save_config(config: dict):
             tags = json.dumps(entry.get("tags", []))
             watch_price = entry.get("watch_price")
             watch_price_date = entry.get("watch_price_date")
+            pin_order = int(entry.get("pin_order", 0) or 0)
 
             conn.execute(
                 """
                 INSERT INTO monitor_watchlist (
-                    symbol, name, list_type, cost, shares, lot,
+                    symbol, name, alias, list_type, cost, shares, lot,
                     hidden, star, dip_buy, tags, watch_price, watch_price_date,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    pin_order, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(symbol) DO UPDATE SET
                     name=excluded.name,
+                    alias=excluded.alias,
                     list_type=excluded.list_type,
                     cost=excluded.cost,
                     shares=excluded.shares,
@@ -144,12 +224,13 @@ def save_config(config: dict):
                     tags=excluded.tags,
                     watch_price=excluded.watch_price,
                     watch_price_date=excluded.watch_price_date,
+                    pin_order=excluded.pin_order,
                     updated_at=excluded.updated_at
                 """,
                 (
-                    symbol, name, list_type, cost, shares, lot,
+                    symbol, name, alias, list_type, cost, shares, lot,
                     hidden, star, dip_buy, tags, watch_price, watch_price_date,
-                    now, now,
+                    pin_order, now, now,
                 ),
             )
 
@@ -176,6 +257,19 @@ def save_config(config: dict):
                 (key, float(value), now),
             )
 
+        after = _read_config_audit_snapshot(conn)
+        _record_config_audit(
+            conn,
+            action="replace",
+            entity="monitor_config",
+            key="config",
+            before=before,
+            after=after,
+            metadata={
+                "watchlist_count": len(watchlist),
+                "settings_count": len(settings),
+            },
+        )
         conn.commit()
     except Exception:
         conn.rollback()
@@ -211,6 +305,7 @@ def save_alerts(alerts: dict):
     now = int(time.time())
     try:
         conn.execute("BEGIN")
+        before = _read_alerts_audit_snapshot(conn)
         for symbol, entry in alerts.items():
             above = entry.get("above")
             below = entry.get("below")
@@ -236,6 +331,16 @@ def save_alerts(alerts: dict):
         else:
             conn.execute("DELETE FROM alert_rules")
 
+        after = _read_alerts_audit_snapshot(conn)
+        _record_config_audit(
+            conn,
+            action="replace",
+            entity="alert_rules",
+            key="alerts",
+            before=before,
+            after=after,
+            metadata={"alert_count": len(alerts)},
+        )
         conn.commit()
     except Exception:
         conn.rollback()

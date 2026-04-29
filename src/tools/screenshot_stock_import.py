@@ -14,9 +14,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -36,7 +38,21 @@ except ImportError:
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.sim_trading.db import get_config_connection
+from src.sim_trading.db import get_config_connection, init_config_db
+from src.utils.audit_log import insert_config_outbox
+from src.utils.audit_system import build_audit_event_v2, make_actor
+
+
+def _parse_tags_for_audit(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    try:
+        tags = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return []
+    if not isinstance(tags, list):
+        return []
+    return [str(tag) for tag in tags]
 
 def extract_text_from_image(image_path: Path) -> str:
     """从图片中提取文本"""
@@ -141,77 +157,137 @@ def import_stocks_to_db(stocks: list[dict[str, Any]], force_type: str | None = N
     Returns:
         (added_count, updated_count)
     """
+    init_config_db()
     conn = get_config_connection()
     now_ts = int(time.time())
     
     added = 0
     updated = 0
     
-    for stock in stocks:
-        code = stock.get('code')
-        name = stock.get('name', code)
-        
-        if not code:
-            continue
-        
-        # 确定类型
-        is_holding = stock.get('is_holding', False)
-        if force_type == 'holding':
-            is_holding = True
-        elif force_type == 'watchlist':
-            is_holding = False
-        
-        list_type = 'holding' if is_holding else 'watching'
-        
-        # 检查是否已存在
-        cursor = conn.execute(
-            'SELECT symbol FROM monitor_watchlist WHERE symbol = ?',
-            (code,)
-        )
-        existing = cursor.fetchone()
-        
-        if existing:
-            # 更新现有记录
-            if is_holding and 'cost' in stock:
-                conn.execute(
-                    '''UPDATE monitor_watchlist 
-                       SET name = ?, list_type = 'holding', cost = ?, shares = ?, 
-                           updated_at = ?, star = 1
-                       WHERE symbol = ?''',
-                    (name, stock.get('cost'), stock.get('shares', 0), now_ts, code)
-                )
-                print(f'  🔄 {code} ({name}) -> 更新持仓: 成本 {stock.get("cost")}, 股数 {stock.get("shares", 0)}')
+    codes = [str(stock.get("code")) for stock in stocks if stock.get("code")]
+
+    def snapshot() -> list[dict[str, Any]]:
+        if not codes:
+            return []
+        placeholders = ",".join("?" * len(codes))
+        rows = conn.execute(
+            f"""
+            SELECT symbol, name, list_type, cost, shares, hidden, star, dip_buy,
+                   alias, lot, tags, watch_price, watch_price_date, pin_order,
+                   created_at, updated_at
+            FROM monitor_watchlist
+            WHERE symbol IN ({placeholders})
+            ORDER BY symbol
+            """,
+            tuple(codes),
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["tags"] = _parse_tags_for_audit(item.get("tags"))
+            result.append(item)
+        return result
+
+    try:
+        conn.execute("BEGIN")
+        before = snapshot()
+        for stock in stocks:
+            code = stock.get('code')
+            name = stock.get('name', code)
+            
+            if not code:
+                continue
+            
+            # 确定类型
+            is_holding = stock.get('is_holding', False)
+            if force_type == 'holding':
+                is_holding = True
+            elif force_type == 'watchlist':
+                is_holding = False
+            
+            list_type = 'holding' if is_holding else 'watching'
+            
+            # 检查是否已存在
+            cursor = conn.execute(
+                'SELECT symbol FROM monitor_watchlist WHERE symbol = ?',
+                (code,)
+            )
+            existing = cursor.fetchone()
+            
+            if existing:
+                # 更新现有记录
+                if is_holding and 'cost' in stock:
+                    shares = stock.get('shares')
+                    if shares is None:
+                        raise ValueError(f'{code} holding import missing shares')
+                    conn.execute(
+                        '''UPDATE monitor_watchlist 
+                           SET name = ?, list_type = 'holding', cost = ?, shares = ?, 
+                               updated_at = ?, star = 1
+                           WHERE symbol = ?''',
+                        (name, stock.get('cost'), shares, now_ts, code)
+                    )
+                    print(f'  🔄 {code} ({name}) -> 更新持仓: 成本 {stock.get("cost")}, 股数 {shares}')
+                else:
+                    conn.execute(
+                        '''UPDATE monitor_watchlist 
+                           SET name = ?, star = 1, updated_at = ?
+                           WHERE symbol = ?''',
+                        (name, now_ts, code)
+                    )
+                    print(f'  ⭐ {code} ({name}) -> 更新为特别关注')
+                updated += 1
             else:
-                conn.execute(
-                    '''UPDATE monitor_watchlist 
-                       SET name = ?, star = 1, updated_at = ?
-                       WHERE symbol = ?''',
-                    (name, now_ts, code)
-                )
-                print(f'  ⭐ {code} ({name}) -> 更新为特别关注')
-            updated += 1
-        else:
-            # 插入新记录
-            if is_holding and 'cost' in stock:
-                conn.execute(
-                    '''INSERT INTO monitor_watchlist 
-                       (symbol, name, list_type, cost, shares, hidden, star, dip_buy, tags, created_at, updated_at)
-                       VALUES (?, ?, 'holding', ?, ?, 0, 1, 0, '[]', ?, ?)''',
-                    (code, name, stock.get('cost'), stock.get('shares', 0), now_ts, now_ts)
-                )
-                print(f'  ✅ {code} ({name}) -> 添加持仓: 成本 {stock.get("cost")}, 股数 {stock.get("shares", 0)}')
-            else:
-                conn.execute(
-                    '''INSERT INTO monitor_watchlist 
-                       (symbol, name, list_type, hidden, star, dip_buy, tags, created_at, updated_at)
-                       VALUES (?, ?, 'watching', 0, 1, 0, '[]', ?, ?)''',
-                    (code, name, now_ts, now_ts)
-                )
-                print(f'  ✅ {code} ({name}) -> 添加特别关注')
-            added += 1
-    
-    conn.commit()
-    conn.close()
+                # 插入新记录
+                if is_holding and 'cost' in stock:
+                    shares = stock.get('shares')
+                    if shares is None:
+                        raise ValueError(f'{code} holding import missing shares')
+                    conn.execute(
+                        '''INSERT INTO monitor_watchlist 
+                           (symbol, name, list_type, cost, shares, hidden, star, dip_buy, tags, created_at, updated_at)
+                           VALUES (?, ?, 'holding', ?, ?, 0, 1, 0, '[]', ?, ?)''',
+                        (code, name, stock.get('cost'), shares, now_ts, now_ts)
+                    )
+                    print(f'  ✅ {code} ({name}) -> 添加持仓: 成本 {stock.get("cost")}, 股数 {shares}')
+                else:
+                    conn.execute(
+                        '''INSERT INTO monitor_watchlist 
+                           (symbol, name, list_type, hidden, star, dip_buy, tags, created_at, updated_at)
+                           VALUES (?, ?, 'watching', 0, 1, 0, '[]', ?, ?)''',
+                        (code, name, now_ts, now_ts)
+                    )
+                    print(f'  ✅ {code} ({name}) -> 添加特别关注')
+                added += 1
+
+        if added or updated:
+            after = snapshot()
+            event = build_audit_event_v2(
+                event_id=uuid.uuid4().hex,
+                ts_ms=int(time.time() * 1000),
+                source="screenshot_stock_import",
+                actor=make_actor(actor_type="system", actor_id="screenshot_stock_import"),
+                action="import",
+                entity="monitor_watchlist",
+                key=",".join(codes),
+                db_name="config.db",
+                before={"watchlist": before},
+                after={"watchlist": after},
+                metadata={
+                    "force_type": force_type,
+                    "added": added,
+                    "updated": updated,
+                    "input_count": len(stocks),
+                },
+            )
+            insert_config_outbox(conn, event)
+
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
     
     return added, updated
 

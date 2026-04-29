@@ -1,4 +1,5 @@
 import json
+import hashlib
 
 import src.sim_trading.db as db
 from src.tools.audit_flush import flush_outbox_once
@@ -29,9 +30,19 @@ def test_record_notification_sent_writes_trading_outbox(tmp_path, monkeypatch):
     assert row["entity"] == "notification"
     assert row["key"] == "terminal:HK00700"
     payload = json.loads(row["payload_json"])
+    assert payload["schema_version"] == 2
+    assert payload["actor"] == {"type": "system", "id": "notification"}
     assert payload["after"]["channel"] == "terminal"
-    assert payload["after"]["title"] == "CI Pipeline Alert"
-    assert payload["after"]["message"] == "HK00700 alert"
+    assert payload["after"]["title_hash"] == (
+        "sha256:" + hashlib.sha256("CI Pipeline Alert".encode()).hexdigest()
+    )
+    assert payload["after"]["title_len"] == len("CI Pipeline Alert")
+    assert payload["after"]["message_hash"] == (
+        "sha256:" + hashlib.sha256("HK00700 alert".encode()).hexdigest()
+    )
+    assert payload["after"]["message_len"] == len("HK00700 alert")
+    assert "title" not in payload["after"]
+    assert "message" not in payload["after"]
     assert payload["after"]["metadata"] == {"symbol": "HK00700", "kind": "threshold"}
 
 
@@ -55,4 +66,46 @@ def test_notification_audit_flushes_to_trading_jsonl(tmp_path, monkeypatch):
     rows = [json.loads(line) for line in jsonl_path.read_text().splitlines()]
     assert rows[0]["source"] == "notification"
     assert rows[0]["after"]["channel"] == "feishu"
+    assert "message" not in rows[0]["after"]
+    assert rows[0]["after"]["message_hash"].startswith("sha256:")
     assert rows[0]["hash"].startswith("sha256:")
+
+
+def test_notification_audit_rejects_nested_sensitive_metadata(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "_db_path_override", str(tmp_path / "trading.db"))
+    monkeypatch.setattr(db, "_config_db_path_override", str(tmp_path / "config.db"))
+    db.init_trading_db()
+
+    try:
+        record_notification_sent(
+            channel="terminal",
+            title="Alert",
+            message="body",
+            metadata={"name": [{"api_token": "should-not-be-recorded"}]},
+            ts_ms=1777376520000,
+        )
+    except ValueError as exc:
+        assert "sensitive audit field" in str(exc)
+    else:
+        raise AssertionError("expected sensitive metadata rejection")
+
+
+def test_notification_audit_drops_unapproved_metadata_keys(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "_db_path_override", str(tmp_path / "trading.db"))
+    monkeypatch.setattr(db, "_config_db_path_override", str(tmp_path / "config.db"))
+    db.init_trading_db()
+
+    record_notification_sent(
+        channel="terminal",
+        title="Alert",
+        message="body",
+        metadata={"symbol": "HK00700", "url": "https://example.test/?x=secret"},
+        ts_ms=1777376520000,
+    )
+
+    conn = db.get_connection()
+    row = conn.execute("SELECT payload_json FROM trading_audit_outbox").fetchone()
+    conn.close()
+
+    payload = json.loads(row["payload_json"])
+    assert payload["after"]["metadata"] == {"symbol": "HK00700"}

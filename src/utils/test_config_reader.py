@@ -13,14 +13,15 @@ def config_db(tmp_path, monkeypatch):
     conn.execute(
         """
         INSERT INTO monitor_watchlist (
-            symbol, name, list_type, cost, shares, lot, hidden, star,
-            dip_buy, tags, created_at, updated_at
+            symbol, name, alias, list_type, cost, shares, lot, hidden, star,
+            dip_buy, tags, pin_order, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             "HK09988",
             "阿里巴巴",
+            "BABA",
             "holding",
             88.8,
             100,
@@ -29,6 +30,7 @@ def config_db(tmp_path, monkeypatch):
             1,
             0,
             '["AI"]',
+            7,
             1777376520000,
             1777376520000,
         ),
@@ -49,6 +51,8 @@ def test_read_monitor_config_reads_db_without_json_fallback(config_db):
     assert cfg["watchlist"]["HK09988"]["type"] == "holding"
     assert cfg["watchlist"]["HK09988"]["star"] is True
     assert cfg["watchlist"]["HK09988"]["tags"] == ["AI"]
+    assert cfg["watchlist"]["HK09988"]["alias"] == "BABA"
+    assert cfg["watchlist"]["HK09988"]["pin_order"] == 7
     assert cfg["settings"]["poll_interval"] == 30
 
 

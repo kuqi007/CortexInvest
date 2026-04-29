@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { randomUUID } from "crypto";
 import { openTradingDb, openConfigDb } from "../../lib/db";
+import { buildAuditEventV2, insertTradingAuditOutbox, makeActor } from "../../lib/audit";
 
 /* ── Types ── */
 
@@ -34,6 +36,16 @@ interface PlanPosition {
   name: string;
 }
 
+type PlanRow = {
+  id: string;
+  name: string;
+  symbol: string;
+  status: string;
+  scope: string | null;
+  created_at: string;
+  orders_json: string;
+};
+
 /* ── DB helpers ── */
 
 const VALID_STATUSES = new Set(["active", "paused"]);
@@ -60,7 +72,7 @@ function normalizeScope(scope: unknown): TradePlan["scope"] {
     : "real";
 }
 
-function rowToPlan(row: { id: string; name: string; symbol: string; status: string; scope: string | null; created_at: string; orders_json: string }): TradePlan {
+function rowToPlan(row: PlanRow): TradePlan {
   return {
     name: row.name,
     symbol: row.symbol,
@@ -71,6 +83,11 @@ function rowToPlan(row: { id: string; name: string; symbol: string; status: stri
   };
 }
 
+function rowToAudit(row: PlanRow | undefined): Record<string, unknown> | null {
+  if (!row) return null;
+  return { id: row.id, ...rowToPlan(row) };
+}
+
 function ensureScopeColumn(db: ReturnType<typeof openTradingDb>) {
   try {
     db.prepare("SELECT scope FROM trade_plans LIMIT 1").get();
@@ -79,6 +96,85 @@ function ensureScopeColumn(db: ReturnType<typeof openTradingDb>) {
       db.prepare("ALTER TABLE trade_plans ADD COLUMN scope TEXT NOT NULL DEFAULT 'real'").run();
     } catch { /* ignore */ }
   }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS trading_audit_outbox (
+      event_id TEXT PRIMARY KEY,
+      schema_version INTEGER NOT NULL DEFAULT 1,
+      correlation_id TEXT,
+      ts TEXT NOT NULL,
+      ts_ms INTEGER NOT NULL,
+      source TEXT NOT NULL,
+      action TEXT NOT NULL,
+      entity TEXT NOT NULL,
+      key TEXT NOT NULL,
+      db TEXT NOT NULL DEFAULT 'trading.db' CHECK (db = 'trading.db'),
+      payload_json TEXT NOT NULL,
+      flushed_at TEXT,
+      flushed_at_ms INTEGER,
+      flush_id TEXT,
+      flush_started_at_ms INTEGER,
+      CHECK (length(trim(payload_json)) > 0)
+    );
+  `);
+  const auditCols = new Set(
+    (db.pragma("table_info(trading_audit_outbox)") as { name: string }[]).map((c) => c.name),
+  );
+  if (!auditCols.has("flushed_at")) {
+    db.exec(`ALTER TABLE trading_audit_outbox ADD COLUMN flushed_at TEXT`);
+  }
+  if (!auditCols.has("flushed_at_ms")) {
+    db.exec(`ALTER TABLE trading_audit_outbox ADD COLUMN flushed_at_ms INTEGER`);
+  }
+  if (!auditCols.has("flush_id")) {
+    db.exec(`ALTER TABLE trading_audit_outbox ADD COLUMN flush_id TEXT`);
+  }
+  if (!auditCols.has("flush_started_at_ms")) {
+    db.exec(`ALTER TABLE trading_audit_outbox ADD COLUMN flush_started_at_ms INTEGER`);
+  }
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_trading_audit_outbox_pending
+      ON trading_audit_outbox(ts_ms, event_id)
+      WHERE flushed_at IS NULL;
+    CREATE INDEX IF NOT EXISTS idx_trading_audit_outbox_correlation
+      ON trading_audit_outbox(correlation_id, ts_ms)
+      WHERE correlation_id IS NOT NULL;
+  `);
+}
+
+function readPlanRow(db: ReturnType<typeof openTradingDb>, id: string): PlanRow | undefined {
+  return db
+    .prepare("SELECT id, name, symbol, status, scope, created_at, orders_json FROM trade_plans WHERE id = ?")
+    .get(id) as PlanRow | undefined;
+}
+
+function recordTradePlanAudit(
+  db: ReturnType<typeof openTradingDb>,
+  args: {
+    action: string;
+    key: string;
+    before: Record<string, unknown> | null;
+    after: Record<string, unknown> | null;
+    metadata?: Record<string, unknown>;
+  },
+) {
+  const nowMs = Date.now();
+  insertTradingAuditOutbox(
+    db,
+    buildAuditEventV2({
+      eventId: randomUUID(),
+      tsMs: nowMs,
+      correlationId: randomUUID(),
+      source: "api_trade_plans",
+      actor: makeActor({ type: "user", id: "local-ui" }),
+      action: args.action,
+      entity: "trade_plan",
+      key: args.key,
+      dbName: "trading.db",
+      before: args.before,
+      after: args.after,
+      metadata: args.metadata,
+    }),
+  );
 }
 
 /* ── GET ── */
@@ -202,18 +298,26 @@ export async function POST(request: Request) {
           }
         }
 
-        db.prepare(
-          `INSERT INTO trade_plans (id, name, symbol, status, scope, created_at, orders_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
-        ).run(
-          id,
-          plan.name,
-          plan.symbol,
-          status,
-          scope,
-          plan.created_at || new Date().toISOString().slice(0, 10),
-          JSON.stringify(orders)
-        );
+        db.transaction(() => {
+          db.prepare(
+            `INSERT INTO trade_plans (id, name, symbol, status, scope, created_at, orders_json)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`
+          ).run(
+            id,
+            plan.name,
+            plan.symbol,
+            status,
+            scope,
+            plan.created_at || new Date().toISOString().slice(0, 10),
+            JSON.stringify(orders)
+          );
+          recordTradePlanAudit(db, {
+            action: "create",
+            key: id,
+            before: null,
+            after: rowToAudit(readPlanRow(db, id)),
+          });
+        })();
 
         return NextResponse.json({ success: true, message: `Created plan ${id}` });
       }
@@ -251,9 +355,17 @@ export async function POST(request: Request) {
 
         const newScope = updates.scope !== undefined ? normalizeScope(updates.scope) : plan.scope;
 
-        db.prepare(
-          `UPDATE trade_plans SET name = ?, status = ?, scope = ?, orders_json = ?, updated_at = strftime('%s', 'now') WHERE id = ?`
-        ).run(newName, newStatus, newScope, JSON.stringify(newOrders), id);
+        db.transaction(() => {
+          db.prepare(
+            `UPDATE trade_plans SET name = ?, status = ?, scope = ?, orders_json = ?, updated_at = strftime('%s', 'now') WHERE id = ?`
+          ).run(newName, newStatus, newScope, JSON.stringify(newOrders), id);
+          recordTradePlanAudit(db, {
+            action: "update",
+            key: id,
+            before: rowToAudit(row),
+            after: rowToAudit(readPlanRow(db, id)),
+          });
+        })();
 
         return NextResponse.json({ success: true, message: `Updated plan ${id}` });
       }
@@ -261,30 +373,46 @@ export async function POST(request: Request) {
       /* ── delete ── */
       case "delete": {
         const { id } = body as { id: string };
-        const existing = db.prepare("SELECT 1 FROM trade_plans WHERE id = ?").get(id);
+        const existing = readPlanRow(db, id);
         if (!existing) {
           return NextResponse.json({ success: false, message: `Plan ${id} not found` }, { status: 400 });
         }
-        db.prepare("DELETE FROM trade_plans WHERE id = ?").run(id);
+        db.transaction(() => {
+          db.prepare("DELETE FROM trade_plans WHERE id = ?").run(id);
+          recordTradePlanAudit(db, {
+            action: "delete",
+            key: id,
+            before: rowToAudit(existing),
+            after: null,
+          });
+        })();
         return NextResponse.json({ success: true, message: `Deleted plan ${id}` });
       }
 
       /* ── toggle (active/paused) ── */
       case "toggle": {
         const { id } = body as { id: string };
-        const row = db.prepare("SELECT status FROM trade_plans WHERE id = ?").get(id) as { status: string } | undefined;
+        const row = readPlanRow(db, id);
         if (!row) {
           return NextResponse.json({ success: false, message: `Plan ${id} not found` }, { status: 400 });
         }
         const newStatus = row.status === "active" ? "paused" : "active";
-        db.prepare("UPDATE trade_plans SET status = ?, updated_at = strftime('%s', 'now') WHERE id = ?").run(newStatus, id);
+        db.transaction(() => {
+          db.prepare("UPDATE trade_plans SET status = ?, updated_at = strftime('%s', 'now') WHERE id = ?").run(newStatus, id);
+          recordTradePlanAudit(db, {
+            action: "toggle",
+            key: id,
+            before: rowToAudit(row),
+            after: rowToAudit(readPlanRow(db, id)),
+          });
+        })();
         return NextResponse.json({ success: true, message: `${newStatus === "active" ? "Activated" : "Paused"} plan ${id}` });
       }
 
       /* ── reset (un-trigger an order) ── */
       case "reset": {
         const { id, order_id } = body as { id: string; order_id: string };
-        const row = db.prepare("SELECT orders_json FROM trade_plans WHERE id = ?").get(id) as { orders_json: string } | undefined;
+        const row = readPlanRow(db, id);
         if (!row) {
           return NextResponse.json({ success: false, message: `Plan ${id} not found` }, { status: 400 });
         }
@@ -295,10 +423,19 @@ export async function POST(request: Request) {
         }
         order.triggered = false;
         order.triggered_at = null;
-        db.prepare("UPDATE trade_plans SET orders_json = ?, updated_at = strftime('%s', 'now') WHERE id = ?").run(
-          JSON.stringify(orders),
-          id
-        );
+        db.transaction(() => {
+          db.prepare("UPDATE trade_plans SET orders_json = ?, updated_at = strftime('%s', 'now') WHERE id = ?").run(
+            JSON.stringify(orders),
+            id
+          );
+          recordTradePlanAudit(db, {
+            action: "reset_order",
+            key: id,
+            before: rowToAudit(row),
+            after: rowToAudit(readPlanRow(db, id)),
+            metadata: { order_id },
+          });
+        })();
         return NextResponse.json({ success: true, message: `Reset order ${order_id} in plan ${id}` });
       }
 

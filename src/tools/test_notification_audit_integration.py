@@ -34,6 +34,8 @@ def test_notify_records_terminal_audit_only_on_success(tmp_path, monkeypatch):
     assert len(rows) == 1
     payload = json.loads(rows[0]["payload_json"])
     assert payload["after"]["channel"] == "terminal"
+    assert "message" not in payload["after"]
+    assert payload["after"]["message_hash"].startswith("sha256:")
     assert payload["after"]["metadata"]["symbol"] == "HK00700"
 
 
@@ -65,6 +67,8 @@ def test_feishu_send_records_audit_on_success(tmp_path, monkeypatch):
     assert len(rows) == 1
     payload = json.loads(rows[0]["payload_json"])
     assert payload["after"]["channel"] == "feishu"
+    assert "message" not in payload["after"]
+    assert payload["after"]["message_hash"].startswith("sha256:")
     assert payload["after"]["metadata"]["symbol"] == "HK00700"
 
 

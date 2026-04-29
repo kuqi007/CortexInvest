@@ -19,6 +19,7 @@ import signal
 import sqlite3
 import sys
 import time
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -28,6 +29,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.tools.stock_monitor import is_hk_symbol, notify
 from src.utils.logging_config import setup_logger
+from src.utils.audit_log import insert_trading_outbox
+from src.utils.audit_system import build_audit_event_v2, make_actor
 
 logger = setup_logger("stock_notifier")
 
@@ -1241,9 +1244,11 @@ def check_mainline_alerts() -> list[dict]:
     today_str = datetime.now().strftime("%Y-%m-%d")
 
     # tag_meta is in config.db, sector_daily is in trading.db
-    cfg_conn = get_config_connection()
-    trading_conn = get_connection()
+    cfg_conn = None
+    trading_conn = None
     try:
+        cfg_conn = get_config_connection()
+        trading_conn = get_connection()
         # Load tag indices from config DB
         tags = cfg_conn.execute(
             "SELECT tag, star, watch, baseline_value, created_at FROM tag_meta"
@@ -1354,8 +1359,10 @@ def check_mainline_alerts() -> list[dict]:
         logger.warning("check_mainline_alerts failed: %s", e)
         return []
     finally:
-        cfg_conn.close()
-        trading_conn.close()
+        if cfg_conn is not None:
+            cfg_conn.close()
+        if trading_conn is not None:
+            trading_conn.close()
 
 
 def write_alert_events(alerts: list[dict]):
@@ -2035,6 +2042,74 @@ def check_market_open_close(
 TRADING_DB_PATH = PROJECT_ROOT / "src" / "data" / "trading.db"
 
 
+def _get_trading_conn() -> sqlite3.Connection:
+    from src.sim_trading.db import get_connection, init_trading_db
+
+    init_trading_db()
+    return get_connection()
+
+
+def _read_trade_plan_audit_snapshot(
+    conn: sqlite3.Connection, plan_ids: list[str]
+) -> list[dict]:
+    if not plan_ids:
+        return []
+    placeholders = ",".join("?" * len(plan_ids))
+    rows = conn.execute(
+        f"""
+        SELECT id, name, symbol, status, scope, created_at, orders_json, updated_at
+        FROM trade_plans
+        WHERE id IN ({placeholders})
+        ORDER BY id
+        """,
+        tuple(plan_ids),
+    ).fetchall()
+    result: list[dict] = []
+    for row in rows:
+        try:
+            orders = json.loads(row["orders_json"]) if row["orders_json"] else []
+        except json.JSONDecodeError:
+            orders = []
+        result.append(
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "symbol": row["symbol"],
+                "status": row["status"],
+                "scope": row["scope"] or "real",
+                "created_at": row["created_at"],
+                "orders": orders,
+                "updated_at": row["updated_at"],
+            }
+        )
+    return result
+
+
+def _record_trade_plan_audit(
+    conn: sqlite3.Connection,
+    *,
+    action: str,
+    key: str,
+    before: dict | None,
+    after: dict | None,
+    metadata: dict | None = None,
+) -> None:
+    event = build_audit_event_v2(
+        event_id=uuid.uuid4().hex,
+        ts_ms=int(time.time() * 1000),
+        source="stock_notifier",
+        actor=make_actor(actor_type="system", actor_id="stock_notifier"),
+        action=action,
+        entity="trade_plans",
+        key=key,
+        db_name="trading.db",
+        before=before,
+        after=after,
+        metadata=metadata or {},
+    )
+    insert_trading_outbox(conn, event)
+
+
 class TradePlanEngine:
     """检查交易计划条件，触发通知 + 模拟执行。
 
@@ -2051,6 +2126,7 @@ class TradePlanEngine:
 
     def __init__(self):
         self._plans: dict = {}
+        self._pending_plan_events: list[tuple] = []
         self._consecutive_tracker: dict[
             str, dict
         ] = {}  # {plan_id: {cond_id: {"count": N, "last_date": "YYYY-MM-DD"}}}
@@ -2064,8 +2140,7 @@ class TradePlanEngine:
         """Load or reload plans from trading.db (checks updated_at for hot-reload)."""
         conn = None
         try:
-            conn = sqlite3.connect(str(TRADING_DB_PATH))
-            conn.row_factory = sqlite3.Row
+            conn = _get_trading_conn()
             # Ensure scope column exists (idempotent migration)
             try:
                 conn.execute("SELECT scope FROM trade_plans LIMIT 1")
@@ -2087,7 +2162,7 @@ class TradePlanEngine:
                 conn.close()
 
         # Use max updated_at as mtime proxy
-        mtime = max((r["updated_at"] for r in rows), default=0)
+        mtime = max((r["updated_at"] or 0 for r in rows), default=0)
         if mtime == self._last_mtime:
             return
         self._last_mtime = mtime
@@ -2113,7 +2188,7 @@ class TradePlanEngine:
         """Write plans back to trading.db trade_plans table."""
         conn = None
         try:
-            conn = sqlite3.connect(str(TRADING_DB_PATH))
+            conn = _get_trading_conn()
             now_ts = int(time.time())
             # Ensure scope column exists (idempotent migration)
             try:
@@ -2123,6 +2198,17 @@ class TradePlanEngine:
                     conn.execute("ALTER TABLE trade_plans ADD COLUMN scope TEXT NOT NULL DEFAULT 'real'")
                 except sqlite3.OperationalError:
                     pass
+            plan_ids = sorted(self._plans.keys())
+            before = _read_trade_plan_audit_snapshot(conn, plan_ids)
+            conn.execute("BEGIN")
+            pending_events = getattr(self, "_pending_plan_events", [])
+            for event in pending_events:
+                conn.execute(
+                    "INSERT OR IGNORE INTO trade_plan_events "
+                    "(ts, date, plan_id, event_type, condition_id, label, price, shares, message) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    event,
+                )
             for plan_id, plan in self._plans.items():
                 conn.execute(
                     "INSERT OR REPLACE INTO trade_plans (id, name, symbol, status, scope, created_at, orders_json, updated_at) "
@@ -2138,9 +2224,23 @@ class TradePlanEngine:
                         now_ts,
                     ),
                 )
+            if plan_ids:
+                after = _read_trade_plan_audit_snapshot(conn, plan_ids)
+                _record_trade_plan_audit(
+                    conn,
+                    action="save",
+                    key=",".join(plan_ids),
+                    before={"trade_plans": before},
+                    after={"trade_plans": after},
+                    metadata={"plan_count": len(plan_ids)},
+                )
             conn.commit()
+            if hasattr(self, "_pending_plan_events"):
+                self._pending_plan_events.clear()
             self._last_mtime = now_ts
         except Exception as e:
+            if conn:
+                conn.rollback()
             logger.error(f"TradePlan: failed to save to DB: {e}")
         finally:
             if conn:
@@ -2546,31 +2646,22 @@ class TradePlanEngine:
         price: float,
         shares: int,
     ):
-        """Write to trade_plan_events SQLite table."""
-        try:
-            from src.sim_trading.db import get_connection
-
-            conn = get_connection()
-            conn.execute(
-                "INSERT OR IGNORE INTO trade_plan_events "
-                "(ts, date, plan_id, event_type, condition_id, label, price, shares, message) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    int(time.time() * 1000),
-                    datetime.now().strftime("%Y-%m-%d"),
-                    plan_id,
-                    event_type,
-                    condition_id,
-                    label,
-                    price,
-                    shares,
-                    f"{label} @ {price:.2f}",
-                ),
+        """Queue trade_plan_events rows; _save_plans persists them atomically."""
+        if not hasattr(self, "_pending_plan_events"):
+            self._pending_plan_events = []
+        self._pending_plan_events.append(
+            (
+                int(time.time() * 1000),
+                datetime.now().strftime("%Y-%m-%d"),
+                plan_id,
+                event_type,
+                condition_id,
+                label,
+                price,
+                shares,
+                f"{label} @ {price:.2f}",
             )
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            logger.error(f"Failed to write plan event: {e}")
+        )
 
 
 # ══════════════════════════════════════════

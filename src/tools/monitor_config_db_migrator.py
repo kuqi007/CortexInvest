@@ -13,10 +13,13 @@ import argparse
 import json
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
 from src.sim_trading.db import get_config_connection, init_db
+from src.utils.audit_log import insert_config_outbox
+from src.utils.audit_system import build_audit_event_v2, make_actor
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 MONITOR_CONFIG_PATH = DATA_DIR / "monitor_config.json"
@@ -67,6 +70,7 @@ def _normalize_config(cfg: dict[str, Any]) -> dict[str, Any]:
         tags = list(raw_tags) if isinstance(raw_tags, (list, tuple)) else []
         normalized_watchlist[symbol] = {
             "name": str(entry.get("name", symbol)),
+            "alias": entry.get("alias") or None,
             "list_type": list_type,
             "cost": _num_or_none(entry.get("cost")),
             "shares": _int_or_none(entry.get("shares")),
@@ -76,6 +80,7 @@ def _normalize_config(cfg: dict[str, Any]) -> dict[str, Any]:
             "tags": tags,
             "watch_price": _num_or_none(entry.get("watch_price")),
             "watch_price_date": entry.get("watch_price_date") or None,
+            "pin_order": _int_or_none(entry.get("pin_order")) or 0,
         }
 
     normalized_settings: dict[str, float] = {}
@@ -96,64 +101,87 @@ def import_json_to_db(cfg: dict[str, Any]) -> tuple[int, int]:
     now_ts = int(time.time())
     conn = get_config_connection()
     try:
-        with conn:
-            conn.execute("DELETE FROM monitor_watchlist")
-            conn.execute("DELETE FROM monitor_settings")
+        conn.execute("BEGIN")
+        before = _read_config_from_conn(conn)
+        conn.execute("DELETE FROM monitor_watchlist")
+        conn.execute("DELETE FROM monitor_settings")
 
-            for symbol, entry in cfg["watchlist"].items():
-                tags_json = json.dumps(entry.get("tags", []), ensure_ascii=False)
-                conn.execute(
-                    """
-                    INSERT INTO monitor_watchlist (
-                        symbol, name, list_type, cost, shares, lot, hidden, star,
-                        tags, watch_price, watch_price_date,
-                        created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        symbol,
-                        entry["name"],
-                        entry["list_type"],
-                        entry["cost"],
-                        entry["shares"],
-                        entry["lot"],
-                        1 if entry["hidden"] else 0,
-                        1 if entry["star"] else 0,
-                        tags_json,
-                        entry.get("watch_price"),
-                        entry.get("watch_price_date"),
-                        now_ts,
-                        now_ts,
-                    ),
-                )
+        for symbol, entry in cfg["watchlist"].items():
+            tags_json = json.dumps(entry.get("tags", []), ensure_ascii=False)
+            conn.execute(
+                """
+                INSERT INTO monitor_watchlist (
+                    symbol, name, alias, list_type, cost, shares, lot, hidden, star,
+                    tags, watch_price, watch_price_date, pin_order,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    symbol,
+                    entry["name"],
+                    entry.get("alias"),
+                    entry["list_type"],
+                    entry["cost"],
+                    entry["shares"],
+                    entry["lot"],
+                    1 if entry["hidden"] else 0,
+                    1 if entry["star"] else 0,
+                    tags_json,
+                    entry.get("watch_price"),
+                    entry.get("watch_price_date"),
+                    int(entry.get("pin_order", 0) or 0),
+                    now_ts,
+                    now_ts,
+                ),
+            )
 
-            for key, value in cfg["settings"].items():
-                conn.execute(
-                    "INSERT INTO monitor_settings(key, value, updated_at) VALUES (?, ?, ?)",
-                    (key, value, now_ts),
-                )
+        for key, value in cfg["settings"].items():
+            conn.execute(
+                "INSERT INTO monitor_settings(key, value, updated_at) VALUES (?, ?, ?)",
+                (key, value, now_ts),
+            )
+        after = _read_config_from_conn(conn)
+        event = build_audit_event_v2(
+            event_id=uuid.uuid4().hex,
+            ts_ms=int(time.time() * 1000),
+            source="monitor_config_db_migrator",
+            actor=make_actor(
+                actor_type="system", actor_id="monitor_config_db_migrator"
+            ),
+            action="import",
+            entity="monitor_config",
+            key="config",
+            db_name="config.db",
+            before=before,
+            after=after,
+            metadata={
+                "watchlist_count": len(cfg["watchlist"]),
+                "settings_count": len(cfg["settings"]),
+            },
+        )
+        insert_config_outbox(conn, event)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
     return len(cfg["watchlist"]), len(cfg["settings"])
 
 
-def read_config_from_db() -> dict[str, Any]:
-    conn = get_config_connection()
-    try:
-        watch_rows = conn.execute(
-            """
-            SELECT symbol, name, list_type, cost, shares, lot, hidden, star,
-                   tags, watch_price, watch_price_date
-            FROM monitor_watchlist
-            ORDER BY symbol
-            """
-        ).fetchall()
-        settings_rows = conn.execute(
-            "SELECT key, value FROM monitor_settings ORDER BY key"
-        ).fetchall()
-    finally:
-        conn.close()
+def _read_config_from_conn(conn) -> dict[str, Any]:
+    watch_rows = conn.execute(
+        """
+        SELECT symbol, name, alias, list_type, cost, shares, lot, hidden, star,
+               tags, watch_price, watch_price_date, pin_order
+        FROM monitor_watchlist
+        ORDER BY symbol
+        """
+    ).fetchall()
+    settings_rows = conn.execute(
+        "SELECT key, value FROM monitor_settings ORDER BY key"
+    ).fetchall()
 
     watchlist: dict[str, dict[str, Any]] = {}
     for r in watch_rows:
@@ -164,6 +192,7 @@ def read_config_from_db() -> dict[str, Any]:
             tags = []
         watchlist[r["symbol"]] = {
             "name": str(r["name"]),
+            "alias": r["alias"] if "alias" in r.keys() else None,
             "list_type": "holding" if r["list_type"] == "holding" else "watching",
             "cost": _num_or_none(r["cost"]),
             "shares": _int_or_none(r["shares"]),
@@ -173,6 +202,8 @@ def read_config_from_db() -> dict[str, Any]:
             "tags": tags if isinstance(tags, list) else [],
             "watch_price": _num_or_none(r["watch_price"] if "watch_price" in r.keys() else None),
             "watch_price_date": r["watch_price_date"] if "watch_price_date" in r.keys() else None,
+            "pin_order": _int_or_none(r["pin_order"] if "pin_order" in r.keys() else None)
+            or 0,
         }
 
     settings: dict[str, float] = {}
@@ -184,12 +215,22 @@ def read_config_from_db() -> dict[str, Any]:
     return {"watchlist": watchlist, "settings": settings}
 
 
+def read_config_from_db() -> dict[str, Any]:
+    conn = get_config_connection()
+    try:
+        return _read_config_from_conn(conn)
+    finally:
+        conn.close()
+
+
 def _from_db_normalized_to_snapshot(cfg: dict[str, Any]) -> dict[str, Any]:
     watchlist_out: dict[str, dict[str, Any]] = {}
     holdings_out: dict[str, dict[str, Any]] = {}
     watching_out: dict[str, dict[str, Any]] = {}
     for symbol, entry in sorted(cfg["watchlist"].items()):
         out: dict[str, Any] = {"name": entry["name"]}
+        if entry.get("alias"):
+            out["alias"] = entry["alias"]
         if entry["list_type"] == "holding":
             out["type"] = "holding"
         if entry["cost"] is not None:
@@ -209,6 +250,8 @@ def _from_db_normalized_to_snapshot(cfg: dict[str, Any]) -> dict[str, Any]:
             out["watch_price"] = entry["watch_price"]
         if entry.get("watch_price_date") is not None:
             out["watch_price_date"] = entry["watch_price_date"]
+        if entry.get("pin_order"):
+            out["pin_order"] = entry["pin_order"]
         watchlist_out[symbol] = out
         split_out = dict(out)
         split_out.pop("type", None)

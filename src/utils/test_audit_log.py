@@ -78,6 +78,36 @@ def test_build_audit_event_rejects_obvious_secret_fields():
         )
 
 
+def test_build_audit_event_rejects_sensitive_fields_inside_tuple():
+    with pytest.raises(ValueError, match="sensitive audit field"):
+        build_audit_event(
+            event_id="01HWNM4Z7G8E6Q9M3R2T1V0X5K",
+            ts_ms=1777376520000,
+            source="api_config",
+            action="update",
+            entity="monitor_watchlist",
+            key="HK09988",
+            db_name="config.db",
+            before=None,
+            after={"items": ({"api_token": "secret"},)},
+        )
+
+
+def test_build_audit_event_rejects_obvious_secret_values():
+    with pytest.raises(ValueError, match="sensitive audit value"):
+        build_audit_event(
+            event_id="01HWNM4Z7G8E6Q9M3R2T1V0X5K",
+            ts_ms=1777376520000,
+            source="api_config",
+            action="update",
+            entity="monitor_watchlist",
+            key="HK09988",
+            db_name="config.db",
+            before=None,
+            after={"note": "Bearer abcdefghijklmnopqrstuvwxyz"},
+        )
+
+
 def test_build_audit_event_allows_authority_but_rejects_authorization():
     event = build_audit_event(
         event_id="01HWNM4Z7G8E6Q9M3R2T1V0X5K",

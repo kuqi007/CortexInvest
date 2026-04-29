@@ -3,6 +3,7 @@
 
 import subprocess
 import sys
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -45,6 +46,91 @@ def test_load_config_does_not_create_default_or_json_fallback(monkeypatch):
 
     with pytest.raises(RuntimeError, match="config.db unavailable"):
         stock_monitor.load_config()
+
+
+def test_save_config_records_config_audit_in_same_db(tmp_path, monkeypatch):
+    import src.sim_trading.db as db
+    import src.tools.stock_monitor as stock_monitor
+
+    monkeypatch.setattr(db, "_config_db_path_override", str(tmp_path / "config.db"))
+    monkeypatch.setattr(db, "_db_path_override", str(tmp_path / "trading.db"))
+
+    stock_monitor.save_config(
+        {
+            "watchlist": {
+                "HK00700": {
+                    "name": "Tencent",
+                    "alias": "TCEHY",
+                    "type": "holding",
+                    "shares": 100,
+                    "cost": 320,
+                    "pin_order": 3,
+                }
+            },
+            "settings": {"poll_interval": 30},
+        }
+    )
+
+    conn = db.get_config_connection()
+    try:
+        watch_row = conn.execute(
+            "SELECT symbol, alias, shares, cost, pin_order FROM monitor_watchlist WHERE symbol = ?",
+            ("HK00700",),
+        ).fetchone()
+        audit_row = conn.execute(
+            "SELECT payload_json FROM config_audit_outbox ORDER BY ts_ms DESC LIMIT 1"
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert dict(watch_row) == {
+        "symbol": "HK00700",
+        "alias": "TCEHY",
+        "shares": 100,
+        "cost": 320.0,
+        "pin_order": 3,
+    }
+    payload = json.loads(audit_row["payload_json"])
+    assert payload["schema_version"] == 2
+    assert payload["source"] == "stock_monitor"
+    assert payload["action"] == "replace"
+    assert payload["entity"] == "monitor_config"
+    assert payload["key"] == "config"
+    assert payload["db"] == "config.db"
+    assert payload["after"]["watchlist"][0]["symbol"] == "HK00700"
+    assert payload["after"]["watchlist"][0]["alias"] == "TCEHY"
+    assert payload["after"]["watchlist"][0]["pin_order"] == 3
+
+
+def test_save_alerts_records_config_audit_in_same_db(tmp_path, monkeypatch):
+    import src.sim_trading.db as db
+    import src.tools.stock_monitor as stock_monitor
+
+    monkeypatch.setattr(db, "_config_db_path_override", str(tmp_path / "config.db"))
+    monkeypatch.setattr(db, "_db_path_override", str(tmp_path / "trading.db"))
+
+    stock_monitor.save_alerts({"HK00700": {"above": 380, "below": 300}})
+
+    conn = db.get_config_connection()
+    try:
+        alert_row = conn.execute(
+            "SELECT symbol, above, below FROM alert_rules WHERE symbol = ?",
+            ("HK00700",),
+        ).fetchone()
+        audit_row = conn.execute(
+            "SELECT payload_json FROM config_audit_outbox ORDER BY ts_ms DESC LIMIT 1"
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert dict(alert_row) == {"symbol": "HK00700", "above": 380.0, "below": 300.0}
+    payload = json.loads(audit_row["payload_json"])
+    assert payload["schema_version"] == 2
+    assert payload["source"] == "stock_monitor"
+    assert payload["action"] == "replace"
+    assert payload["entity"] == "alert_rules"
+    assert payload["key"] == "alerts"
+    assert payload["after"]["alerts"][0]["symbol"] == "HK00700"
 
 
 # ══════════════════════════════════════════

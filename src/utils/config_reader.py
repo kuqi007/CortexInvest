@@ -36,8 +36,9 @@ def _read_from_db() -> dict[str, Any]:
         # Read watchlist
         rows = conn.execute(
             """
-            SELECT symbol, name, list_type, cost, shares, lot,
-                   hidden, star, dip_buy, tags, watch_price, watch_price_date
+            SELECT symbol, name, alias, list_type, cost, shares, lot,
+                   hidden, star, dip_buy, tags, watch_price, watch_price_date,
+                   pin_order
             FROM monitor_watchlist
             ORDER BY symbol
             """
@@ -52,6 +53,8 @@ def _read_from_db() -> dict[str, Any]:
         for r in rows:
             entry: dict[str, Any] = {"name": r["name"]}
             
+            if r["alias"]:
+                entry["alias"] = r["alias"]
             if r["list_type"]:
                 entry["type"] = r["list_type"]
             if r["cost"] is not None:
@@ -80,6 +83,8 @@ def _read_from_db() -> dict[str, Any]:
                 entry["watch_price"] = float(r["watch_price"])
             if r["watch_price_date"]:
                 entry["watch_price_date"] = r["watch_price_date"]
+            if r["pin_order"]:
+                entry["pin_order"] = int(r["pin_order"])
             
             watchlist[r["symbol"]] = entry
         

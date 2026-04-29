@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import re
 import sqlite3
 from typing import Any
 
@@ -18,6 +19,12 @@ SENSITIVE_FIELD_FRAGMENTS = (
     "private_key",
     "secret",
     "token",
+)
+SENSITIVE_VALUE_PATTERNS = (
+    re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{12,}", re.IGNORECASE),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{16,}"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
 )
 
 
@@ -37,9 +44,12 @@ def _reject_sensitive_fields(value: Any, *, path: str) -> None:
             if any(fragment in lowered for fragment in SENSITIVE_FIELD_FRAGMENTS):
                 raise ValueError(f"sensitive audit field is not allowed: {path}.{key}")
             _reject_sensitive_fields(child, path=f"{path}.{key}")
-    elif isinstance(value, list):
+    elif isinstance(value, (list, tuple, set)):
         for idx, child in enumerate(value):
             _reject_sensitive_fields(child, path=f"{path}[{idx}]")
+    elif isinstance(value, str):
+        if any(pattern.search(value) for pattern in SENSITIVE_VALUE_PATTERNS):
+            raise ValueError(f"sensitive audit value is not allowed: {path}")
 
 
 def build_audit_event(
@@ -54,6 +64,8 @@ def build_audit_event(
     before: dict[str, Any] | None,
     after: dict[str, Any] | None,
     correlation_id: str | None = None,
+    actor: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
     ts: str | None = None,
     schema_version: int = 1,
 ) -> dict[str, Any]:
@@ -64,8 +76,10 @@ def build_audit_event(
         raise ValueError("ts does not match ts_ms")
     _reject_sensitive_fields(before, path="before")
     _reject_sensitive_fields(after, path="after")
+    _reject_sensitive_fields(actor, path="actor")
+    _reject_sensitive_fields(metadata, path="metadata")
 
-    return {
+    event = {
         "event_id": event_id,
         "schema_version": schema_version,
         "ts": derived_ts,
@@ -79,6 +93,11 @@ def build_audit_event(
         "after": after,
         "db": db_name,
     }
+    if actor is not None:
+        event["actor"] = actor
+    if metadata is not None:
+        event["metadata"] = metadata
+    return event
 
 
 def _insert_outbox(

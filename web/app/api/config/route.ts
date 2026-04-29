@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import Database from "better-sqlite3";
+import { randomUUID } from "crypto";
 import { openConfigDb, openTradingDb } from "../../lib/db";
+import { buildAuditEventV2, insertConfigAuditOutbox, makeActor } from "../../lib/audit";
 
 import type { WatchEntry, MonitorConfig } from "../../types";
 import { EM_UT } from "../../theme";
@@ -129,6 +131,9 @@ function ensureMonitorTables(db: MonitorDb) {
   if (!existingCols.has("dip_buy")) {
     db.exec(`ALTER TABLE monitor_watchlist ADD COLUMN dip_buy INTEGER NOT NULL DEFAULT 0`);
   }
+  if (!existingCols.has("alias")) {
+    db.exec(`ALTER TABLE monitor_watchlist ADD COLUMN alias TEXT`);
+  }
   if (!existingCols.has("tags")) {
     db.exec(`ALTER TABLE monitor_watchlist ADD COLUMN tags TEXT DEFAULT '[]'`);
   }
@@ -194,6 +199,49 @@ function ensureMonitorTables(db: MonitorDb) {
       below REAL,
       updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
     );
+  `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS config_audit_outbox (
+      event_id TEXT PRIMARY KEY,
+      schema_version INTEGER NOT NULL DEFAULT 1,
+      correlation_id TEXT,
+      ts TEXT NOT NULL,
+      ts_ms INTEGER NOT NULL,
+      source TEXT NOT NULL,
+      action TEXT NOT NULL,
+      entity TEXT NOT NULL,
+      key TEXT NOT NULL,
+      db TEXT NOT NULL DEFAULT 'config.db' CHECK (db = 'config.db'),
+      payload_json TEXT NOT NULL,
+      flushed_at TEXT,
+      flushed_at_ms INTEGER,
+      flush_id TEXT,
+      flush_started_at_ms INTEGER,
+      CHECK (length(trim(payload_json)) > 0)
+    );
+  `);
+  const auditCols = new Set(
+    (db.pragma("table_info(config_audit_outbox)") as { name: string }[]).map((c) => c.name),
+  );
+  if (!auditCols.has("flushed_at")) {
+    db.exec(`ALTER TABLE config_audit_outbox ADD COLUMN flushed_at TEXT`);
+  }
+  if (!auditCols.has("flushed_at_ms")) {
+    db.exec(`ALTER TABLE config_audit_outbox ADD COLUMN flushed_at_ms INTEGER`);
+  }
+  if (!auditCols.has("flush_id")) {
+    db.exec(`ALTER TABLE config_audit_outbox ADD COLUMN flush_id TEXT`);
+  }
+  if (!auditCols.has("flush_started_at_ms")) {
+    db.exec(`ALTER TABLE config_audit_outbox ADD COLUMN flush_started_at_ms INTEGER`);
+  }
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_config_audit_outbox_pending
+      ON config_audit_outbox(ts_ms, event_id)
+      WHERE flushed_at IS NULL;
+    CREATE INDEX IF NOT EXISTS idx_config_audit_outbox_correlation
+      ON config_audit_outbox(correlation_id, ts_ms)
+      WHERE correlation_id IS NOT NULL;
   `);
 }
 
@@ -270,6 +318,67 @@ function readWatchRow(db: MonitorDb, symbol: string): WatchRow | undefined {
        WHERE symbol = ?`,
     )
     .get(symbol) as WatchRow | undefined;
+}
+
+function parseTagsForAudit(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map((tag) => String(tag)) : [];
+  } catch {
+    return [];
+  }
+}
+
+function watchRowToAudit(row: WatchRow | undefined): Record<string, unknown> | null {
+  if (!row) return null;
+  return {
+    symbol: row.symbol,
+    name: row.name,
+    alias: row.alias,
+    list_type: row.list_type,
+    cost: row.cost,
+    shares: row.shares,
+    lot: row.lot,
+    hidden: Boolean(row.hidden),
+    star: Boolean(row.star),
+    dip_buy: Boolean(row.dip_buy),
+    tags: parseTagsForAudit(row.tags),
+    watch_price: row.watch_price,
+    watch_price_date: row.watch_price_date,
+    pin_order: row.pin_order,
+  };
+}
+
+function recordConfigAudit(
+  db: MonitorDb,
+  args: {
+    action: string;
+    entity: string;
+    key: string;
+    before: Record<string, unknown> | null;
+    after: Record<string, unknown> | null;
+    metadata?: Record<string, unknown>;
+  },
+) {
+  const nowMs = Date.now();
+  insertConfigAuditOutbox(
+    db,
+    buildAuditEventV2({
+      eventId: randomUUID(),
+      tsMs: nowMs,
+      correlationId: randomUUID(),
+      source: "api_config",
+      actor: makeActor({ type: "user", id: "local-ui" }),
+      action: args.action,
+      entity: args.entity,
+      key: args.key,
+      dbName: "config.db",
+      before: args.before,
+      after: args.after,
+      metadata: args.metadata,
+    }),
+  );
 }
 
 function isConfigEmpty(config: MonitorConfig): boolean {
@@ -376,12 +485,11 @@ export async function GET() {
 
 // ── POST /api/config — modify config and/or alerts ──
 export async function POST(request: Request) {
-  let db: MonitorDb | null = null;
+  const db = openMonitorDb(false);
   try {
+    ensureMonitorTables(db);
     const body = await request.json();
     const { action } = body;
-    db = openMonitorDb(false);
-    ensureMonitorTables(db);
 
     const withSnapshotWarning = (message: string, warn: string | null): string => {
       if (!warn) return message;
@@ -419,63 +527,77 @@ export async function POST(request: Request) {
         const watchPrice = data?.watch_price != null ? Number(data.watch_price) : readMarketPrice(code);
         const watchPriceDate = watchPrice != null ? todayStr() : null;
 
-        // ── 持仓变更记录（add 也可能触发 ON CONFLICT 更新）──
         const oldRow = readWatchRow(db, code);
-        if (oldRow) {
-          const oldShares = oldRow.shares;
-          const oldCost = oldRow.cost;
-          const newShares = shares;
-          const newCost = cost;
-          const oldType = oldRow.list_type;
-          const newType = listType;
-          const sharesOrCostChanged = oldShares !== newShares || oldCost !== newCost;
-          const typeChanged = oldType !== newType;
-          if (sharesOrCostChanged || typeChanged) {
-            const nowIso = new Date().toISOString();
-            db.prepare(`
-              INSERT OR IGNORE INTO position_change_log
-                (symbol, ts, source, shares_from, shares_to, cost_from, cost_to, type_from, type_to)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `).run(code, nowIso, "import",
-              oldShares != null ? oldShares : null,
-              newShares != null ? newShares : null,
-              oldCost != null ? oldCost : null,
-              newCost != null ? newCost : null,
-              typeChanged ? oldType : null,
-              typeChanged ? newType : null);
+        db.transaction(() => {
+          // ── 持仓变更记录（add 也可能触发 ON CONFLICT 更新）──
+          if (oldRow) {
+            const oldShares = oldRow.shares;
+            const oldCost = oldRow.cost;
+            const newShares = shares;
+            const newCost = cost;
+            const oldType = oldRow.list_type;
+            const newType = listType;
+            const sharesOrCostChanged = oldShares !== newShares || oldCost !== newCost;
+            const typeChanged = oldType !== newType;
+            if (sharesOrCostChanged || typeChanged) {
+              const nowIso = new Date().toISOString();
+              db.prepare(`
+                INSERT OR IGNORE INTO position_change_log
+                  (symbol, ts, source, shares_from, shares_to, cost_from, cost_to, type_from, type_to)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+              `).run(code, nowIso, "import",
+                oldShares != null ? oldShares : null,
+                newShares != null ? newShares : null,
+                oldCost != null ? oldCost : null,
+                newCost != null ? newCost : null,
+                typeChanged ? oldType : null,
+                typeChanged ? newType : null);
+            }
           }
-        }
 
-        db.prepare(
-          `INSERT INTO monitor_watchlist(
-            symbol, name, list_type, cost, shares, lot, hidden, star, dip_buy,
-            tags, watch_price, watch_price_date, pin_order, created_at, updated_at
-          )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(symbol) DO UPDATE SET
-            name = excluded.name,
-            list_type = excluded.list_type,
-            cost = excluded.cost,
-            shares = excluded.shares,
-            lot = excluded.lot,
-            hidden = excluded.hidden,
-            star = excluded.star,
-            dip_buy = excluded.dip_buy,
-            tags = excluded.tags,
-            watch_price = excluded.watch_price,
-            watch_price_date = excluded.watch_price_date,
-            pin_order = excluded.pin_order,
-            updated_at = excluded.updated_at,
-            created_at = monitor_watchlist.created_at`
-        ).run(code, name, listType, cost, shares, lot, hidden, star, 0, tagsJson, watchPrice, watchPriceDate, 0, nowTs, nowTs);
+          db.prepare(
+            `INSERT INTO monitor_watchlist(
+              symbol, name, list_type, cost, shares, lot, hidden, star, dip_buy,
+              tags, watch_price, watch_price_date, pin_order, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(symbol) DO UPDATE SET
+              name = excluded.name,
+              list_type = excluded.list_type,
+              cost = excluded.cost,
+              shares = excluded.shares,
+              lot = excluded.lot,
+              hidden = excluded.hidden,
+              star = excluded.star,
+              dip_buy = excluded.dip_buy,
+              tags = excluded.tags,
+              watch_price = excluded.watch_price,
+              watch_price_date = excluded.watch_price_date,
+              pin_order = excluded.pin_order,
+              updated_at = excluded.updated_at,
+              created_at = monitor_watchlist.created_at`
+          ).run(code, name, listType, cost, shares, lot, hidden, star, 0, tagsJson, watchPrice, watchPriceDate, 0, nowTs, nowTs);
 
-        // 告警写到 alert_rules
-        if (data?.above != null || data?.below != null) {
-          const alertEntry: AlertEntry = {};
-          if (data.above != null) alertEntry.above = data.above;
-          if (data.below != null) alertEntry.below = data.below;
-          writeAlertToDb(db, code, alertEntry);
-        }
+          // 告警写到 alert_rules
+          if (data?.above != null || data?.below != null) {
+            const alertEntry: AlertEntry = {};
+            if (data.above != null) alertEntry.above = data.above;
+            if (data.below != null) alertEntry.below = data.below;
+            writeAlertToDb(db, code, alertEntry);
+          }
+
+          recordConfigAudit(db, {
+            action: oldRow ? "upsert" : "add",
+            entity: "monitor_watchlist",
+            key: code,
+            before: watchRowToAudit(oldRow),
+            after: watchRowToAudit(readWatchRow(db, code)),
+            metadata: {
+              source_action: "add",
+              alert_updated: data?.above != null || data?.below != null,
+            },
+          });
+        })();
 
         const env = listType === "holding" ? "PROD" : "DEV";
         const extras: string[] = [];
@@ -553,57 +675,70 @@ export async function POST(request: Request) {
 
         const nowTs = Math.floor(Date.now() / 1000);
 
-        // ── 持仓变更记录 ──
-        const oldShares = existing.shares;
-        const oldCost = existing.cost;
-        const newShares = shares;
-        const newCost = cost;
-        const sharesChanged = oldShares !== newShares;
-        const costChanged = oldCost !== newCost;
-        const oldType = existing.list_type;
-        const newType = listType;
-        const typeChanged = oldType !== newType;
-        if (sharesChanged || costChanged || typeChanged) {
-          const nowIso = new Date().toISOString();
-          db.prepare(`
-            INSERT OR IGNORE INTO position_change_log
-              (symbol, ts, source, shares_from, shares_to, cost_from, cost_to, type_from, type_to)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `).run(code, nowIso, "manual",
-            oldShares != null ? oldShares : null,
-            newShares != null ? newShares : null,
-            oldCost != null ? oldCost : null,
-            newCost != null ? newCost : null,
-            typeChanged ? oldType : null,
-            typeChanged ? newType : null);
-        }
-
-        db.prepare(
-          `UPDATE monitor_watchlist
-           SET list_type = ?, cost = ?, shares = ?, lot = ?, hidden = ?, star = ?, dip_buy = ?,
-               alias = ?, tags = ?, watch_price = ?, watch_price_date = ?, pin_order = ?, updated_at = ?
-           WHERE symbol = ?`
-        ).run(listType, cost, shares, lot, hidden ? 1 : 0, star ? 1 : 0, dipBuy ? 1 : 0, alias, tagsJson, watchPrice, watchPriceDate, existing.pin_order, nowTs, code);
-
-        // 告警写到 alert_rules
-        if (data?.above !== undefined || data?.below !== undefined) {
-          const currentAlert = db
-            .prepare("SELECT above, below FROM alert_rules WHERE symbol = ?")
-            .get(code) as { above: number | null; below: number | null } | undefined;
-          const alertEntry: AlertEntry = {};
-          if (currentAlert?.above != null) alertEntry.above = currentAlert.above;
-          if (currentAlert?.below != null) alertEntry.below = currentAlert.below;
-
-          if (data.above !== undefined) {
-            if (data.above === null) delete alertEntry.above;
-            else alertEntry.above = data.above;
+        db.transaction(() => {
+          // ── 持仓变更记录 ──
+          const oldShares = existing.shares;
+          const oldCost = existing.cost;
+          const newShares = shares;
+          const newCost = cost;
+          const sharesChanged = oldShares !== newShares;
+          const costChanged = oldCost !== newCost;
+          const oldType = existing.list_type;
+          const newType = listType;
+          const typeChanged = oldType !== newType;
+          if (sharesChanged || costChanged || typeChanged) {
+            const nowIso = new Date().toISOString();
+            db.prepare(`
+              INSERT OR IGNORE INTO position_change_log
+                (symbol, ts, source, shares_from, shares_to, cost_from, cost_to, type_from, type_to)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).run(code, nowIso, "manual",
+              oldShares != null ? oldShares : null,
+              newShares != null ? newShares : null,
+              oldCost != null ? oldCost : null,
+              newCost != null ? newCost : null,
+              typeChanged ? oldType : null,
+              typeChanged ? newType : null);
           }
-          if (data.below !== undefined) {
-            if (data.below === null) delete alertEntry.below;
-            else alertEntry.below = data.below;
+
+          db.prepare(
+            `UPDATE monitor_watchlist
+             SET list_type = ?, cost = ?, shares = ?, lot = ?, hidden = ?, star = ?, dip_buy = ?,
+                 alias = ?, tags = ?, watch_price = ?, watch_price_date = ?, pin_order = ?, updated_at = ?
+             WHERE symbol = ?`
+          ).run(listType, cost, shares, lot, hidden ? 1 : 0, star ? 1 : 0, dipBuy ? 1 : 0, alias, tagsJson, watchPrice, watchPriceDate, existing.pin_order, nowTs, code);
+
+          // 告警写到 alert_rules
+          if (data?.above !== undefined || data?.below !== undefined) {
+            const currentAlert = db
+              .prepare("SELECT above, below FROM alert_rules WHERE symbol = ?")
+              .get(code) as { above: number | null; below: number | null } | undefined;
+            const alertEntry: AlertEntry = {};
+            if (currentAlert?.above != null) alertEntry.above = currentAlert.above;
+            if (currentAlert?.below != null) alertEntry.below = currentAlert.below;
+
+            if (data.above !== undefined) {
+              if (data.above === null) delete alertEntry.above;
+              else alertEntry.above = data.above;
+            }
+            if (data.below !== undefined) {
+              if (data.below === null) delete alertEntry.below;
+              else alertEntry.below = data.below;
+            }
+            writeAlertToDb(db, code, alertEntry);
           }
-          writeAlertToDb(db, code, alertEntry);
-        }
+
+          recordConfigAudit(db, {
+            action: "update",
+            entity: "monitor_watchlist",
+            key: code,
+            before: watchRowToAudit(existing),
+            after: watchRowToAudit(readWatchRow(db, code)),
+            metadata: {
+              alert_updated: data?.above !== undefined || data?.below !== undefined,
+            },
+          });
+        })();
         const snapshotWarn = exportMonitorSnapshotFromDb(db);
 
         const changed: string[] = [];
@@ -643,10 +778,28 @@ export async function POST(request: Request) {
         if (value) {
           const maxRow = db.prepare("SELECT MAX(pin_order) as m FROM monitor_watchlist").get() as { m: number };
           const nextOrder = (maxRow?.m ?? 0) + 1;
-          db.prepare("UPDATE monitor_watchlist SET pin_order = ?, updated_at = ? WHERE symbol = ?").run(nextOrder, nowTs, code);
+          db.transaction(() => {
+            db.prepare("UPDATE monitor_watchlist SET pin_order = ?, updated_at = ? WHERE symbol = ?").run(nextOrder, nowTs, code);
+            recordConfigAudit(db, {
+              action: "pin",
+              entity: "monitor_watchlist",
+              key: code,
+              before: watchRowToAudit(row),
+              after: watchRowToAudit(readWatchRow(db, code)),
+            });
+          })();
           return NextResponse.json({ success: true, message: `Pinned ${code} (order=${nextOrder})` });
         } else {
-          db.prepare("UPDATE monitor_watchlist SET pin_order = 0, updated_at = ? WHERE symbol = ?").run(nowTs, code);
+          db.transaction(() => {
+            db.prepare("UPDATE monitor_watchlist SET pin_order = 0, updated_at = ? WHERE symbol = ?").run(nowTs, code);
+            recordConfigAudit(db, {
+              action: "unpin",
+              entity: "monitor_watchlist",
+              key: code,
+              before: watchRowToAudit(row),
+              after: watchRowToAudit(readWatchRow(db, code)),
+            });
+          })();
           return NextResponse.json({ success: true, message: `Unpinned ${code}` });
         }
       }
@@ -658,18 +811,30 @@ export async function POST(request: Request) {
           return NextResponse.json({ success: false, message: "Missing code(s)" }, { status: 400 });
         }
 
-        const removed: string[] = [];
+        const removedRows: WatchRow[] = [];
         const notFound: string[] = [];
-        for (const c of toRemove) {
-          const row = readWatchRow(db, c);
-          if (row) {
-            removed.push(`${c} (${row.name})`);
-            db.prepare("DELETE FROM monitor_watchlist WHERE symbol = ?").run(c);
-            deleteAlertFromDb(db, c); // 同步清理告警
-          } else {
-            notFound.push(c);
+        db.transaction(() => {
+          for (const c of toRemove) {
+            const row = readWatchRow(db, c);
+            if (row) {
+              removedRows.push(row);
+              db.prepare("DELETE FROM monitor_watchlist WHERE symbol = ?").run(c);
+              deleteAlertFromDb(db, c); // 同步清理告警
+              recordConfigAudit(db, {
+                action: "remove",
+                entity: "monitor_watchlist",
+                key: c,
+                before: watchRowToAudit(row),
+                after: null,
+                metadata: { alert_deleted: true },
+              });
+            } else {
+              notFound.push(c);
+            }
           }
-        }
+        })();
+
+        const removed: string[] = removedRows.map((row) => `${row.symbol} (${row.name})`);
 
         const snapshotWarn = exportMonitorSnapshotFromDb(db);
         let msg = removed.length > 0 ? `Removed ${removed.join(", ")}` : "";
@@ -704,6 +869,8 @@ export async function POST(request: Request) {
 
         const rejected: string[] = [];
         const applied: string[] = [];
+        const beforeSettings: Record<string, number | null> = {};
+        const afterSettings: Record<string, number> = {};
         for (const [key, val] of Object.entries(settings)) {
           const range = ALLOWED[key];
           if (!range) { rejected.push(`${key} (unknown)`); continue; }
@@ -712,15 +879,34 @@ export async function POST(request: Request) {
             rejected.push(`${key}=${val} (must be ${range[0]}-${range[1]})`);
             continue;
           }
-          const nowTs = Math.floor(Date.now() / 1000);
-          db.prepare(
-            `INSERT INTO monitor_settings(key, value, updated_at)
-             VALUES (?, ?, ?)
-             ON CONFLICT(key) DO UPDATE SET
-               value = excluded.value,
-               updated_at = excluded.updated_at`
-          ).run(key, n, nowTs);
           applied.push(`${key}=${n}`);
+          const current = db
+            .prepare("SELECT value FROM monitor_settings WHERE key = ?")
+            .get(key) as { value: number } | undefined;
+          beforeSettings[key] = current ? Number(current.value) : null;
+          afterSettings[key] = n;
+        }
+        if (Object.keys(afterSettings).length > 0) {
+          db.transaction(() => {
+            const nowTs = Math.floor(Date.now() / 1000);
+            for (const [key, n] of Object.entries(afterSettings)) {
+              db.prepare(
+                `INSERT INTO monitor_settings(key, value, updated_at)
+                 VALUES (?, ?, ?)
+                 ON CONFLICT(key) DO UPDATE SET
+                   value = excluded.value,
+                   updated_at = excluded.updated_at`
+              ).run(key, n, nowTs);
+            }
+            recordConfigAudit(db, {
+              action: "update",
+              entity: "monitor_settings",
+              key: "settings",
+              before: beforeSettings,
+              after: afterSettings,
+              metadata: { rejected },
+            });
+          })();
         }
         const snapshotWarn = exportMonitorSnapshotFromDb(db);
 
@@ -741,21 +927,31 @@ export async function POST(request: Request) {
           );
         }
         const updated: string[] = [];
-        for (const c of codes) {
-          const row = readWatchRow(db, c);
-          if (!row) continue;
-          let tags: string[] = [];
-          try { tags = JSON.parse(row.tags ?? "[]"); } catch { /* ignore */ }
-          if (!tags.includes(tag)) {
-            tags.push(tag);
-            const nowTs = Math.floor(Date.now() / 1000);
-            db.prepare("UPDATE monitor_watchlist SET tags = ?, updated_at = ? WHERE symbol = ?")
-              .run(JSON.stringify(tags), nowTs, c);
-            updated.push(c);
+        db.transaction(() => {
+          for (const c of codes) {
+            const row = readWatchRow(db, c);
+            if (!row) continue;
+            let tags: string[] = [];
+            try { tags = JSON.parse(row.tags ?? "[]"); } catch { /* ignore */ }
+            if (!tags.includes(tag)) {
+              tags.push(tag);
+              const nowTs = Math.floor(Date.now() / 1000);
+              db.prepare("UPDATE monitor_watchlist SET tags = ?, updated_at = ? WHERE symbol = ?")
+                .run(JSON.stringify(tags), nowTs, c);
+              updated.push(c);
+              recordConfigAudit(db, {
+                action: "tag_add",
+                entity: "monitor_watchlist",
+                key: c,
+                before: watchRowToAudit(row),
+                after: watchRowToAudit(readWatchRow(db, c)),
+                metadata: { tag },
+              });
+            }
           }
-        }
-        // Auto-create tag_meta row if tag is new
-        db.prepare("INSERT OR IGNORE INTO tag_meta(tag) VALUES (?)").run(tag);
+          // Auto-create tag_meta row if tag is new
+          db.prepare("INSERT OR IGNORE INTO tag_meta(tag) VALUES (?)").run(tag);
+        })();
         const snapshotWarnTagAdd = exportMonitorSnapshotFromDb(db);
         return NextResponse.json({
           success: updated.length > 0,
@@ -777,20 +973,30 @@ export async function POST(request: Request) {
           );
         }
         const removed: string[] = [];
-        for (const c of codes) {
-          const row = readWatchRow(db, c);
-          if (!row) continue;
-          let tags: string[] = [];
-          try { tags = JSON.parse(row.tags ?? "[]"); } catch { /* ignore */ }
-          const idx = tags.indexOf(tag);
-          if (idx >= 0) {
-            tags.splice(idx, 1);
-            const nowTs = Math.floor(Date.now() / 1000);
-            db.prepare("UPDATE monitor_watchlist SET tags = ?, updated_at = ? WHERE symbol = ?")
-              .run(JSON.stringify(tags), nowTs, c);
-            removed.push(c);
+        db.transaction(() => {
+          for (const c of codes) {
+            const row = readWatchRow(db, c);
+            if (!row) continue;
+            let tags: string[] = [];
+            try { tags = JSON.parse(row.tags ?? "[]"); } catch { /* ignore */ }
+            const idx = tags.indexOf(tag);
+            if (idx >= 0) {
+              tags.splice(idx, 1);
+              const nowTs = Math.floor(Date.now() / 1000);
+              db.prepare("UPDATE monitor_watchlist SET tags = ?, updated_at = ? WHERE symbol = ?")
+                .run(JSON.stringify(tags), nowTs, c);
+              removed.push(c);
+              recordConfigAudit(db, {
+                action: "tag_remove",
+                entity: "monitor_watchlist",
+                key: c,
+                before: watchRowToAudit(row),
+                after: watchRowToAudit(readWatchRow(db, c)),
+                metadata: { tag },
+              });
+            }
           }
-        }
+        })();
         const snapshotWarnTagRm = exportMonitorSnapshotFromDb(db);
         return NextResponse.json({
           success: removed.length > 0,
@@ -823,9 +1029,18 @@ export async function POST(request: Request) {
           );
         }
         const nowTs = Math.floor(Date.now() / 1000);
-        db.prepare(
-          "UPDATE monitor_watchlist SET watch_price = ?, watch_price_date = ?, updated_at = ? WHERE symbol = ?"
-        ).run(price, todayStr(), nowTs, code);
+        db.transaction(() => {
+          db.prepare(
+            "UPDATE monitor_watchlist SET watch_price = ?, watch_price_date = ?, updated_at = ? WHERE symbol = ?"
+          ).run(price, todayStr(), nowTs, code);
+          recordConfigAudit(db, {
+            action: "reset_watch_price",
+            entity: "monitor_watchlist",
+            key: code,
+            before: watchRowToAudit(row),
+            after: watchRowToAudit(readWatchRow(db, code)),
+          });
+        })();
         const snapshotWarnWp = exportMonitorSnapshotFromDb(db);
         return NextResponse.json({
           success: true,
@@ -845,6 +1060,6 @@ export async function POST(request: Request) {
   } catch (e) {
     return NextResponse.json({ success: false, message: String(e) }, { status: 500 });
   } finally {
-    db?.close();
+    db.close();
   }
 }
