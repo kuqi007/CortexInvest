@@ -670,32 +670,30 @@ def fetch_realtime_tencent(symbols: list[str]) -> list[dict]:
             if len(parts) < 50 or not parts[2]:
                 continue
 
-            code_raw = parts[2]  # e.g. "000021", "00700"
-            # 转换回原始 symbol
-            if code_raw.isdigit() and len(code_raw) == 6:
-                # A 股
-                code = f"sz{code_raw}" if code_raw.startswith(("0", "3", "4", "8")) else f"sh{code_raw}"
-            elif code_raw.startswith("hk"):
-                code = code_raw.upper()
-            else:
-                code = parts[2]
+            code_raw = parts[2]  # e.g. "000021" (A股), "00700" (HK)
 
-            # 验证在原始请求列表中
-            if code not in symbols:
-                # 尝试匹配（去掉前缀）
-                matched = False
-                for orig in symbols:
-                    if orig.endswith(code_raw) or orig.upper() == f"HK{code_raw}":
-                        code = orig
-                        matched = True
-                        break
-                if not matched:
-                    continue
+            # 验证在原始请求列表中，转换 code_raw → 原始 symbol
+            # symbols 格式：A股如 '000021'，港股如 'HK00700'
+            matched_symbol = None
+            for orig in symbols:
+                # A 股：'000021' 或 'sz000021' → 都匹配 code_raw='000021'
+                sym = orig.removeprefix("sz").removeprefix("sh")
+                if sym == code_raw:
+                    matched_symbol = orig
+                    break
+                # 港股：'HK00700' → code_raw='00700'
+                if orig.upper().removeprefix("HK") == code_raw:
+                    matched_symbol = orig
+                    break
+            if not matched_symbol:
+                continue
+            code = matched_symbol
 
             price = float(parts[3]) if parts[3] else 0
             prev_close = float(parts[4]) if parts[4] else 0
             open_price = float(parts[5]) if parts[5] else 0
-            volume = int(parts[36]) if parts[36] else 0  # 成交量(手)
+            # HK 数据 parts[36] 是浮点数字符串如 "19321018.0"，需先转 float 再转 int
+            volume = int(float(parts[36])) if parts[36] else 0  # 成交量(手)
             amount = float(parts[37]) if parts[37] else 0  # 成交额(元)
             turnover = float(parts[38]) if parts[38] else 0  # 换手率%
             vol_ratio = float(parts[49]) if parts[49] else 0  # 量比

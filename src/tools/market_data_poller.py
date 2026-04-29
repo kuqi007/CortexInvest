@@ -484,22 +484,22 @@ def _backfill_missing_names(stocks: list[dict], watchlist: dict) -> bool:
 
 
 def fetch_realtime_with_fallback(symbols: list[str]) -> tuple[list[dict], bool]:
-    """优先东方财富，失败回退腾讯财经（含 turnover/vol_ratio），再失败回退新浪（仅价格）
+    """优先腾讯财经，失败回退东方财富（含 turnover/vol_ratio），再失败回退新浪（仅价格）
 
-    腾讯财经提供 A 股量比/换手率，EM 不可用时的最佳 fallback。
+    腾讯财经提供 A 股量比/换手率，作为首选数据源。
     Returns:
         (stocks, is_tencent_fallback, is_sina_fallback)
     """
-    stocks = fetch_realtime_eastmoney(symbols)
+    stocks = fetch_realtime_tencent(symbols)
     if stocks:
         return stocks, False, False
 
-    logger.warning("东方财富不可达，回退腾讯财经行情")
-    tencent_stocks = fetch_realtime_tencent(symbols)
-    if tencent_stocks:
-        return tencent_stocks, True, False
+    logger.warning("腾讯财经不可达，回退东方财富行情")
+    em_stocks = fetch_realtime_eastmoney(symbols)
+    if em_stocks:
+        return em_stocks, False, False
 
-    logger.warning("腾讯财经不可达，回退新浪行情（无量比/换手率）")
+    logger.warning("东方财富不可达，回退新浪行情（无量比/换手率）")
     sina_quotes = fetch_realtime_sina(symbols)
     if not sina_quotes:
         return [], True, True
