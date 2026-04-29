@@ -246,3 +246,52 @@ def test_alert_clusterer_reads_settings_from_db_not_alert_json(tmp_path, monkeyp
 
     assert clusterer.enabled is False
     assert clusterer._min_count == 7
+
+
+def test_check_l2_signals_dedups_by_code_strategy_not_display(tmp_path, monkeypatch):
+    """Regression: dedup key is (code, strategy), not (code, display).
+    Same stock + same strategy with different display text → only 1 alert.
+    Fixes: 胜宏科技 momentum_alert fired 15x/day with varying display values.
+    """
+    monkeypatch.setattr(db, "_db_path_override", str(tmp_path / "trading.db"))
+    monkeypatch.setattr(db, "_config_db_path_override", str(tmp_path / "config.db"))
+    db.init_trading_db()
+    notifier.check_l2_signals._last_consumed = 0
+    notifier.check_l2_signals._daily_counts = {}
+    notifier.check_l2_signals._seen_today = set()
+
+    ts = int(datetime.now().timestamp() * 1000)
+    today = datetime.now().strftime("%Y-%m-%d")
+    conn = db.get_connection()
+    # Insert TWO signals: same code + strategy, different display (simulating tick-by-tick value changes)
+    for i, display in enumerate([
+        "HK02476 胜宏科技 动量确认: 日涨5.5% | 大单净买入6759万(3笔)",
+        "HK02476 胜宏科技 动量确认: 日涨7.4% | 大单净买入5770万(4笔)",
+    ]):
+        conn.execute(
+            """
+            INSERT INTO signals
+                (ts, date, time, strategy, code, direction, notify, detail, display)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                ts + i,
+                today,
+                "10:00:00",
+                "momentum_alert",
+                "HK02476",
+                "bullish",
+                1,
+                "{}",
+                display,
+            ),
+        )
+    conn.commit()
+    conn.close()
+
+    alerts = notifier.check_l2_signals()
+
+    # Should get exactly 1 alert — second signal deduped by (code, strategy)
+    assert len(alerts) == 1
+    assert alerts[0]["symbol"] == "HK02476"
+    assert "momentum_alert" in alerts[0]["title"]

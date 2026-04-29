@@ -87,9 +87,21 @@ Merge: `{**DEFAULT_POLICIES[level], **user_overrides}`
 ## Delta-Driven (Not State-Driven)
 
 - First trigger: `|daily change%| >= trigger_pct`
-- Re-trigger: `|price - last_notified_price| / last_notified_price >= delta_pct`
+- Re-trigger: `cooldown_min` 门控优先 — 冷却期内不检查 delta；冷却期后 `|price - last_notified_price| / last_notified_price >= delta_pct`
 - Threshold (above/below): also protected by delta — first breach notifies, then needs delta change
 - Price unchanged → no repeat notification
+
+## L2 Signal Dedup
+
+- `check_l2_signals()` 去重 key: `(code, strategy)` — 不用 `(code, display)`，display 含动态数值（涨跌幅、净额）每 tick 变化会导致去重失效
+- `_load_seen_today_from_db()`: 从 `signals` 表读取 `ts <= watermark` 的已消费信号，防止 notifier 重启后吞掉未消费信号
+- L2 daemon 重启恢复: `CooldownManager.restore_from_db()` + `DailyIndicatorTracker.restore_from_db()` 从 signals 表恢复内存去重状态
+
+## DRIFT Tier 规则
+
+- 跨越高 tier 时自动填充所有低位 tier（防止回落时触发 spurious alerts）
+- Retrace 告警有 5 分钟 per-key cooldown（防止阈值附近振荡）
+- Retrace level 跟随股票 star/type 配置，不再硬编码 level=2
 
 ## Daily Reset
 

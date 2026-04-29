@@ -347,3 +347,48 @@ def test_poll_degraded_mode_restore_from_db(tmp_path, monkeypatch):
     assert any("degraded" in w.lower() or "unavailable" in w.lower()
                for w in logged_warnings), \
         f"Warning about degraded mode must be logged. Got warnings: {logged_warnings}"
+
+
+def test_l2_engine_init_restores_state_from_db(tmp_path, monkeypatch):
+    """L2StrategyEngine.__init__ restores cooldown and daily indicator state from DB.
+    Prevents duplicate signal generation after daemon restart within same day.
+    """
+    from datetime import datetime
+
+    monkeypatch.setattr(db, "_db_path_override", str(tmp_path / "trading.db"))
+    monkeypatch.setattr(db, "_config_db_path_override", str(tmp_path / "config.db"))
+    db.init_trading_db()
+    db.init_config_db()
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    ts = int(datetime.now().timestamp() * 1000)
+
+    # Pre-populate signals table with today's data
+    conn = db.get_connection()
+    conn.execute(
+        "INSERT INTO signals (ts, date, time, strategy, code, direction, notify, detail, display) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (ts, today, "10:00:00", "momentum_alert", "HK00700", "bullish", 1, "{}", "test"),
+    )
+    conn.execute(
+        "INSERT INTO signals (ts, date, time, strategy, code, direction, notify, detail, display) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (ts + 1, today, "10:00:00", "rsi_oversold", "HK00700", "bearish", 0, "{}", "test"),
+    )
+    conn.commit()
+    conn.close()
+
+    # Create engine — __init__ should call restore_from_db
+    engine = L2StrategyEngine(
+        strategy_config={},
+        watchlist={"HK00700": {"type": "holding", "star": False, "hidden": False}},
+    )
+
+    # Verify cooldown restored: momentum_alert for HK00700 should NOT be triggerable
+    # (cooldown was just set to now, so within the cooldown window)
+    assert not engine._cooldown.can_trigger("momentum_alert", "HK00700"), \
+        "cooldown should be restored from DB, blocking re-trigger"
+
+    # Verify daily indicator tracker restored: rsi_oversold for HK00700 should be already triggered
+    assert engine._daily_indicators._already_triggered("HK00700", "rsi_oversold"), \
+        "daily indicator state should be restored from DB"

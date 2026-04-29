@@ -62,7 +62,7 @@ Hard limits — **never relax** in code changes:
 ## Test Commands
 
 ```bash
-uv run pytest src/sim_trading/test_sim_trading.py -q   # quick (~113 tests)
+uv run pytest src/sim_trading/test_sim_trading.py -q   # quick (~113 tests, 全量 194)
 uv run pytest src/sim_trading/test_sim_trading.py -v   # verbose
 cd web && npm run dev                                    # frontend :3120
 ```

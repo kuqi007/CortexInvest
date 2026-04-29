@@ -31,6 +31,7 @@ from src.tools.stock_monitor import is_hk_symbol, notify
 from src.utils.logging_config import setup_logger
 from src.utils.audit_log import insert_trading_outbox
 from src.utils.audit_system import build_audit_event_v2, make_actor
+from src.utils.audit_writer import record_db_change_best_effort
 
 logger = setup_logger("stock_notifier")
 
@@ -110,6 +111,18 @@ def _archive_and_reset(today):
         d1 = conn.execute(
             "DELETE FROM alert_events WHERE date < ?", (cutoff_30d,)
         ).rowcount
+        if d1:
+            record_db_change_best_effort(
+                conn,
+                db_name="trading.db",
+                table="alert_events",
+                action="purge",
+                key=f"date<{cutoff_30d}",
+                source="stock_notifier_cleanup",
+                actor=make_actor(actor_type="system", actor_id="stock_notifier"),
+                before={"cutoff_date": cutoff_30d, "deleted_count": d1},
+                after=None,
+            )
         # signals / price_snapshots / session_snapshots: 180 天
         d2 = conn.execute("DELETE FROM signals WHERE date < ?", (cutoff_180d,)).rowcount
         d3 = conn.execute(
@@ -1446,12 +1459,48 @@ def write_alert_events(alerts: list[dict]):
     conn = None
     try:
         conn = get_connection()
-        conn.executemany(
-            "INSERT OR IGNORE INTO alert_events "
-            "(ts, date, time, symbol, kind, level, message, display, change_pct) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            rows,
-        )
+        for row in rows:
+            cursor = conn.execute(
+                "INSERT OR IGNORE INTO alert_events "
+                "(ts, date, time, symbol, kind, level, message, display, change_pct) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                row,
+            )
+            if cursor.rowcount == 0:
+                continue
+            (
+                alert_ts,
+                alert_date,
+                alert_time,
+                symbol,
+                kind,
+                level,
+                message,
+                display,
+                change_pct,
+            ) = row
+            record_db_change_best_effort(
+                conn,
+                db_name="trading.db",
+                table="alert_events",
+                action="create",
+                key=f"{symbol}:{alert_ts}",
+                source="stock_notifier",
+                actor=make_actor(actor_type="system", actor_id="stock_notifier"),
+                before=None,
+                after={
+                    "ts": alert_ts,
+                    "date": alert_date,
+                    "time": alert_time,
+                    "symbol": symbol,
+                    "kind": kind,
+                    "level": level,
+                    "message": message,
+                    "display": display,
+                    "change_pct": change_pct,
+                },
+                hash_text_fields=True,
+            )
         conn.commit()
     except Exception as e:
         logger.warning(f"写入 alert_events 到 SQLite 失败: {e}")
@@ -1626,6 +1675,8 @@ def _load_seen_today_from_db() -> set:
 
         today_str = _dt.date.today().strftime("%Y-%m-%d")
         watermark = check_l2_signals._last_consumed
+        if not watermark:
+            return seen
         conn = get_connection()
         rows = conn.execute(
             "SELECT DISTINCT code, strategy FROM signals WHERE date = ? AND ts <= ?",
@@ -1633,8 +1684,8 @@ def _load_seen_today_from_db() -> set:
         ).fetchall()
         for code, strategy in rows:
             seen.add((code, strategy))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Load consumed L2 signals failed: {e}")
     finally:
         if conn:
             conn.close()
@@ -2208,11 +2259,46 @@ class TradePlanEngine:
             conn.execute("BEGIN")
             pending_events = getattr(self, "_pending_plan_events", [])
             for event in pending_events:
-                conn.execute(
+                cursor = conn.execute(
                     "INSERT OR IGNORE INTO trade_plan_events "
                     "(ts, date, plan_id, event_type, condition_id, label, price, shares, message) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     event,
+                )
+                if cursor.rowcount == 0:
+                    continue
+                (
+                    event_ts,
+                    event_date,
+                    plan_id,
+                    event_type,
+                    condition_id,
+                    label,
+                    price,
+                    shares,
+                    message,
+                ) = event
+                record_db_change_best_effort(
+                    conn,
+                    db_name="trading.db",
+                    table="trade_plan_events",
+                    action="create",
+                    key=f"{plan_id}:{condition_id}:{event_ts}",
+                    source="stock_notifier_trade_plan",
+                    actor=make_actor(actor_type="system", actor_id="stock_notifier"),
+                    before=None,
+                    after={
+                        "ts": event_ts,
+                        "date": event_date,
+                        "plan_id": plan_id,
+                        "event_type": event_type,
+                        "condition_id": condition_id,
+                        "label": label,
+                        "price": price,
+                        "shares": shares,
+                        "message": message,
+                    },
+                    hash_text_fields=True,
                 )
             for plan_id, plan in self._plans.items():
                 conn.execute(
@@ -2684,11 +2770,15 @@ class WatchDriftTracker:
     def __init__(self, alert_config_path):
         self._alert_config_path = alert_config_path
         self._notified_tiers = {}  # {symbol_or_tag: set of triggered tier values}
+        self._retrace_cooldown: dict[str, float] = {}  # {key: last_fire_ts}
         self._defaults = {"watch_drift_pct": 5, "watch_drift_enabled": True}
 
     def reset(self):
         """Daily reset at 08:00."""
         self._notified_tiers.clear()
+        self._retrace_cooldown.clear()
+        if hasattr(self, "_cached_step"):
+            del self._cached_step
 
     def check_stocks(self, quotes):
         """Check individual stock drift from watch_price. Returns list of alert dicts.
@@ -2722,6 +2812,7 @@ class WatchDriftTracker:
             tier = self._calc_tier(drift_pct, step)
             if tier and tier not in self._notified_tiers.get(symbol, set()):
                 self._notified_tiers.setdefault(symbol, set()).add(tier)
+                self._fill_lower_tiers(symbol, tier, drift_pct, step)
                 level = 1 if star else (2 if list_type == "holding" else 3)
                 direction = "涨" if drift_pct > 0 else "跌"
                 alerts.append(
@@ -2738,10 +2829,11 @@ class WatchDriftTracker:
                     }
                 )
             else:
+                level = 1 if star else (2 if list_type == "holding" else 3)
                 retrace_alert = self._check_retrace(
                     symbol, drift_pct, step,
                     "涨" if drift_pct > 0 else "跌",
-                    name, wp, price, is_index=False,
+                    name, wp, price, is_index=False, level=level,
                 )
                 if retrace_alert:
                     alerts.append(retrace_alert)
@@ -2776,6 +2868,7 @@ class WatchDriftTracker:
             tier = self._calc_tier(drift_pct, step)
             if tier and tier not in self._notified_tiers.get(key, set()):
                 self._notified_tiers.setdefault(key, set()).add(tier)
+                self._fill_lower_tiers(key, tier, drift_pct, step)
                 level = 1 if star else 2
                 direction = "涨" if drift_pct > 0 else "跌"
                 alerts.append(
@@ -2792,33 +2885,37 @@ class WatchDriftTracker:
                     }
                 )
             else:
+                level = 1 if star else 2
                 retrace_alert = self._check_retrace(
                     key, drift_pct, step,
                     "涨" if drift_pct > 0 else "跌",
-                    f"{tag}指数", baseline, val, is_index=True,
+                    f"{tag}指数", baseline, val, is_index=True, level=level,
                 )
                 if retrace_alert:
                     alerts.append(retrace_alert)
         return alerts
 
-    def _get_step(self, key):
-        """Get drift step % for a key (stock code or tag:name)."""
-        conn = None
-        try:
-            from src.sim_trading.db import get_config_connection
+    def _fill_lower_tiers(self, key, tier, drift_pct, step):
+        """Auto-fill all lower same-direction tiers when a new tier is crossed."""
+        sign = 1 if drift_pct > 0 else -1
+        for lower_tier in range(step, abs(tier) + 1, step):
+            self._notified_tiers.setdefault(key, set()).add(sign * lower_tier)
 
-            conn = get_config_connection()
-            row = conn.execute(
-                "SELECT value FROM monitor_settings WHERE key = ?", ("watch_drift_pct",)
-            ).fetchone()
-            if row:
-                return row["value"]
-        except Exception:
-            pass
-        finally:
-            if conn:
+    def _get_step(self, key):
+        """Get drift step % for a key (stock code or tag:name). Cached after first read."""
+        if not hasattr(self, "_cached_step"):
+            try:
+                from src.sim_trading.db import get_config_connection
+
+                conn = get_config_connection()
+                row = conn.execute(
+                    "SELECT value FROM monitor_settings WHERE key = ?", ("watch_drift_pct",)
+                ).fetchone()
                 conn.close()
-        return self._defaults["watch_drift_pct"]
+                self._cached_step = row["value"] if row else self._defaults["watch_drift_pct"]
+            except Exception:
+                self._cached_step = self._defaults["watch_drift_pct"]
+        return self._cached_step
 
     def _calc_tier(self, drift_pct, step):
         """Return the tier value if drift crosses a new step boundary, else None.
@@ -2835,7 +2932,7 @@ class WatchDriftTracker:
         return tier_value
 
     def _check_retrace(self, key, drift_pct, step, direction, name, wp_or_baseline,
-                       price_or_val, is_index=False):
+                       price_or_val, is_index=False, level=2):
         if abs(drift_pct) < 0.01:
             return None
         same_dir_tiers = {t for t in self._notified_tiers.get(key, set())
@@ -2850,6 +2947,12 @@ class WatchDriftTracker:
         if (current_tier is None or abs(current_tier) < abs(highest)):
             if retrace_tier_key in self._notified_tiers.get(key, set()):
                 return None
+            # P1: Add retrace cooldown to prevent rapid oscillation spam
+            cooldown_key = f"{key}:{retrace_tier_key}"
+            last_fired = self._retrace_cooldown.get(cooldown_key, 0)
+            if time.time() - last_fired < 300:  # 5 min
+                return None
+            self._retrace_cooldown[cooldown_key] = time.time()
             self._notified_tiers.setdefault(key, set()).add(retrace_tier_key)
 
             retrace_dir = "回落" if drift_pct >= 0 else "反弹"
@@ -2858,7 +2961,7 @@ class WatchDriftTracker:
                     "symbol": key,
                     "title": f"{name} drift {retrace_dir}",
                     "_kind": "DRIFT",
-                    "_level": 2,
+                    "_level": level,
                     "_change_pct": round(drift_pct, 1),
                     "_name": name,
                     "message": f"{name} 距基线{direction}{abs(drift_pct):.1f}% ({retrace_dir}自{abs(highest):.0f}%)",
@@ -2870,7 +2973,7 @@ class WatchDriftTracker:
                     "symbol": key,
                     "title": f"{name} drift {retrace_dir}",
                     "_kind": "DRIFT",
-                    "_level": 2,
+                    "_level": level,
                     "_change_pct": round(drift_pct, 1),
                     "_name": name,
                     "message": f"{name} 距关注{direction}{abs(drift_pct):.1f}% ({retrace_dir}自{abs(highest):.0f}%)",

@@ -16,15 +16,18 @@ _original_run = subprocess.run
 def _safe_subprocess_run(*args, **kwargs):
     """拦截 terminal-notifier 和 osascript display notification 调用"""
     cmd = args[0] if args else kwargs.get("args", [])
+    cmd_str = ""
     if isinstance(cmd, list) and len(cmd) > 0:
         cmd_str = " ".join(str(c) for c in cmd)
-        if "terminal-notifier" in cmd_str or (
-            "osascript" in cmd_str and "display notification" in cmd_str
-        ):
-            # 返回一个成功的 CompletedProcess，不实际弹窗
-            return subprocess.CompletedProcess(
-                args=cmd, returncode=0, stdout=b"", stderr=b""
-            )
+    elif isinstance(cmd, str):
+        cmd_str = cmd
+    if cmd_str and ("terminal-notifier" in cmd_str or (
+        "osascript" in cmd_str and "display notification" in cmd_str
+    )):
+        # 返回一个成功的 CompletedProcess，不实际弹窗
+        return subprocess.CompletedProcess(
+            args=cmd, returncode=0, stdout=b"", stderr=b""
+        )
     return _original_run(*args, **kwargs)
 
 
