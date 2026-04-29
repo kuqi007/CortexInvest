@@ -663,6 +663,71 @@ class TestTickDataEdgeCases:
         assert snap["HK00700"]["last_seq"] == 123
         assert snap["HK00700"]["warmed_up"] is True
 
+    def test_cooldown_manager_restore_from_db(self, mock_db, monkeypatch):
+        """Cooldown restore prevents duplicate raw signals after daemon restart."""
+        db_path, conn = mock_db
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        ts = int(datetime.now().timestamp() * 1000)
+        conn.execute(
+            "INSERT INTO signals (ts, date, time, code, strategy, direction) VALUES (?, ?, ?, ?, ?, ?)",
+            (ts, date_str, "10:00:00", "HK00700", "large_order", "bullish"),
+        )
+        conn.commit()
+        conn.close()
+
+        from src.sim_trading import db as db_module
+
+        def mock_get_conn():
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            return conn
+
+        monkeypatch.setattr(db_module, "get_connection", mock_get_conn)
+
+        from src.tools.l2_strategy_engine import CooldownManager
+
+        cooldown = CooldownManager({"large_order": 15})
+        assert cooldown.can_trigger("large_order", "HK00700") is True
+
+        cooldown.restore_from_db(date_str)
+
+        assert cooldown.can_trigger("large_order", "HK00700") is False
+
+    def test_daily_indicator_tracker_restore_from_db(self, mock_db, monkeypatch):
+        """Daily indicator restore prevents duplicate daily indicator signals after restart."""
+        db_path, conn = mock_db
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        ts = int(datetime.now().timestamp() * 1000)
+        conn.execute(
+            "INSERT INTO signals (ts, date, time, code, strategy, direction) VALUES (?, ?, ?, ?, ?, ?)",
+            (ts, date_str, "10:00:00", "HK00700", "rsi_oversold", "bullish"),
+        )
+        conn.execute(
+            "INSERT INTO signals (ts, date, time, code, strategy, direction) VALUES (?, ?, ?, ?, ?, ?)",
+            (ts, date_str, "10:01:00", "HK00700", "large_order", "bullish"),
+        )
+        conn.commit()
+        conn.close()
+
+        from src.sim_trading import db as db_module
+
+        def mock_get_conn():
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            return conn
+
+        monkeypatch.setattr(db_module, "get_connection", mock_get_conn)
+
+        from src.tools.l2_strategy_engine import DailyIndicatorTracker
+
+        tracker = DailyIndicatorTracker({})
+        assert tracker._already_triggered("HK00700", "rsi_oversold") is False
+
+        tracker.restore_from_db(date_str)
+
+        assert tracker._already_triggered("HK00700", "rsi_oversold") is True
+        assert tracker._already_triggered("HK00700", "large_order") is False
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

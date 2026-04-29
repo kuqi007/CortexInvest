@@ -1607,12 +1607,16 @@ check_l2_signals._daily_counts = {}  # {code: count} — reset daily at 08:00
 
 
 def _load_seen_today_from_db() -> set:
-    """Load today's already-seen (symbol, strategy) pairs from signals table.
+    """Load today's already-consumed (symbol, strategy) pairs from signals table.
 
     This ensures dedup survives daemon/notifier restarts — same signal
     for the same stock won't be written twice even after process restart.
     Uses signals table (has `strategy` column) instead of alert_events
     (which only has `kind='l2_strategy'` without strategy name).
+
+    IMPORTANT: Only loads signals with ts <= _last_consumed watermark,
+    so unconsumed signals are NOT marked as "seen" — they will be
+    processed normally on next check_l2_signals() call.
     """
     seen = set()
     conn = None
@@ -1621,10 +1625,11 @@ def _load_seen_today_from_db() -> set:
         import datetime as _dt
 
         today_str = _dt.date.today().strftime("%Y-%m-%d")
+        watermark = check_l2_signals._last_consumed
         conn = get_connection()
         rows = conn.execute(
-            "SELECT DISTINCT code, strategy FROM signals WHERE date = ?",
-            (today_str,),
+            "SELECT DISTINCT code, strategy FROM signals WHERE date = ? AND ts <= ?",
+            (today_str, watermark),
         ).fetchall()
         for code, strategy in rows:
             seen.add((code, strategy))

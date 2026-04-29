@@ -1016,6 +1016,32 @@ class CooldownManager:
     def reset(self):
         self._last_trigger.clear()
 
+    def restore_from_db(self, today: str):
+        """从 signals 表恢复今日已触发策略的冷却状态，防止 daemon 重启后重复触发。"""
+        conn = None
+        try:
+            from src.sim_trading.db import get_connection
+
+            conn = get_connection()
+            rows = conn.execute(
+                "SELECT strategy, code, MAX(ts) as max_ts "
+                "FROM signals WHERE date = ? GROUP BY strategy, code",
+                (today,),
+            ).fetchall()
+            count = 0
+            for row in rows:
+                key = (row["strategy"], row["code"])
+                ts_sec = row["max_ts"] / 1000  # signals.ts is millisecond
+                self._last_trigger[key] = ts_sec
+                count += 1
+            if count:
+                logger.info(f"CooldownManager restored {count} entries from DB for {today}")
+        except Exception as e:
+            logger.warning(f"CooldownManager.restore_from_db failed: {e}")
+        finally:
+            if conn is not None:
+                conn.close()
+
 
 # ══════════════════════════════════════════
 # Signal Scorer — 复合研判
@@ -1256,6 +1282,15 @@ DAILY_NOTIFY_STRATEGIES = {
     "support_breakdown",
     "macd_golden_cross",
     "macd_death_cross",
+}
+
+DAILY_INDICATOR_STRATEGIES = DAILY_NOTIFY_STRATEGIES | {
+    "rsi_overbought",
+    "rsi_oversold",
+    "volume_divergence_top",
+    "engulfing_pattern",
+    "morning_evening_star",
+    "relative_strength",
 }
 
 
@@ -2896,6 +2931,35 @@ class DailyIndicatorTracker:
         self._cf_pct_cache.clear()
         logger.info("DailyIndicatorTracker daily reset complete")
 
+    def restore_from_db(self, today: str):
+        """从 signals 表恢复今日已触发的日线指标，防止 daemon 重启后重复生成。"""
+        conn = None
+        try:
+            from src.sim_trading.db import get_connection
+
+            conn = get_connection()
+            placeholders = ",".join("?" for _ in DAILY_INDICATOR_STRATEGIES)
+            rows = conn.execute(
+                "SELECT DISTINCT code, strategy FROM signals "
+                f"WHERE date = ? AND strategy IN ({placeholders})",
+                (today, *DAILY_INDICATOR_STRATEGIES),
+            ).fetchall()
+            count = 0
+            for row in rows:
+                code = row["code"]
+                strategy = row["strategy"]
+                self._triggered_today.setdefault(code, set()).add(strategy)
+                count += 1
+            if count:
+                logger.info(
+                    f"DailyIndicatorTracker restored {count} triggered entries from DB for {today}"
+                )
+        except Exception as e:
+            logger.warning(f"DailyIndicatorTracker.restore_from_db failed: {e}")
+        finally:
+            if conn is not None:
+                conn.close()
+
 
 # ══════════════════════════════════════════
 # L2 Strategy Engine
@@ -2956,14 +3020,14 @@ class L2StrategyEngine:
         daily_cooldown = strategy_config.get("daily_indicators", {}).get(
             "cooldown_minutes", 480
         )
-        for s in DAILY_NOTIFY_STRATEGIES | {
-            "rsi_overbought",
-            "rsi_oversold",
-            "adx_trend_start",
-            "volume_divergence_top",
-        }:
+        for s in DAILY_INDICATOR_STRATEGIES:
             cooldowns[s] = daily_cooldown
         self._cooldown = CooldownManager(cooldowns)
+
+        # Restore in-memory dedup state from DB (survives daemon restart within same day)
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        self._daily_indicators.restore_from_db(today_str)
+        self._cooldown.restore_from_db(today_str)
 
         # Composite scorer (决定是否弹通知)
         scoring_cfg = strategy_config.get("scoring", {})

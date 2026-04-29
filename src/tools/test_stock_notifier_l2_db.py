@@ -163,6 +163,41 @@ def test_check_l2_signals_resumes_from_persisted_watermark(tmp_path, monkeypatch
     assert row["value_json"] == str(new_ts)
 
 
+def test_load_seen_today_only_marks_consumed_signals(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "_db_path_override", str(tmp_path / "trading.db"))
+    monkeypatch.setattr(db, "_config_db_path_override", str(tmp_path / "config.db"))
+    db.init_trading_db()
+    old_ts = int(datetime.now().timestamp() * 1000)
+    new_ts = old_ts + 1000
+    today = datetime.now().strftime("%Y-%m-%d")
+    conn = db.get_connection()
+    for ts, strategy in ((old_ts, "old_strategy"), (new_ts, "new_strategy")):
+        conn.execute(
+            """
+            INSERT INTO signals
+                (ts, date, time, strategy, code, direction, notify, detail, display)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                ts,
+                today,
+                "10:00:00",
+                strategy,
+                "HK00700",
+                "bullish",
+                1,
+                "{}",
+                strategy,
+            ),
+        )
+    conn.commit()
+    conn.close()
+
+    notifier.check_l2_signals._last_consumed = old_ts
+
+    assert notifier._load_seen_today_from_db() == {("HK00700", "old_strategy")}
+
+
 def test_panic_sell_engine_reads_thresholds_from_db_not_alert_json(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "_db_path_override", str(tmp_path / "trading.db"))
     monkeypatch.setattr(db, "_config_db_path_override", str(tmp_path / "config.db"))
