@@ -250,7 +250,7 @@ def test_poll_once_uses_db_watchlist(tmp_db, stale_json, tmp_path):
                 "prev_close": 9.9,
             }
             for s in symbols if s not in INDEX_CODES
-        ], False)  # (stocks, is_sina_fallback)
+        ], False, False)  # (stocks, is_tencent_fallback, is_sina_fallback)
 
     write_args: dict[str, list] = {}
 
@@ -317,8 +317,8 @@ def test_poll_once_extracts_chiNext_kc50_to_turnover(tmp_db, stale_json, tmp_pat
                                "amount": 10000.0, "amplitude": 1.0,
                                "turnover": 1.0, "vol_ratio": 1.0,
                                "high": 10.5, "low": 9.5, "open": 9.8,
-                               "prev_close": 9.9})
-        return (result, False)
+                                "prev_close": 9.9})
+        return (result, False, False)
 
     def fake_turnover():
         return {
@@ -545,7 +545,7 @@ def test_poll_once_index_results_empty_on_fetch_failure(tmp_db, stale_json, tmp_
     import src.tools.market_data_poller as poller
 
     def fake_realtime_fallback(symbols):
-        return ([], True)  # Empty + sina fallback
+        return ([], False, True)  # Empty + sina fallback
 
     with _config_db_patch(tmp_db), \
          patch("src.tools.market_data_poller.fetch_realtime_with_fallback", side_effect=fake_realtime_fallback), \
@@ -638,7 +638,7 @@ def test_poll_once_writes_stale_data_when_fetch_fails(tmp_db, stale_json, tmp_pa
         write_args["date_str"] = date_str
 
     def fake_realtime_fallback(symbols):
-        return ([], True)  # Empty — simulates fetch failure
+        return ([], False, True)  # Empty — simulates fetch failure
 
     with _config_db_patch(tmp_db), \
          db_patcher, \
@@ -708,7 +708,7 @@ def test_amo_uses_actual_amount_not_vol_price(tmp_db, stale_json, tmp_path):
                 "open": 49.5,
                 "prev_close": 49.25,
             }
-        ], False)
+        ], False, False)
 
     with _config_db_patch(tmp_db), \
          db_patcher, \
@@ -755,7 +755,7 @@ def test_amo_uses_actual_amount_not_vol_price(tmp_db, stale_json, tmp_path):
                 "open": 49.5,
                 "prev_close": 49.25,
             }
-        ], False)
+        ], False, False)
 
     with _config_db_patch(tmp_db), \
          db_patcher, \

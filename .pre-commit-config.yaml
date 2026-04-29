@@ -7,3 +7,9 @@ repos:
         language: system
         pass_filenames: true
         require_serial: true
+      - id: audit-coverage
+        name: Check DB mutation audit coverage
+        entry: python scripts/check_audit_coverage.py
+        language: system
+        pass_filenames: false
+        require_serial: true

@@ -1,15 +1,14 @@
-"""Signal Archiver — 价格快照采样辅助。
+"""Signal Archiver — L2 兼容归档辅助。
 
 与 l2_strategy_daemon 共生运行:
 - L2 daemon 已直接写入 signals/session_snapshots
-- 每 30s 从 price_snapshots DB 采样价格快照
+- price_snapshots 只由 market_data_poller 写入
 
 可独立运行: poetry run python src/sim_trading/signal_archiver.py
 """
 
 import logging
 import time
-from datetime import datetime
 
 from .db import get_connection, init_db
 from .l2_signal_direction import infer_l2_signal_direction
@@ -17,7 +16,6 @@ from .l2_signal_direction import infer_l2_signal_direction
 logger = logging.getLogger("signal_archiver")
 
 SIGNAL_CHECK_SEC = 5
-PRICE_SAMPLE_SEC = 30
 
 
 def _infer_direction(signal: dict) -> str:
@@ -47,76 +45,16 @@ class SignalArchiver:
         return 0
 
     def sample_prices(self) -> int:
-        """Sample current HK stock prices from price_snapshots DB. Returns sample count."""
-        now = time.time()
-        if now - self._last_price_sample < PRICE_SAMPLE_SEC:
-            return 0
-
-        self._last_price_sample = now
-        ts = int(now * 1000)
-        today = datetime.now().strftime("%Y-%m-%d")
-
-        conn = None
-        try:
-            conn = get_connection()
-            rows = conn.execute(
-                """SELECT code, name, price, volume, amount, change_pct
-                   FROM price_snapshots
-                   WHERE (code, ts) IN (
-                       SELECT code, MAX(ts) FROM price_snapshots GROUP BY code
-                   )
-                   AND code LIKE 'HK%'"""
-            ).fetchall()
-            conn.close()
-        except Exception:
-            if conn:
-                conn.close()
-            return 0
-
-        if not rows:
-            return 0
-
-        conn = get_connection()
-        saved = 0
-        for row in rows:
-            code = row["code"]
-            price = float(row["price"] or 0)
-            if price <= 0:
-                continue
-
-            try:
-                conn.execute(
-                    """INSERT OR IGNORE INTO price_snapshots
-                       (ts, date, code, price, volume, amount, change_pct)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        ts,
-                        today,
-                        code,
-                        price,
-                        float(row["volume"] or 0),
-                        float(row["amount"] or 0),
-                        float(row["change_pct"] or 0),
-                    ),
-                )
-                saved += 1
-            except Exception as e:
-                logger.debug(f"Price sample error: {e}")
-
-        conn.commit()
-        conn.close()
-
-        if saved > 0:
-            logger.info(f"Sampled {saved} HK prices from DB")
-
-        return saved
+        """No-op: price_snapshots are owned exclusively by market_data_poller."""
+        self._last_price_sample = time.time()
+        return 0
 
     def snapshot_session(self) -> int:
         """L2 daemon writes session snapshots directly to DB; kept for loop compatibility."""
         return 0
 
     def run(self):
-        """主循环: 5s 检查信号 + 30s 采样价格 + 5min session 快照。"""
+        """主循环: 保留兼容入口；实时 signals/session 由 L2 daemon 直接写 DB。"""
         self._load_watermark()
         logger.info("Signal Archiver started")
         logger.info("  signals/session: written directly by l2_strategy_daemon")

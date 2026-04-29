@@ -27,6 +27,8 @@ import numpy as np
 import pandas as pd
 
 from src.sim_trading.db import get_connection, init_db
+from src.utils.audit_system import make_actor
+from src.utils.audit_writer import record_db_change_best_effort
 
 logger = logging.getLogger(__name__)
 
@@ -1102,6 +1104,28 @@ def _save_param_version_inner(result: dict):
                 "agg_test_trades": agg.get("total_trades", 0),
             }),
         ),
+    )
+    record_db_change_best_effort(
+        conn,
+        db_name="trading.db",
+        table="param_versions",
+        action="upsert",
+        key=version,
+        source="scoring_backtester",
+        actor=make_actor(actor_type="system", actor_id="scoring_backtester"),
+        before=None,
+        after={
+            "version": version,
+            "config": config,
+            "trade_rules": result["best_thresholds"],
+            "optimization_score": result["best_objective_value"],
+            "train_sharpe": full.get("sharpe", 0),
+            "test_sharpe": agg.get("sharpe", 0),
+            "train_win_rate": full.get("win_rate", 0),
+            "test_win_rate": agg.get("win_rate", 0),
+            "train_max_dd": full.get("max_drawdown", 0),
+            "test_max_dd": agg.get("max_drawdown", 0),
+        },
     )
     conn.commit()
     conn.close()

@@ -15,10 +15,16 @@ from datetime import datetime
 
 from .db import get_connection, get_config_connection, init_db
 from .futu_trade_adapter import FutuTradeAdapter, FutuPosition, OrderUpdate
+from src.utils.audit_system import make_actor
+from src.utils.audit_writer import record_db_change_best_effort
 
 logger = logging.getLogger("l2_daemon.futu_sync")
 
 PARAM_VERSION = "live"
+
+
+def _futu_actor() -> dict[str, str]:
+    return make_actor(actor_type="system", actor_id="futu_position_sync")
 
 
 def _get_watch_row(conn, code: str) -> dict | None:
@@ -56,6 +62,27 @@ class FutuPositionSync:
         conn = get_connection()
         config_conn = get_config_connection()
         try:
+            before_rows = conn.execute("SELECT * FROM live_state").fetchall()
+            before_by_code = {
+                row["code"]: {
+                    "code": row["code"],
+                    "name": row["name"],
+                    "entry_price": row["entry_price"],
+                    "quantity": row["quantity"],
+                    "entry_time": row["entry_time"],
+                    "entry_date": row["entry_date"],
+                    "stop_loss": row["stop_loss"],
+                    "take_profit": row["take_profit"],
+                    "max_hold_days": row["max_hold_days"],
+                    "entry_strategy": row["entry_strategy"],
+                    "confidence": row["confidence"],
+                    "trigger_signals": row["trigger_signals"],
+                    "buy_cost_per_share": row["buy_cost_per_share"],
+                    "atr_at_entry": row["atr_at_entry"],
+                }
+                for row in before_rows
+            }
+            after_by_code: dict[str, dict] = {}
             # 清理不再持有的
             current_codes = set(positions.keys())
             if current_codes:
@@ -145,6 +172,22 @@ class FutuPositionSync:
                         now_ts,
                     ),
                 )
+                after_by_code[code] = {
+                    "code": code,
+                    "name": fp.name,
+                    "entry_price": fp.avg_price,
+                    "quantity": fp.quantity,
+                    "entry_time": entry_time,
+                    "entry_date": entry_date,
+                    "stop_loss": sl,
+                    "take_profit": tp,
+                    "max_hold_days": max_hold,
+                    "entry_strategy": strategy,
+                    "confidence": confidence,
+                    "trigger_signals": signals,
+                    "buy_cost_per_share": bps,
+                    "atr_at_entry": atr_entry,
+                }
 
                 # ── 持仓变更记录（按标的，须与当前 fp 同次循环内写入）──
                 old_row = _get_watch_row(config_conn, code)
@@ -162,7 +205,7 @@ class FutuPositionSync:
                     if shares_or_cost_changed or type_changed:
                         now_iso = datetime.now().isoformat(timespec="seconds")
                         try:
-                            config_conn.execute(
+                            cursor = config_conn.execute(
                                 """
                                 INSERT OR IGNORE INTO position_change_log
                                   (symbol, ts, source, shares_from, shares_to, cost_from, cost_to, type_from, type_to)
@@ -180,11 +223,63 @@ class FutuPositionSync:
                                     new_type if type_changed else None,
                                 ),
                             )
+                            if cursor.rowcount:
+                                record_db_change_best_effort(
+                                    config_conn,
+                                    db_name="config.db",
+                                    table="position_change_log",
+                                    action="create",
+                                    key=f"{code}:{now_iso}:sync",
+                                    source="futu_position_sync",
+                                    actor=_futu_actor(),
+                                    before=None,
+                                    after={
+                                        "symbol": code,
+                                        "ts": now_iso,
+                                        "source": "sync",
+                                        "shares_from": old_shares,
+                                        "shares_to": new_shares if new_shares > 0 else None,
+                                        "cost_from": old_cost,
+                                        "cost_to": new_cost,
+                                        "type_from": old_type if type_changed else None,
+                                        "type_to": new_type if type_changed else None,
+                                    },
+                                )
                             config_conn.commit()
                         except Exception as pcl_err:
                             logger.warning(
                                 f"position_change_log write failed: {pcl_err}"
                             )
+
+            actor = _futu_actor()
+            for code, before in before_by_code.items():
+                if code not in after_by_code:
+                    record_db_change_best_effort(
+                        conn,
+                        db_name="trading.db",
+                        table="live_state",
+                        action="delete",
+                        key=code,
+                        source="futu_position_sync",
+                        actor=actor,
+                        before=before,
+                        after=None,
+                    )
+            for code, after in after_by_code.items():
+                before = before_by_code.get(code)
+                if before == after:
+                    continue
+                record_db_change_best_effort(
+                    conn,
+                    db_name="trading.db",
+                    table="live_state",
+                    action="create" if before is None else "update",
+                    key=code,
+                    source="futu_position_sync",
+                    actor=actor,
+                    before=before,
+                    after=after,
+                )
 
             conn.commit()
         except Exception as e:
@@ -294,7 +389,7 @@ class FutuPositionSync:
         """Save trade to trades table."""
         conn = get_connection()
         try:
-            conn.execute(
+            cursor = conn.execute(
                 """INSERT OR IGNORE INTO trades
                    (trade_id, param_version, code, action, direction,
                     entry_price, exit_price, quantity, entry_time, exit_time,
@@ -326,6 +421,19 @@ class FutuPositionSync:
                     trade.get("notes", ""),
                 ),
             )
+            if cursor.rowcount:
+                record_db_change_best_effort(
+                    conn,
+                    db_name="trading.db",
+                    table="trades",
+                    action="create",
+                    key=trade["trade_id"],
+                    source="futu_position_sync",
+                    actor=_futu_actor(),
+                    before=None,
+                    after={**trade, "param_version": PARAM_VERSION},
+                    hash_text_fields=True,
+                )
             conn.commit()
         except Exception as e:
             logger.warning(f"Save trade error: {e}")
@@ -370,6 +478,27 @@ class FutuPositionSync:
                     positions_json,
                 ),
             )
+            record_db_change_best_effort(
+                conn,
+                db_name="trading.db",
+                table="daily_pnl",
+                action="upsert",
+                key=f"{PARAM_VERSION}:{today}",
+                source="futu_position_sync",
+                actor=_futu_actor(),
+                before=None,
+                after={
+                    "date": today,
+                    "param_version": PARAM_VERSION,
+                    "total_equity": funds.total_assets,
+                    "cash": funds.cash,
+                    "invested": funds.market_val,
+                    "daily_return": 0,
+                    "cumulative_return": 0,
+                    "drawdown_pct": 0,
+                    "positions": json.loads(positions_json),
+                },
+            )
             conn.commit()
         except Exception as e:
             logger.warning(f"Save daily_pnl error: {e}")
@@ -399,6 +528,29 @@ class FutuPositionSync:
                    VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?)""",
                 (order_id, code, side, price, qty, acc_id, reason, now_ts, now_ts),
             )
+            record_db_change_best_effort(
+                conn,
+                db_name="trading.db",
+                table="futu_orders",
+                action="upsert",
+                key=order_id,
+                source="futu_position_sync",
+                actor=_futu_actor(),
+                before=None,
+                after={
+                    "order_id": order_id,
+                    "code": code,
+                    "side": side,
+                    "price": price,
+                    "quantity": qty,
+                    "status": "PENDING",
+                    "futu_acc_id": acc_id,
+                    "exit_reason": reason,
+                    "created_at": now_ts,
+                    "updated_at": now_ts,
+                },
+                hash_text_fields=True,
+            )
             conn.commit()
         except Exception as e:
             logger.warning(f"Save order error: {e}")
@@ -414,12 +566,33 @@ class FutuPositionSync:
         conn = get_connection()
         try:
             for u in updates:
+                before_row = conn.execute(
+                    "SELECT * FROM futu_orders WHERE order_id = ?",
+                    (u.order_id,),
+                ).fetchone()
                 conn.execute(
                     """UPDATE futu_orders
                        SET status=?, filled_qty=?, avg_fill_price=?, updated_at=?
                        WHERE order_id=?""",
                     (u.status, u.filled_qty, u.avg_fill_price, now_ts, u.order_id),
                 )
+                after_row = conn.execute(
+                    "SELECT * FROM futu_orders WHERE order_id = ?",
+                    (u.order_id,),
+                ).fetchone()
+                if after_row:
+                    record_db_change_best_effort(
+                        conn,
+                        db_name="trading.db",
+                        table="futu_orders",
+                        action="update",
+                        key=u.order_id,
+                        source="futu_position_sync",
+                        actor=_futu_actor(),
+                        before=dict(before_row) if before_row else None,
+                        after=dict(after_row),
+                        hash_text_fields=True,
+                    )
             conn.commit()
         except Exception as e:
             logger.warning(f"Update order status error: {e}")

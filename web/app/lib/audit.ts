@@ -1,6 +1,34 @@
 import type Database from "better-sqlite3";
+import { randomUUID } from "crypto";
 
 type AuditDbName = "config.db" | "trading.db";
+const EXCLUDED_AUDIT_TABLES: Record<AuditDbName, Set<string>> = {
+  "config.db": new Set(),
+  "trading.db": new Set([
+    "price_snapshots",
+    "market_turnover",
+    "market_amo_history",
+    "signals",
+    "session_snapshots",
+    "tick_monitor_events",
+    "tick_monitor_state",
+    "poller_leader_lease",
+    "daily_kline",
+    "earnings_calendar",
+    "earnings_history",
+    "indicator_cache",
+    "sentiment_cache",
+    "sector_rotation",
+    "sector_daily",
+    "sector_alerts",
+    "stock_daily",
+    "stock_data_fetch_snapshots",
+    "trading_calendar_cache",
+    "morning_briefings",
+    "daily_l2_digest",
+    "daily_summaries",
+  ]),
+};
 const SENSITIVE_FIELD_FRAGMENTS = [
   "api_key",
   "apikey",
@@ -198,4 +226,51 @@ export function insertConfigAuditOutbox(db: Database.Database, event: AuditEvent
 
 export function insertTradingAuditOutbox(db: Database.Database, event: AuditEventV2) {
   insertOutbox(db, "trading_audit_outbox", "trading.db", event);
+}
+
+export function auditTableEnabled(dbName: AuditDbName, table: string) {
+  return !EXCLUDED_AUDIT_TABLES[dbName].has(table);
+}
+
+export function recordDbChangeBestEffort(
+  db: Database.Database,
+  args: {
+    dbName: AuditDbName;
+    table: string;
+    action: string;
+    key: string;
+    source: string;
+    actor: AuditActor;
+    before: Record<string, unknown> | null;
+    after: Record<string, unknown> | null;
+    metadata?: Record<string, unknown>;
+    correlationId?: string | null;
+  },
+) {
+  if (!auditTableEnabled(args.dbName, args.table)) return false;
+  try {
+    const event = buildAuditEventV2({
+      eventId: randomUUID(),
+      tsMs: Date.now(),
+      source: args.source,
+      actor: args.actor,
+      action: args.action,
+      entity: args.table,
+      key: args.key,
+      dbName: args.dbName,
+      before: args.before,
+      after: args.after,
+      metadata: args.metadata,
+      correlationId: args.correlationId,
+    });
+    if (args.dbName === "config.db") {
+      insertConfigAuditOutbox(db, event);
+    } else {
+      insertTradingAuditOutbox(db, event);
+    }
+    return true;
+  } catch (error) {
+    console.warn("best-effort audit failed", error);
+    return false;
+  }
 }

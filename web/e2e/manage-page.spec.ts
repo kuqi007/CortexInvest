@@ -127,7 +127,7 @@ test.describe("代码输入正则校验", () => {
 
   test("有效代码可提交", async ({ page }) => {
     const codeInput = page.locator('input[placeholder="000001"]').first();
-    const addButton = page.locator("text=add", { exact: false }).first();
+    const addButton = page.getByText("add").first();
 
     // Listen for dialog events
     let dialogMessage = "";

@@ -1,0 +1,14 @@
+name: Audit Coverage
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  audit-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Check DB mutation audit coverage
+        run: uv run python scripts/check_audit_coverage.py

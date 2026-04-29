@@ -31,8 +31,48 @@ logger = logging.getLogger("l2_daemon.rt_sim")
 # Config read from config.db only.
 from src.utils.config_reader import read_monitor_config
 from src.utils.notification_audit import record_notification_sent
+from src.utils.audit_system import make_actor
+from src.utils.audit_writer import record_db_change_best_effort
 
 PARAM_VERSION = "live"
+
+
+def _live_state_row_audit(row) -> dict:
+    return {
+        "code": row["code"],
+        "name": row["name"],
+        "entry_price": row["entry_price"],
+        "quantity": row["quantity"],
+        "entry_time": row["entry_time"],
+        "entry_date": row["entry_date"],
+        "stop_loss": row["stop_loss"],
+        "take_profit": row["take_profit"],
+        "max_hold_days": row["max_hold_days"],
+        "entry_strategy": row["entry_strategy"],
+        "confidence": row["confidence"],
+        "trigger_signals": row["trigger_signals"],
+        "buy_cost_per_share": row["buy_cost_per_share"],
+        "atr_at_entry": row["atr_at_entry"],
+    }
+
+
+def _live_state_position_audit(code: str, pos: Position) -> dict:
+    return {
+        "code": code,
+        "name": "",
+        "entry_price": pos.entry_price,
+        "quantity": pos.quantity,
+        "entry_time": pos.entry_time,
+        "entry_date": pos.entry_date,
+        "stop_loss": round(pos.stop_loss, 4),
+        "take_profit": round(pos.take_profit, 4) if pos.take_profit else None,
+        "max_hold_days": pos.max_hold_days,
+        "entry_strategy": pos.entry_strategy,
+        "confidence": pos.confidence,
+        "trigger_signals": json.dumps(pos.trigger_signals),
+        "buy_cost_per_share": round(pos.buy_cost_per_share, 6),
+        "atr_at_entry": round(pos.atr_at_entry, 4),
+    }
 
 
 class RealtimeSimEngine:
@@ -334,6 +374,11 @@ class RealtimeSimEngine:
         now_ts = int(time.time() * 1000)
 
         current_codes = set(self._pos_mgr.positions.keys())
+        before_rows = conn.execute("SELECT * FROM live_state").fetchall()
+        before_by_code = {
+            row["code"]: _live_state_row_audit(row)
+            for row in before_rows
+        }
         conn.execute(
             "DELETE FROM live_state WHERE code NOT IN ({})".format(
                 ",".join("?" for _ in current_codes)
@@ -385,6 +430,40 @@ class RealtimeSimEngine:
                 ),
             )
 
+        after_by_code = {
+            code: _live_state_position_audit(code, pos)
+            for code, pos in self._pos_mgr.positions.items()
+        }
+        actor = make_actor(actor_type="system", actor_id="realtime_engine")
+        for code, before in before_by_code.items():
+            if code not in after_by_code:
+                record_db_change_best_effort(
+                    conn,
+                    db_name="trading.db",
+                    table="live_state",
+                    action="delete",
+                    key=code,
+                    source="realtime_engine",
+                    actor=actor,
+                    before=before,
+                    after=None,
+                )
+        for code, after in after_by_code.items():
+            before = before_by_code.get(code)
+            if before == after:
+                continue
+            record_db_change_best_effort(
+                conn,
+                db_name="trading.db",
+                table="live_state",
+                action="create" if before is None else "update",
+                key=code,
+                source="realtime_engine",
+                actor=actor,
+                before=before,
+                after=after,
+            )
+
         conn.commit()
         conn.close()
 
@@ -392,7 +471,7 @@ class RealtimeSimEngine:
         """Save completed trade to trades table with param_version='live'."""
         conn = get_connection()
         try:
-            conn.execute(
+            cursor = conn.execute(
                 """INSERT OR IGNORE INTO trades
                    (trade_id, param_version, code, action, direction,
                     entry_price, exit_price, quantity, entry_time, exit_time,
@@ -424,6 +503,39 @@ class RealtimeSimEngine:
                     trade.get("notes", ""),
                 ),
             )
+            if cursor.rowcount:
+                record_db_change_best_effort(
+                    conn,
+                    db_name="trading.db",
+                    table="trades",
+                    action="create",
+                    key=trade["trade_id"],
+                    source="realtime_engine",
+                    actor=make_actor(actor_type="system", actor_id="realtime_engine"),
+                    before=None,
+                    after={
+                        "trade_id": trade["trade_id"],
+                        "param_version": PARAM_VERSION,
+                        "code": trade["code"],
+                        "action": trade["action"],
+                        "direction": trade["direction"],
+                        "entry_price": trade["entry_price"],
+                        "exit_price": trade["exit_price"],
+                        "quantity": trade["quantity"],
+                        "entry_date": trade["entry_date"],
+                        "exit_date": trade["exit_date"],
+                        "hold_days": trade.get("hold_days", 0),
+                        "pnl": trade["pnl"],
+                        "pnl_pct": trade["pnl_pct"],
+                        "commission": trade["commission"],
+                        "total_cost": trade.get("total_cost", trade["commission"]),
+                        "confidence": trade["confidence"],
+                        "trigger_signals": trade.get("trigger_signals", []),
+                        "exit_reason": trade["exit_reason"],
+                        "notes": trade.get("notes", ""),
+                    },
+                    hash_text_fields=True,
+                )
             conn.commit()
         except Exception as e:
             logger.warning(f"Save trade error: {e}")
@@ -950,7 +1062,7 @@ class RealtimeSimEngine:
         )
         try:
             conn = get_connection()
-            conn.execute(
+            cursor = conn.execute(
                 """INSERT OR IGNORE INTO alert_events
                    (ts, date, time, symbol, kind, level, message, display, change_pct)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -966,6 +1078,29 @@ class RealtimeSimEngine:
                     drawdown_pct,
                 ),
             )
+            if cursor.rowcount:
+                record_db_change_best_effort(
+                    conn,
+                    db_name="trading.db",
+                    table="alert_events",
+                    action="create",
+                    key=f"{code}:{now_ts}",
+                    source="realtime_engine",
+                    actor=make_actor(actor_type="system", actor_id="realtime_engine"),
+                    before=None,
+                    after={
+                        "ts": now_ts,
+                        "date": date,
+                        "time": now_time,
+                        "symbol": code,
+                        "kind": "dip_buy",
+                        "level": "L1",
+                        "message": msg,
+                        "display": display,
+                        "change_pct": drawdown_pct,
+                    },
+                    hash_text_fields=True,
+                )
             conn.commit()
             conn.close()
         except Exception as e:

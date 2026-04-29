@@ -19,6 +19,8 @@ from .signal_mapper import TradeSignalMapper
 from .position_manager import PositionManager
 from .simulation_engine import SimulationEngine
 from .trade_analyzer import TradeAnalyzer
+from src.utils.audit_system import make_actor
+from src.utils.audit_writer import record_db_change_best_effort
 
 logger = logging.getLogger("replay_runner")
 
@@ -115,12 +117,25 @@ def _estimate_atr(conn, date: str, code: str) -> float:
 
 def _save_results(conn, trades: list[dict], daily_pnl: list[dict], version: str, rules: dict):
     """Write trades and daily_pnl to DB."""
+    actor = make_actor(actor_type="system", actor_id="replay_runner")
+    rules_json = json.dumps(rules, ensure_ascii=False)
     # Save param version
     conn.execute(
         """INSERT OR REPLACE INTO param_versions
            (version, created_at, config_json, is_active)
            VALUES (?, ?, ?, 1)""",
-        (version, datetime.now().isoformat(), json.dumps(rules, ensure_ascii=False)),
+        (version, datetime.now().isoformat(), rules_json),
+    )
+    record_db_change_best_effort(
+        conn,
+        db_name="trading.db",
+        table="param_versions",
+        action="upsert",
+        key=version,
+        source="replay_runner",
+        actor=actor,
+        before=None,
+        after={"version": version, "config_json": rules_json, "is_active": 1},
     )
 
     # Save trades
@@ -144,6 +159,18 @@ def _save_results(conn, trades: list[dict], daily_pnl: list[dict], version: str,
                 t["exit_reason"], t.get("notes", ""),
             ),
         )
+        record_db_change_best_effort(
+            conn,
+            db_name="trading.db",
+            table="trades",
+            action="upsert",
+            key=t["trade_id"],
+            source="replay_runner",
+            actor=actor,
+            before=None,
+            after={**t, "param_version": version},
+            hash_text_fields=True,
+        )
 
     # Save daily PnL
     for d in daily_pnl:
@@ -157,6 +184,27 @@ def _save_results(conn, trades: list[dict], daily_pnl: list[dict], version: str,
                 d["daily_return"], d["cumulative_return"], d["drawdown_pct"],
                 json.dumps(d.get("positions", {})),
             ),
+        )
+        record_db_change_best_effort(
+            conn,
+            db_name="trading.db",
+            table="daily_pnl",
+            action="upsert",
+            key=f"{version}:{d['date']}",
+            source="replay_runner",
+            actor=actor,
+            before=None,
+            after={
+                "date": d["date"],
+                "param_version": version,
+                "total_equity": d["total_equity"],
+                "cash": d["cash"],
+                "invested": d["invested"],
+                "daily_return": d["daily_return"],
+                "cumulative_return": d["cumulative_return"],
+                "drawdown_pct": d["drawdown_pct"],
+                "positions": d.get("positions", {}),
+            },
         )
 
     conn.commit()

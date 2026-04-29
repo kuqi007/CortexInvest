@@ -31,6 +31,7 @@ from src.sim_trading.db import init_db, get_connection, get_config_connection
 from src.tools.futu_enricher import FutuL2Enricher
 from src.tools.stock_monitor import (
     fetch_realtime_eastmoney,
+    fetch_realtime_tencent,
     fetch_realtime_sina,
     fetch_realtime_yahoo,
     is_kr_symbol,
@@ -483,19 +484,25 @@ def _backfill_missing_names(stocks: list[dict], watchlist: dict) -> bool:
 
 
 def fetch_realtime_with_fallback(symbols: list[str]) -> tuple[list[dict], bool]:
-    """优先东方财富，失败回退新浪（价格能刷新，但无量比/换手率）
+    """优先东方财富，失败回退腾讯财经（含 turnover/vol_ratio），再失败回退新浪（仅价格）
 
+    腾讯财经提供 A 股量比/换手率，EM 不可用时的最佳 fallback。
     Returns:
-        (stocks, is_sina_fallback) — is_sina_fallback=True 时 turnover/vol_ratio 为 0
+        (stocks, is_tencent_fallback, is_sina_fallback)
     """
     stocks = fetch_realtime_eastmoney(symbols)
     if stocks:
-        return stocks, False
+        return stocks, False, False
 
-    logger.warning("东方财富不可达，回退新浪行情")
+    logger.warning("东方财富不可达，回退腾讯财经行情")
+    tencent_stocks = fetch_realtime_tencent(symbols)
+    if tencent_stocks:
+        return tencent_stocks, True, False
+
+    logger.warning("腾讯财经不可达，回退新浪行情（无量比/换手率）")
     sina_quotes = fetch_realtime_sina(symbols)
     if not sina_quotes:
-        return [], True
+        return [], True, True
 
     # 转换新浪格式 → 东方财富格式
     results = []
@@ -535,7 +542,7 @@ def fetch_realtime_with_fallback(symbols: list[str]) -> tuple[list[dict], bool]:
                 "prev_close": prev,
             }
         )
-    return results, True
+    return results, True, True
 
 
 def build_services(stocks: list[dict], watchlist: dict) -> list[dict]:
@@ -818,7 +825,7 @@ def poll_once() -> bool:
     # 追加 A 股指数：创业板、科创50
     INDEX_CODES = ["399006", "sh000688"]
     em_with_index = em_symbols + INDEX_CODES
-    stocks, is_sina_fallback = fetch_realtime_with_fallback(em_with_index)
+    stocks, is_tencent_fallback, is_sina_fallback = fetch_realtime_with_fallback(em_with_index)
 
     # 追加 Yahoo Finance 数据（KR 股票）
     if kr_symbols:

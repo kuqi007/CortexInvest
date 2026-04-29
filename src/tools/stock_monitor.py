@@ -615,6 +615,124 @@ def fetch_realtime_eastmoney(symbols: list[str]) -> list[dict]:
 
 
 # ══════════════════════════════════════════
+# 2b-2. 腾讯财经实时行情（含量比/换手率）
+# ══════════════════════════════════════════
+
+TENCENT_API_URL = "https://qt.gtimg.cn/q="
+
+
+def fetch_realtime_tencent(symbols: list[str]) -> list[dict]:
+    """通过腾讯财经 API 批量获取 A 股/港股实时行情（含量比/换手率）
+
+    腾讯 API 字段映射（parts 数组索引）：
+      [3] = 现价, [4] = 昨收, [5] = 今开, [6] = 成交量(手)
+      [36] = 成交量(手), [37] = 成交额(元), [38] = 换手率%, [49] = 量比
+      [33] = 最高, [34] = 最低, [41] = 最高(同花顺), [42] = 最低(同花顺)
+
+    用于 EM 不可用时的 fallback，含量比和换手率。
+
+    Returns:
+        list of dict, 按原始顺序返回，每项包含:
+        code, name, price, pct, change, volume, amount,
+        amplitude, turnover, vol_ratio, high, low, open, prev_close
+    """
+    if not symbols:
+        return []
+
+    # 腾讯 API 格式: sz000001, sh600519, hk00700
+    codes = []
+    for s in symbols:
+        if is_hk_symbol(s):
+            codes.append(f"hk{hk_code(s)}")
+        elif is_kr_symbol(s):
+            continue  # 腾讯不支持韩股
+        elif s.startswith("sh") or s.startswith("sz"):
+            codes.append(s.lower())
+        else:
+            codes.append(f"sz{s}")  # 默认深市
+
+    try:
+        resp = requests.get(
+            TENCENT_API_URL + ",".join(codes), timeout=10
+        )
+        resp.encoding = "gbk"
+    except Exception as e:
+        logger.debug(f"请求腾讯财经行情失败: {e}")
+        return []
+
+    results = []
+    for line in resp.text.strip().split("\n"):
+        if "=\"\";" in line or "=" not in line:
+            continue
+        try:
+            raw = line.split("=")[1].strip().strip('";";')
+            parts = raw.split("~")
+            if len(parts) < 50 or not parts[2]:
+                continue
+
+            code_raw = parts[2]  # e.g. "000021", "00700"
+            # 转换回原始 symbol
+            if code_raw.isdigit() and len(code_raw) == 6:
+                # A 股
+                code = f"sz{code_raw}" if code_raw.startswith(("0", "3", "4", "8")) else f"sh{code_raw}"
+            elif code_raw.startswith("hk"):
+                code = code_raw.upper()
+            else:
+                code = parts[2]
+
+            # 验证在原始请求列表中
+            if code not in symbols:
+                # 尝试匹配（去掉前缀）
+                matched = False
+                for orig in symbols:
+                    if orig.endswith(code_raw) or orig.upper() == f"HK{code_raw}":
+                        code = orig
+                        matched = True
+                        break
+                if not matched:
+                    continue
+
+            price = float(parts[3]) if parts[3] else 0
+            prev_close = float(parts[4]) if parts[4] else 0
+            open_price = float(parts[5]) if parts[5] else 0
+            volume = int(parts[36]) if parts[36] else 0  # 成交量(手)
+            amount = float(parts[37]) if parts[37] else 0  # 成交额(元)
+            turnover = float(parts[38]) if parts[38] else 0  # 换手率%
+            vol_ratio = float(parts[49]) if parts[49] else 0  # 量比
+            high = float(parts[33]) if parts[33] else 0
+            low = float(parts[34]) if parts[34] else 0
+
+            pct = float(parts[32]) if parts[32] else 0  # 涨跌幅%
+            chg = price - prev_close if prev_close > 0 and price > 0 else 0
+
+            amplitude = round((high - low) / prev_close * 100, 2) if prev_close > 0 and high > low else 0
+
+            results.append(
+                {
+                    "code": code,
+                    "name": parts[1],
+                    "price": price,
+                    "pct": pct,
+                    "change": round(chg, 3),
+                    "volume": volume,
+                    "amount": amount,
+                    "amplitude": amplitude,
+                    "turnover": turnover,
+                    "vol_ratio": vol_ratio,
+                    "high": high,
+                    "low": low,
+                    "open": open_price,
+                    "prev_close": prev_close,
+                }
+            )
+        except (ValueError, IndexError) as e:
+            logger.debug(f"腾讯行情解析失败: {e}")
+            continue
+
+    return results
+
+
+# ══════════════════════════════════════════
 # 2c. 实时行情看板（rich 表格）
 # ══════════════════════════════════════════
 

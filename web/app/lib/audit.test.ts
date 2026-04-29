@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import goldenEvent from "../../../tests/fixtures/audit_event_v2.json";
-import { buildAuditEventV2, makeActor } from "./audit";
+import { auditTableEnabled, buildAuditEventV2, makeActor, recordDbChangeBestEffort } from "./audit";
 
 describe("audit helper", () => {
   it("builds the shared v2 golden event", () => {
@@ -71,6 +71,51 @@ describe("audit helper", () => {
         after: { note: "Bearer abcdefghijklmnopqrstuvwxyz" },
       }),
     ).toThrow(/sensitive audit value/);
+  });
+
+  it("marks high-frequency trading tables as excluded", () => {
+    expect(auditTableEnabled("trading.db", "price_snapshots")).toBe(false);
+    expect(auditTableEnabled("trading.db", "market_turnover")).toBe(false);
+    expect(auditTableEnabled("trading.db", "signals")).toBe(false);
+    expect(auditTableEnabled("trading.db", "session_snapshots")).toBe(false);
+    expect(auditTableEnabled("trading.db", "tick_monitor_events")).toBe(false);
+    expect(auditTableEnabled("trading.db", "trade_plans")).toBe(true);
+  });
+
+  it("best-effort writer skips excluded tables", () => {
+    const db = {} as never;
+    const ok = recordDbChangeBestEffort(db, {
+      dbName: "trading.db",
+      table: "signals",
+      action: "create",
+      key: "sig-1",
+      source: "test",
+      actor: makeActor({ type: "system", id: "vitest" }),
+      before: null,
+      after: { code: "HK00700" },
+    });
+
+    expect(ok).toBe(false);
+  });
+
+  it("best-effort writer catches audit failures", () => {
+    const db = {
+      exec: vi.fn(() => {
+        throw new Error("ddl unavailable");
+      }),
+    } as never;
+    const ok = recordDbChangeBestEffort(db, {
+      dbName: "trading.db",
+      table: "trade_plans",
+      action: "create",
+      key: "p1",
+      source: "test",
+      actor: makeActor({ type: "system", id: "vitest" }),
+      before: null,
+      after: { id: "p1" },
+    });
+
+    expect(ok).toBe(false);
   });
 });
 

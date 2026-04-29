@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import Database from "better-sqlite3";
 import { randomUUID } from "crypto";
 import { openConfigDb, openTradingDb } from "../../lib/db";
-import { buildAuditEventV2, insertConfigAuditOutbox, makeActor } from "../../lib/audit";
+import { buildAuditEventV2, insertConfigAuditOutbox, makeActor, recordDbChangeBestEffort } from "../../lib/audit";
 
 import type { WatchEntry, MonitorConfig } from "../../types";
 import { EM_UT } from "../../theme";
@@ -415,8 +415,23 @@ function writeAlertToDb(
   symbol: string,
   entry: AlertEntry | null,
 ) {
+  const before = db.prepare("SELECT symbol, above, below, updated_at FROM alert_rules WHERE symbol = ?").get(symbol) as
+    | Record<string, unknown>
+    | undefined;
   if (!entry || (entry.above == null && entry.below == null)) {
-    db.prepare("DELETE FROM alert_rules WHERE symbol = ?").run(symbol);
+    const result = db.prepare("DELETE FROM alert_rules WHERE symbol = ?").run(symbol);
+    if (result.changes > 0) {
+      recordDbChangeBestEffort(db, {
+        dbName: "config.db",
+        table: "alert_rules",
+        action: "delete",
+        key: symbol,
+        source: "api_config",
+        actor: makeActor({ type: "user", id: "local-user" }),
+        before: before ?? null,
+        after: null,
+      });
+    }
     return;
   }
   const nowTs = Math.floor(Date.now() / 1000);
@@ -433,10 +448,38 @@ function writeAlertToDb(
     entry.below != null ? Number(entry.below) : null,
     nowTs,
   );
+  const after = db.prepare("SELECT symbol, above, below, updated_at FROM alert_rules WHERE symbol = ?").get(symbol) as
+    | Record<string, unknown>
+    | undefined;
+  recordDbChangeBestEffort(db, {
+    dbName: "config.db",
+    table: "alert_rules",
+    action: before ? "update" : "create",
+    key: symbol,
+    source: "api_config",
+    actor: makeActor({ type: "user", id: "local-user" }),
+    before: before ?? null,
+    after: after ?? null,
+  });
 }
 
 function deleteAlertFromDb(db: MonitorDb, symbol: string) {
-  db.prepare("DELETE FROM alert_rules WHERE symbol = ?").run(symbol);
+  const before = db.prepare("SELECT symbol, above, below, updated_at FROM alert_rules WHERE symbol = ?").get(symbol) as
+    | Record<string, unknown>
+    | undefined;
+  const result = db.prepare("DELETE FROM alert_rules WHERE symbol = ?").run(symbol);
+  if (result.changes > 0) {
+    recordDbChangeBestEffort(db, {
+      dbName: "config.db",
+      table: "alert_rules",
+      action: "delete",
+      key: symbol,
+      source: "api_config",
+      actor: makeActor({ type: "user", id: "local-user" }),
+      before: before ?? null,
+      after: null,
+    });
+  }
 }
 
 // ── Helpers ──

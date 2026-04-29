@@ -63,7 +63,20 @@ def _audit_flush_lock(audit_dir: Path, db_kind: str):
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
-def _read_existing_jsonl(target: Path) -> list[dict]:
+def _has_hash_chain(row: dict) -> bool:
+    return "prev_hash" in row and "hash" in row
+
+
+def _legacy_path(target: Path, now_ms: int) -> Path:
+    candidate = target.with_name(f"{target.name}.legacy.{now_ms}")
+    suffix = 1
+    while candidate.exists():
+        candidate = target.with_name(f"{target.name}.legacy.{now_ms}.{suffix}")
+        suffix += 1
+    return candidate
+
+
+def _read_existing_jsonl(target: Path, *, now_ms: int) -> list[dict]:
     if not target.exists():
         return []
     rows: list[dict] = []
@@ -78,6 +91,11 @@ def _read_existing_jsonl(target: Path) -> list[dict]:
                 raise RuntimeError(
                     f"corrupt JSONL at {target}:{line_no}; refusing audit flush"
                 ) from exc
+    if rows and not any(_has_hash_chain(row) for row in rows):
+        legacy_path = _legacy_path(target, now_ms)
+        target.replace(legacy_path)
+        _fsync_directory(target.parent)
+        return []
     verify_hash_chain(rows)
     return rows
 
@@ -156,7 +174,7 @@ def flush_outbox_once(
         conn = config["connection"]()
         conn.execute("BEGIN IMMEDIATE")
         try:
-            existing_rows = _read_existing_jsonl(jsonl_path)
+            existing_rows = _read_existing_jsonl(jsonl_path, now_ms=now_ms)
             rows = conn.execute(
                 f"""
                 SELECT event_id, payload_json
