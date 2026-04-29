@@ -76,18 +76,30 @@ cd web && npm run dev                                    # frontend :3120
 
 详见 [CLAUDE.md](./CLAUDE.md) for full project documentation.
 
-## AI Stock Notes (防止失忆)
+## AI Notes System (防止失忆)
 
-每只股票可有一份 `.claude/notes/{CODE}.md` 备忘录，保存复杂交易计划、AI 分析结论、关键观察指标。
+### 个股备忘 — `.claude/notes/{CODE}.md`
+每只股票一份，保存基本面、交易计划、历史分析。
 
 **规则**：
 - 用户提到某只股票时，AI **必须先读取**对应的 notes 文件（如果存在）
 - 分析结束后，AI **主动将新结论追加写入** `## AI 历史分析记录`**（新日期放在最上方，倒序排列）**
-- 如果 notes 不存在，AI **创建它**并写入初始分析
+- notes 只写**个股长期信息**：基本面、交易计划、关键教训、历史分析
+- **不写每日操作计划**（每日操作放 daily/）
 - 用户可随时说"帮我在 {CODE} notes 里加上..."或"读一下 {CODE} 的 notes"
 
+### 每日复盘+操作 — `.claude/daily/YYYY-MM-DD.md`
+每个交易日一份，保存当日复盘和次日操作计划。
+
+**规则**：
+- 收盘复盘时写入，文件名 = 交易日期
+- 内容：市场概况、持仓盈亏、异动点评、次日操作清单
+- AI 做次日操作建议时，**必须先读取前一天的 daily 文件**
+- 操作计划写具体的：买卖代码、价格、股数、优先级
+
 **与 trade_plans 的区别**：
-- `trading.db:trade_plans` = 结构化执行计划（程序读取）
-- `.claude/notes/` = 自由文本决策记录（AI + 人阅读，防止失忆）
+- `trade_plans.json` = 结构化执行计划（程序读取，tick_monitor 自动触发）
+- `.claude/notes/` = 个股长期备忘（基本面+交易计划+历史分析）
+- `.claude/daily/` = 每日操作清单（复盘+次日计划，跨股票）
 
 详见 [`.claude/notes/README.md`](./.claude/notes/README.md)

@@ -877,6 +877,15 @@ export function StockDrawer({
       const ok = res.ok && json.success;
       setToast(ok ? { msg: "已保存", type: "ok" } : { msg: `保存失败: ${json.message || res.status}`, type: "err" });
       if (ok) onRefreshMetrics?.();
+      // Refresh configEntry to pick up auto-promote (watching → holding)
+      if (ok && (field === "cost" || field === "shares" || field === "type")) {
+        fetch(`/api/config/${encodeURIComponent(symbol!)}`)
+          .then((r) => r.json())
+          .then((data) => {
+            if (data.found) setConfigEntry({ ...data, type: data.type || "watching" });
+          })
+          .catch(() => {});
+      }
       else if (field === "alias") setAliasOverride(undefined);
     } catch (e) {
       setToast({ msg: `保存失败: ${e}`, type: "err" });
@@ -1154,62 +1163,18 @@ export function StockDrawer({
                 </span>
                 {isPinned ? "已置顶" : "置顶"}
               </span>
-              {/* promote: watching → holding */}
+              {/* promote hint: watching → holding */}
               {configEntry?.type !== "holding" && (
-                <button
-                  onClick={async () => {
-                    if (!symbol) return;
-                    const costStr = window.prompt(`${symbol}（${configEntry?.name ?? ""}）成本价：`);
-                    if (costStr === null) return;
-                    const costVal = costStr.trim() ? Number(costStr) : null;
-                    if (costVal != null && (isNaN(costVal) || costVal <= 0)) {
-                      setToast({ msg: "成本价无效", type: "err" });
-                      setTimeout(() => setToast(null), 2500);
-                      return;
-                    }
-                    const sharesStr = window.prompt("持有股数：");
-                    if (sharesStr === null) return;
-                    const sharesVal = sharesStr.trim() ? Number(sharesStr) : null;
-                    if (sharesVal != null && (isNaN(sharesVal) || sharesVal <= 0 || !Number.isInteger(sharesVal))) {
-                      setToast({ msg: "股数无效（需正整数）", type: "err" });
-                      setTimeout(() => setToast(null), 2500);
-                      return;
-                    }
-                    try {
-                      const res = await fetch("/api/config", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ action: "update", code: symbol, data: { type: "holding", cost: costVal, shares: sharesVal } }),
-                      });
-                      const json = await res.json();
-                      if (res.ok && json.success) {
-                        onRefreshMetrics?.();
-                        onClose();
-                      } else {
-                        setToast({ msg: json.message || "操作失败", type: "err" });
-                        setTimeout(() => setToast(null), 2500);
-                      }
-                    } catch {
-                      setToast({ msg: "操作失败", type: "err" });
-                      setTimeout(() => setToast(null), 2500);
-                    }
-                  }}
-                  title="从自选升为持仓"
+                <span
                   style={{
-                    background: "transparent",
-                    border: `1px solid ${D.cyan}`,
                     color: D.cyan,
-                    cursor: "pointer",
-                    fontSize: 11,
-                    padding: "2px 10px",
-                    borderRadius: 3,
-                    fontFamily: "JetBrains Mono, monospace",
-                    userSelect: "none",
+                    fontSize: 10,
                     opacity: 0.7,
                   }}
+                  title="填写成本和股数后自动转为持仓"
                 >
-                  转持仓
-                </button>
+                  ↑ 填写成本/股数 → 自动转持仓
+                </span>
               )}
               {/* demote: holding → watching */}
               {configEntry?.type === "holding" && (
