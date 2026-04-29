@@ -634,9 +634,15 @@ class DeltaAlertEngine:
                 if not reasons:
                     continue
             else:
-                # ── Re-trigger: price delta >= delta_pct ──
+                # ── Re-trigger: cooldown + price delta >= delta_pct ──
                 prev_price = prev["price"]
-                if prev_price > 0 and delta_pct:
+                cooldown_min = policy.get("cooldown_min")
+                cooldown_ok = True
+                if cooldown_min and prev.get("ts"):
+                    elapsed_min = (time.time() - prev["ts"]) / 60
+                    if elapsed_min < cooldown_min:
+                        cooldown_ok = False
+                if cooldown_ok and prev_price > 0 and delta_pct:
                     delta = abs(price - prev_price) / prev_price * 100
                     if delta >= delta_pct:
                         if threshold_hit:
@@ -647,7 +653,7 @@ class DeltaAlertEngine:
                     continue
 
             # ── Record and build alert ──
-            self._notified[symbol] = {"price": price, "change_pct": change_pct}
+            self._notified[symbol] = {"price": price, "change_pct": change_pct, "ts": time.time()}
             kind = "threshold" if "threshold" in reasons else "big_move"
 
             is_retrigger = prev is not None
@@ -1558,9 +1564,9 @@ def check_l2_signals() -> list[dict]:
         should_notify = bool(s.get("notify", False))
 
         # Per code+strategy daily dedup: same signal for same stock only once per day
-        # Key uses (symbol, display) to survive restarts without collapsing
-        # every signal for the same stock into one alert.
-        dedup_key = (code, display)
+        # Key uses (code, strategy) — NOT display, which contains dynamic values
+        # (change_pct, net_amount, etc.) that vary every tick, causing duplicate alerts.
+        dedup_key = (code, strategy)
         if dedup_key in check_l2_signals._seen_today:
             continue
         check_l2_signals._seen_today.add(dedup_key)
@@ -1594,10 +1600,12 @@ check_l2_signals._daily_counts = {}  # {code: count} — reset daily at 08:00
 
 
 def _load_seen_today_from_db() -> set:
-    """Load today's already-written (symbol, message) pairs from alert_events DB.
+    """Load today's already-seen (symbol, strategy) pairs from signals table.
 
     This ensures dedup survives daemon/notifier restarts — same signal
     for the same stock won't be written twice even after process restart.
+    Uses signals table (has `strategy` column) instead of alert_events
+    (which only has `kind='l2_strategy'` without strategy name).
     """
     seen = set()
     conn = None
@@ -1608,11 +1616,11 @@ def _load_seen_today_from_db() -> set:
         today_str = _dt.date.today().strftime("%Y-%m-%d")
         conn = get_connection()
         rows = conn.execute(
-            "SELECT symbol, message FROM alert_events WHERE date = ? AND kind = 'l2_strategy'",
+            "SELECT DISTINCT code, strategy FROM signals WHERE date = ?",
             (today_str,),
         ).fetchall()
-        for sym, msg in rows:
-            seen.add((sym, msg))
+        for code, strategy in rows:
+            seen.add((code, strategy))
     except Exception:
         pass
     finally:
