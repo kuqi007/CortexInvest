@@ -7,21 +7,21 @@
 ## Data Flow (Single Source of Truth)
 
 ```
-config.db: monitor_watchlist  ← 唯一权威源
+POST /api/config
   ↓
-POST /api/config  → 写 DB + 导出 JSON 快照
+config.db: monitor_watchlist / monitor_settings / alert_rules  ← 唯一运行态权威源
   ↓
-Python 工具 (poller/notifier/L2)  → load_watchlist_from_db() 读 DB，JSON fallback
+config_audit_outbox → src/data/audit/config_events.jsonl
   ↓
-Web 前端 GET /api/metrics  → 读 JSON（由 DB 导出的快照）
+Python 工具 + Web API → 只读 DB，禁止 runtime JSON fallback
 ```
 
 ## Why This Matters
 
-- 直接改 JSON → Web API 的 `writeConfigSnapshot()` 会从 DB 导出 JSON，**覆盖你的手动修改**
-- 直接改 DB → JSON 不同步，Web 前端看到旧数据
-- 直接改两边 → 时序不确定，可能互相覆盖
-- **走 API 保证 DB 和 JSON 原子性双写**
+- 直接改旧 JSON → runtime 不读取，不会生效
+- 直接改 DB → 绕过 audit outbox，恢复链断裂
+- 直接改两边 → 时序不确定，无法可靠追踪历史
+- **走 API 保证业务变更和 audit outbox 同事务写入**
 
 ## Correct: Add/Update Holdings
 
@@ -39,12 +39,12 @@ curl -X POST localhost:3120/api/config \
 
 ## Wrong: Never Do This
 
-- ❌ 手动编辑 `src/data/monitor_config.json` — 会被 DB 导出覆盖
-- ❌ 直接写 `config.db` 的 `monitor_watchlist` 表 — JSON 不同步
+- ❌ 手动编辑 `src/data/monitor_config.json` — runtime 不读取，只能作为迁移/归档输入
+- ❌ 直接写 `config.db` 的 `monitor_watchlist` 表 — 绕过 audit outbox
 - ❌ 同时改 JSON 和 DB — 时序竞争，数据不一致
 
 ## Exceptions
 
-- `trade_plans.json` — 目前不走 API，可以直接编辑（JSON 是唯一源）
-- `market_data.json` — 只由 poller 写入，其他进程只读
-- 紧急修复 — 如果 API 不可用，手动修复后必须确认 DB 和 JSON 一致
+- `monitor_config_db_migrator.py` — 一次性迁移/人工导出旧 `monitor_config.json` 快照
+- `src/data/audit/*.jsonl` — audit flush 输出，只追加，不作为配置输入
+- 紧急修复 — 如果 API 不可用，手动修复 DB 后必须补录 audit 或保留清晰操作记录

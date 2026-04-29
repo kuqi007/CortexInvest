@@ -17,7 +17,7 @@
 │                   Poller (market_data_poller.py)           │
 │    东方财富 API → trading.db:price_snapshots (30s 轮询)     │
 │    汇率 hkdCnyRate → trading.db:market_turnover            │
-│    market_data.json 仅作为 DB crash 后的 recovery log       │
+│    audit JSONL 记录 mutation 历史，旧 JSON 不参与 runtime   │
 └─────────────────────────────────────────────────────────────┘
                           │
 ┌─────────────────────────▼───────────────────────────────────┐
@@ -40,7 +40,7 @@
 - Poller (`src/tools/market_data_poller.py`) 只写 `trading.db:price_snapshots`
 - Web 通过 `/api/metrics` 读取，不直接获取市场数据
 - 所有市场数据必须在 Python poller 中获取，Next.js API 路由绝不直接获取市场数据
-- `market_data.json` 仅在 DB 写入成功后作为 recovery log（标记 `_recovery: true`），不是实时数据源
+- `src/data/audit/*.jsonl` 是 mutation audit log；旧 JSON 文件不作为实时数据源或热备
 
 ### 2. 告警计算单一数据源
 
@@ -54,12 +54,12 @@
 - `position_manager.close_position` 写入 DB 的 `pnl` 字段已包含买卖双边手续费
 - Web `/api/sim` 直接读 DB pnl，不重新计算
 
-### 4. Monitor Config DB-first 双写
+### 4. Monitor Config DB-first
 
 - `/api/config` 所有写操作先写 SQLite `monitor_watchlist`/`monitor_settings` 表
-- 然后导出快照到 `monitor_config.json`
-- Python 端（Poller/Notifier）仍读 JSON
-- `CONFIG_SOURCE=json` 环境变量可强制 Web 端也读 JSON
+- 同事务写入 `config_audit_outbox`，由 audit flush 输出 JSONL
+- Python 端（Poller/Notifier）和 Web 端都读 DB
+- 旧 `monitor_config.json` 只允许迁移/人工归档工具使用，不作为 runtime fallback
 
 ### 5. 板块轮动独立于 Poller
 
@@ -71,26 +71,26 @@
 ## 数据流
 
 ```
-trading.db:price_snapshots ──────────────────────────────→ /api/metrics ──→ Web UI
-     ↑                                                              ↑
-market_data.json (recovery only)    alert_events (DB) ← DeltaAlertEngine
-     ↑                                                              ↑
-monitor_config.json ← → monitor_watchlist (DB)      stock_notifier.py
-     ↑                            ↑                                  ↑
-/api/config (Web)        /api/config (Web)
+market_data_poller ──→ trading.db:price_snapshots / market_turnover ──→ /api/metrics ──→ Web UI
+                         ↑
+config.db:monitor_watchlist / monitor_settings / alert_rules ──→ stock_notifier.py
+                         ↑
+                    /api/config (Web)
+                         ↓
+               config_audit_outbox / trading_audit_outbox ──→ src/data/audit/*.jsonl
 ```
 
 ## Config 数据职责分离
 
 | 存储 | 写入方 | 内容 |
 |------|--------|------|
-| `market_data.json` | Poller (Python) | 个股行情 + 两市成交额 (marketTurnover) + 汇率 |
-| `sim_trading.db` → `monitor_watchlist` | UI (/api/config) | 持仓配置 (主存储，DB-first) |
-| `monitor_config.json` | UI (/api/config) 双写 | 持仓配置 JSON 快照 |
-| `alert_config.json` | UI (/api/config) | 告警规则 (above/below) |
-| `sim_trading.db` → `alert_events` | Notifier (Python) | 告警事件流 |
-| `trade_plans.json` | UI + TradePlanEngine | 条件单 |
-| `sim_trading.db` → `sector_*` | sector_index_engine (Python) | 板块排名 + 自定义指数 |
+| `trading.db:price_snapshots/market_turnover` | Poller (Python) | 个股行情 + 两市成交额 + 汇率 |
+| `config.db:monitor_watchlist` | UI (/api/config) | 真实持仓/自选 |
+| `config.db:monitor_settings/alert_rules/tag_meta` | UI (/api/config, /api/sector) | 设置、价格告警、标签元数据 |
+| `trading.db:alert_events` | Notifier (Python) | 告警事件流 |
+| `trading.db:trade_plans/trade_plan_events` | UI + TradePlanEngine | 条件单和触发事件 |
+| `trading.db:sector_*` | sector_index_engine (Python) | 板块排名 + 自定义指数 |
+| `config_audit_outbox` / `trading_audit_outbox` → `src/data/audit/*.jsonl` | API/Python mutators + audit_flush | mutation 历史和 crash/replay 依据 |
 
 ## Poller 降级保护
 
@@ -121,17 +121,10 @@ Web metrics API 去掉前缀后调用东方财富。见 `emMarket()` 和 `rawCod
 
 | 文件 | 说明 |
 |------|------|
-| `monitor_config.json` | 持仓配置 |
-| `alert_config.json` | 告警规则 |
-| `trade_plans.json` | 条件单 |
-| `sim_trading.db` | SQLite 数据库 |
-| `market_data.json` | 最新行情快照 |
-| `l2_strategy_signals.json` | L2 信号 + session 上下文 |
-| `signal_rules.json` | 信号规则配置 |
-| `l2_strategy_config.json` | L2 策略参数 |
-| `sector_config.json` | 板块告警规则 |
-| `morning_briefing.json` | 早间市场简报 |
-| `daily_summary.json` | 每日信号日报 |
+| `src/data/config.db` | 真实持仓/自选/设置/告警规则 |
+| `src/data/trading.db` | 行情、告警事件、交易计划、模拟交易、板块/日报缓存 |
+| `src/data/audit/*.jsonl` + manifest | mutation audit log |
+| `stocks/` | 股票研究资料、研报、mx-data 缓存 |
 
 ### 不需要提交的（临时/派生）
 

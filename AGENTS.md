@@ -5,19 +5,19 @@ A-share/HK real-time stock monitoring + simulated trading system. Python backend
 ## Architecture
 
 ```
-market_data_poller ──→ src/data/market_data.json (30s轮询)
+market_data_poller ──→ trading.db:price_snapshots / market_turnover (30s轮询)
 stock_notifier ──────→ trading.db:alert_events (DeltaAlertEngine)
 l2_strategy_daemon ──→ trading.db (3s轮询, Futu OpenD)
-web (port 3120) ─────→ read-only JSON + DB
+web (port 3120) ─────→ read-only SQLite APIs
 ```
 
 **Data authority rules** (never violate):
-- Web/API only **read** market data — Poller is the sole producer
+- Web/API only **read** market data from DB — Poller is the sole producer
 - `DeltaAlertEngine` is the **only** alert computation source
 - `SimulationEngine.calc_cost()` is the **only** fee calculator
 - Config updates **must** go through `POST /api/config` — never edit JSON/SQLite directly
-- **DB (config.db) 是唯一权威源**，JSON (monitor_config.json) 只是备份快照
-- 数据流: `POST /api/config` → 写 DB → 导出 JSON；Python 读 DB (fallback JSON)；Web 前端读 JSON
+- **DB (config.db/trading.db) 是唯一运行态权威源**；JSON/JSONL 仅用于迁移、归档和 audit log
+- 数据流: `POST /api/config` → 写 DB + audit outbox；Python/Web 都读 DB，禁止 runtime JSON fallback
 - 加/改持仓走 API: `curl -X POST localhost:3120/api/config -H 'Content-Type: application/json' -d '{"action":"add",...}'`
 
 ## Database Split
@@ -33,7 +33,7 @@ web (port 3120) ─────→ read-only JSON + DB
 | 数据源 | 内容 | 投资决策/复盘时 |
 |--------|------|----------------|
 | `config.db:monitor_watchlist` | 用户手动维护的真实持仓 | ✅ **唯一真实持仓来源** |
-| `market_data.json` | 实时行情 | ✅ 计算浮盈浮亏 |
+| `trading.db:price_snapshots` | 实时行情 | ✅ 计算浮盈浮亏 |
 | `trading.db:alert_events` | 真实行情告警（DeltaAlertEngine） | ✅ 复盘参考 |
 | `trading.db:trades` | FutOpenD 模拟成交 | ❌ **复盘不看** |
 | `trading.db:live_state` | 模拟持仓 | ❌ **复盘不看** |
@@ -86,8 +86,8 @@ cd web && npm run dev                                    # frontend :3120
 - 如果 notes 不存在，AI **创建它**并写入初始分析
 - 用户可随时说"帮我在 {CODE} notes 里加上..."或"读一下 {CODE} 的 notes"
 
-**与 trade_plans.json 的区别**：
-- `trade_plans.json` = 结构化执行计划（程序读取）
+**与 trade_plans 的区别**：
+- `trading.db:trade_plans` = 结构化执行计划（程序读取）
 - `.claude/notes/` = 自由文本决策记录（AI + 人阅读，防止失忆）
 
 详见 [`.claude/notes/README.md`](./.claude/notes/README.md)

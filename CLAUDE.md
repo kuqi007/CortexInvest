@@ -4,11 +4,11 @@ Python 3.13 + uv, Next.js 15, SQLite。行情轮询/告警/模拟交易/Web Dash
 
 ## 规则
 
-- **本地数据优先**: 查行情/持仓/告警 → 读 `src/data/market_data.json` + SQLite，不爬外部
+- **本地数据优先**: 查行情/持仓/告警 → 读 `config.db` + `trading.db`，不爬外部
 - **Poller 唯一生产者**: Web/API 只读，不写行情数据
 - **告警单一数据源**: `stock_notifier.py` DeltaAlertEngine 是唯一计算引擎
 - **手续费单一计算源**: `SimulationEngine.calc_cost()` 是唯一来源，Web 直接读 DB pnl
-- **Config DB-first 双写**: API 写 DB → 导 JSON 快照，Python 用 `config_reader.read_monitor_config()` 读 DB，JSON 仅备份
+- **Config DB-first**: API 写 DB + audit outbox，Python 用 `config_reader.read_monitor_config()` 读 DB；旧 JSON 仅迁移/归档
 - **Config 必须通过 API 更新**: 禁止直接改 JSON/SQLite，详见 [docs/CONFIG_API.md](docs/CONFIG_API.md)
 
 ## 风控硬线（不得放松）
