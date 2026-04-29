@@ -1,0 +1,14 @@
+name: Sensitive Paths
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  check-sensitive-paths:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Reject committed runtime data paths
+        run: git ls-files -z | uv run python scripts/check_sensitive_paths.py --stdin0

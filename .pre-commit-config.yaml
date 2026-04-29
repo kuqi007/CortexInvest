@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: sensitive-runtime-data-paths
+        name: Reject sensitive runtime data paths
+        entry: bash -c 'printf "%s\0" "$@" | python scripts/check_sensitive_paths.py --stdin0' --
+        language: system
+        pass_filenames: true
+        require_serial: true
