@@ -24,9 +24,10 @@ web (port 3120) ─────→ read-only SQLite APIs
 
 | File | Mode | Purpose |
 |------|------|---------|
-| `data/config.db` | DELETE | monitor_watchlist（真实持仓/自选）, monitor_settings, tag_meta |
-| `data/trading.db` | WAL | **纯模拟交易**: trades, live_state, alert_events, signals, sector_rotation |
-| `data/sim_trading.db` | WAL | legacy (migrating to trading.db) |
+| `src/data/config.db` | DELETE | monitor_watchlist（真实持仓/自选）, monitor_settings, tag_meta, alert_rules 等 |
+| `src/data/trading.db` | WAL | 行情快照、告警、交易计划、模拟交易、板块、日报/简报缓存、audit outbox 等 |
+| `src/data/sim_trading.db` | WAL | legacy（逐步迁入 trading.db） |
+| `src/data/audit/*.jsonl` | append | mutation 审计（由 outbox flush 写入，非配置源） |
 
 ### ⚠️ 真实 vs 模拟 数据区分
 
@@ -98,7 +99,7 @@ cd web && npm run dev                                    # frontend :3120
 - 操作计划写具体的：买卖代码、价格、股数、优先级
 
 **与 trade_plans 的区别**：
-- `trade_plans.json` = 结构化执行计划（程序读取，tick_monitor 自动触发）
+- `trading.db:trade_plans`（经 `/api/config` 等 API 维护）= 结构化执行计划，`TradePlanEngine` 每 tick 检查；**不再使用根目录 `trade_plans.json` 作为运行源**
 - `.claude/notes/` = 个股长期备忘（基本面+交易计划+历史分析）
 - `.claude/daily/` = 每日操作清单（复盘+次日计划，跨股票）
 

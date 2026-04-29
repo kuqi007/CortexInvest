@@ -2,6 +2,8 @@
 
 所有自选/持仓配置变更必须通过 `POST /api/config`，禁止直接修改 JSON 或 SQLite。
 
+成功写入 `config.db` 的变更会进入 `config_audit_outbox`，由 `audit_flush` 异步刷写到 `src/data/audit/config_events.jsonl`（append-only 审计，不是配置回读源）。详见 [CLAUDE.md](../CLAUDE.md) 与 [json-to-db-audit 设计](superpowers/specs/2026-04-28-json-to-db-audit-log-design.md)。
+
 ## 端点
 
 `POST http://localhost:3120/api/config`

@@ -14,11 +14,9 @@ echo ""
 echo "[1/5] 检查 OneDrive 目录..."
 if [ ! -d "$ONEDRIVE_DIR" ]; then
     echo "  错误: 找不到 OneDrive 目录: $ONEDRIVE_DIR"
-    echo "  请先在 OneDrive 中创建 'ai-investor-data' 文件夹，并放入以下文件:"
-    echo "  - monitor_config.json (持仓配置)"
-    echo "  - alert_config.json (告警配置)"
-    echo "  - trade_plans.json (交易计划)"
-    echo "  - sim_trading.db (数据库，可为空)"
+    echo "  请先在 OneDrive 中创建 'ai-investor-data' 文件夹，并放入运行态数据库（可从旧机复制）:"
+    echo "  - config.db（持仓/自选/设置等，权威源）"
+    echo "  - trading.db（行情/告警/模拟/计划等；新环境可由 init 生成空库）"
     echo ""
     read -p "  创建目录后按回车继续，或 Ctrl+C 退出: "
 fi
@@ -32,7 +30,7 @@ fi
 if [ -z "$(ls -A "$ONEDRIVE_DIR" 2>/dev/null)" ]; then
     echo "  警告: OneDrive 目录为空!"
     echo "  请从其他电脑复制数据到: $ONEDRIVE_DIR"
-    echo "  至少需要: monitor_config.json"
+    echo "  至少需要: config.db（或按文档从空库初始化后再用 /api/config 导入）"
     echo ""
     read -p "  继续但跳过数据检查? (y/n): " -n 1 -r
     echo ""

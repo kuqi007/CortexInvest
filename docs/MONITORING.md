@@ -15,7 +15,6 @@
 - **数据源**: 东方财富 API（优先）+ 新浪财经（降级）
 - **轮询间隔**: 30s（可配置）
 - **写入**: `trading.db:price_snapshots`（个股行情）+ `trading.db:market_turnover`（大盘成交额）
-- **JSON Recovery Log**: DB 写入成功后可选写入 `market_data.json`（标记 `_recovery: true`），仅用于 DB crash 恢复
 - **降级**: 东方财富不可用时 fallback 到新浪，价格刷新但无量比/换手率
 
 ### 降级保护
@@ -30,7 +29,7 @@
 
 **Data flow**:
 ```
-trading.db:price_snapshots + monitor_config.json + alert_config.json
+trading.db:price_snapshots + config.db（read_monitor_config：watchlist / monitor_settings / alert_rules 等）
   → DeltaAlertEngine + TradePlanEngine
   → stealth_dispatch → terminal-notifier
   → trading.db:alert_events
@@ -91,9 +90,11 @@ trading.db:price_snapshots + monitor_config.json + alert_config.json
 
 ## 每日摘要生成
 
-**收盘后** (16:05-16:15): `generate_daily_summary()` 写入 `daily_summary.json`
+**收盘后** (16:05-16:15): `generate_daily_summary()` 写入 `trading.db:daily_summaries`
 
-**早间简报** (8:25-8:35): `generate_morning_briefing()` 写入 `morning_briefing.json`
+**早间简报** (8:25-8:35): `generate_morning_briefing()` 写入 `trading.db:morning_briefings`
+
+（若磁盘上仍有同名 `daily_summary.json` / `morning_briefing.json`，为旧导出或多机遗留，**运行态以 DB 表为准**。）
 
 ## TradePlanEngine 交易计划
 
@@ -106,7 +107,7 @@ trading.db:price_snapshots + monitor_config.json + alert_config.json
 
 触发后标记 `triggered=true`，写入 `trade_plan_events` SQLite 表。
 
-## Settings (monitor_config.json → settings)
+## Settings（`config.db:monitor_settings`，旧文档中的 monitor_config.json → settings）
 
 | Key | Default | Description |
 |-----|---------|-------------|

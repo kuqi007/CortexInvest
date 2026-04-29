@@ -66,14 +66,15 @@ cp .env.example .env
 ├─────────────┼─────────────┼──────────────┼──────────────────┤
 │ 行情轮询    │ 分级告警    │ 模拟交易     │ 监控面板         │
 │ 数据写入    │ 通知推送    │ 策略执行     │ 可视化展示       │
-│ market_data │ alert_events│ sim_trading  │ /api/*           │
+│ price_snap  │ alert_events│ sim/L2       │ /api/*           │
 └─────────────┴─────────────┴──────────────┴──────────────────┘
          │              │               │              │
          └──────────────┴───────────────┴──────────────┘
                               │
                     ┌─────────┴─────────┐
-                    │   sim_trading.db  │
-                    │   (SQLite)        │
+                    │ config.db +       │
+                    │ trading.db        │
+                    │ (+ audit/*.jsonl) │
                     └───────────────────┘
 ```
 
@@ -144,13 +145,11 @@ cp .env.example .env
 │   │   ├── position_manager.py        # 持仓管理
 │   │   ├── signal_mapper.py           # 信号映射
 │   │   └── futu_trade_adapter.py      # 富途适配
-│   ├── data/                  # 数据文件
-│   │   ├── monitor_config.json        # 持仓配置
-│   │   ├── alert_config.json          # 告警规则
-│   │   ├── signal_rules.json          # 信号规则
-│   │   ├── trade_plans.json           # 交易计划
-│   │   ├── market_data.json           # 行情快照
-│   │   └── sim_trading.db             # SQLite 数据库
+│   ├── data/                  # 运行态数据（常为 symlink；权威在 SQLite）
+│   │   ├── config.db                  # 持仓/自选/设置/告警规则等
+│   │   ├── trading.db               # 行情、告警、交易计划、模拟、板块、日报…
+│   │   ├── audit/*.jsonl            # mutation 审计（outbox flush 落盘）
+│   │   └── archive/                 # 历史归档快照（可选）
 │   └── utils/                 # 工具函数
 ├── web/                       # Next.js 监控面板
 │   ├── app/
@@ -196,53 +195,10 @@ uv run python -c "from src.tools.daily_summary_generator import generate_daily_s
 
 ---
 
-## ⚙️ 配置文件说明
+## ⚙️ 配置与数据
 
-### monitor_config.json
-```json
-{
-  "watchlist": {
-    "HK09988": {
-      "name": "阿里巴巴",
-      "type": "holding",
-      "cost": 155,
-      "shares": 200,
-      "lot": 100,
-      "tags": "港股科技"
-    }
-  },
-  "settings": {
-    "poll_interval": 30,
-    "big_move_pct": 3,
-    "cooldown_minutes": 10
-  }
-}
-```
-
-### alert_config.json
-```json
-{
-  "alerts": {
-    "HK09988": { "above": 166, "below": 150 }
-  }
-}
-```
-
-### trade_plans.json
-```json
-{
-  "plans": {
-    "plan_id": {
-      "name": "止盈计划",
-      "symbol": "HK09988",
-      "status": "active",
-      "orders": [
-        { "side": "sell", "op": "<=", "price": 150, "shares": 200, "label": "止损" }
-      ]
-    }
-  }
-}
-```
+- **所有配置变更**通过 Web `POST /api/config` 写入 `config.db`（禁止手改 JSON/SQLite）。说明见 [docs/CONFIG_API.md](docs/CONFIG_API.md)、项目根目录 [CLAUDE.md](CLAUDE.md)。
+- **根目录遗留 `*.json`**（如旧文档中的 `monitor_config.json`、`trade_plans.json`）已由 DB 表替代；若数据目录中仍有同名文件，多为备份或迁移前快照，**不作为运行态来源**。
 
 ---
 

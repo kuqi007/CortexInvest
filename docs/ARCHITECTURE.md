@@ -45,7 +45,7 @@
 ### 2. 告警计算单一数据源
 
 - `stock_notifier.py` 的 `DeltaAlertEngine` 是唯一告警计算引擎
-- 产出写入 `sim_trading.db:alert_events` 表
+- 产出写入 `trading.db:alert_events` 表
 - Web 前端 (`useAlerts`) 只读取展示，不做任何告警计算
 
 ### 3. 手续费单一计算源

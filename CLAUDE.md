@@ -9,6 +9,7 @@ Python 3.13 + uv, Next.js 15, SQLite。行情轮询/告警/模拟交易/Web Dash
 - **告警单一数据源**: `stock_notifier.py` DeltaAlertEngine 是唯一计算引擎
 - **手续费单一计算源**: `SimulationEngine.calc_cost()` 是唯一来源，Web 直接读 DB pnl
 - **Config DB-first**: API 写 DB + audit outbox，Python 用 `config_reader.read_monitor_config()` 读 DB；旧 JSON 仅迁移/归档
+- **Audit（变更记录）**: 对受覆盖表做 DB 变更时，经 `config_audit_outbox` / `trading_audit_outbox` 由 `audit_flush` 落盘到 `src/data/audit/*.jsonl`（含 manifest、哈希链）；高频表在 `EXCLUDED_AUDIT_TABLES` 中排除。实现见 `src/utils/audit_writer.py`、`web/app/lib/audit.ts`；CI 用 `scripts/check_audit_coverage.py` 扫描非排除表的写路径
 - **Config 必须通过 API 更新**: 禁止直接改 JSON/SQLite，详见 [docs/CONFIG_API.md](docs/CONFIG_API.md)
 
 ## 风控硬线（不得放松）
@@ -41,6 +42,13 @@ L1(star,4%,3%,弹窗+声) → L2(holding,6%,5%,弹窗) → L3(watching,threshold
 - `stocks/{CODE}_{NAME}/` — 每只股票的独立目录，保存 mx-data 缓存、研报、分析结论
 - **stocks 下的基本面分析报告是 AI 决策的重要依据**，分析或研究股票时，将结果存入对应 `stocks/` 子目录
 
+## 运行态数据目录 `src/data/`
+
+- 代码中路径为 `src/data/`（本机可为指向 OneDrive 等位置的符号链接）。**权威状态只在 SQLite**：`config.db`、`trading.db`。
+- **`audit/`**：`config_events.jsonl`、`trading_events.jsonl` 及 `.manifest.json` — mutation 审计日志，不是配置源。
+- **`archive/`**：按日归档的历史快照（如旧流程导出的日报/L2 信号），供查阅或回填，不参与实时读写主链路。
+- **根目录遗留 `*.json`（如 `monitor_config.json`、`market_data.json`、`trade_plans.json` 等）**：已由 DB 表替代，**不得作为 runtime 配置源**；若仍存在，多为迁移前备份或多机副本（`-*主机名*.json` / `-*主机名*.db`），整理前需确认是否仍被引用。
+
 ## 子文档索引
 
 | 文档 | 内容 |
@@ -53,3 +61,4 @@ L1(star,4%,3%,弹窗+声) → L2(holding,6%,5%,弹窗) → L3(watching,threshold
 | [.claude/rules/sim-trading-safety.md](.claude/rules/sim-trading-safety.md) | 风控硬线、测试覆盖要求 |
 | [docs/notification-system.md](docs/notification-system.md) | 告警分级、时段、dispatch |
 | [docs/futu-api.md](docs/futu-api.md) | Futu API 参数陷阱、额度（调 Futu 接口前必读） |
+| [docs/superpowers/specs/2026-04-28-json-to-db-audit-log-design.md](docs/superpowers/specs/2026-04-28-json-to-db-audit-log-design.md) | JSON→DB 与 audit 设计说明（表映射、排除表） |
