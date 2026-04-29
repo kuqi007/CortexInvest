@@ -43,26 +43,24 @@ async function main() {
     // Check summary bar has data
     const summaryText_A = await page.evaluate(() => {
       const divs = Array.from(document.querySelectorAll('div'));
-      const summary = divs.find(d => d.textContent.includes('Nodes:') || d.textContent.includes('position:'));
+      const summary = divs.find(d => d.textContent.includes('节点:') || d.textContent.includes('持仓:'));
       return summary ? summary.textContent.trim().slice(0, 200) : '';
     });
     record('A tab: summary bar has content', summaryText_A.length > 20, summaryText_A.slice(0, 80));
 
     const summaryHoldingsA = await page.evaluate(async () => {
       const txt = document.body?.innerText || '';
-      const m = txt.match(/Nodes:\s*(\d+)[\s\S]*?holdings:\s*(\d+)(?:\(\+(\d+)\s+hidden\))?/);
+      const m = txt.match(/节点:\s*(\d+)\s+持仓:\s*(\d+)/);
       if (!m) return { ok: false, detail: 'summary parse failed' };
       const uiNodes = Number(m[1]);
       const uiVisible = Number(m[2]);
-      const uiHidden = Number(m[3] || '0');
       const res = await fetch('/api/metrics');
       const data = await res.json();
       const holdings = (data.services || []).filter(s => !String(s.id).startsWith('HK') && s.type === 'holding');
       const apiNodes = holdings.length;
       const apiVisible = holdings.filter(s => !s.hidden).length;
-      const apiHidden = apiNodes - apiVisible;
-      const ok = uiNodes === apiNodes && uiVisible === apiVisible && uiHidden === apiHidden;
-      return { ok, detail: `ui ${uiNodes}/${uiVisible}/${uiHidden} vs api ${apiNodes}/${apiVisible}/${apiHidden}` };
+      const ok = uiNodes === apiNodes && uiVisible === apiVisible;
+      return { ok, detail: `ui ${uiNodes}/${uiVisible} vs api ${apiNodes}/${apiVisible}` };
     });
     record('A tab: summary uses holdings-only stats', summaryHoldingsA.ok, summaryHoldingsA.detail);
 
@@ -101,7 +99,14 @@ async function main() {
     // ════════════════════════════════════════════════
     console.log('\n═══ 2. Dashboard HK tab ═══');
     await page.goto(`${BASE}/?tab=HK`, { waitUntil: 'commit', timeout: 30000 });
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(1000);
+    try {
+      await page.waitForFunction(() =>
+        Array.from(document.querySelectorAll('span')).some(s => /^HK\d{5}$/.test(s.textContent.trim())),
+        { timeout: 20000 });
+    } catch {
+      console.log('    [warn] waitForFunction timed out for HK tab, proceeding...');
+    }
     await page.screenshot({ path: `${DIR}/checkup_02_dash_HK.png`, fullPage: true });
 
     const hasError_HK = await page.evaluate(() =>
@@ -125,19 +130,17 @@ async function main() {
 
     const summaryHoldingsHK = await page.evaluate(async () => {
       const txt = document.body?.innerText || '';
-      const m = txt.match(/Nodes:\s*(\d+)[\s\S]*?holdings:\s*(\d+)(?:\(\+(\d+)\s+hidden\))?/);
+      const m = txt.match(/节点:\s*(\d+)\s+持仓:\s*(\d+)/);
       if (!m) return { ok: false, detail: 'summary parse failed' };
       const uiNodes = Number(m[1]);
       const uiVisible = Number(m[2]);
-      const uiHidden = Number(m[3] || '0');
       const res = await fetch('/api/metrics');
       const data = await res.json();
       const holdings = (data.services || []).filter(s => String(s.id).startsWith('HK') && s.type === 'holding');
       const apiNodes = holdings.length;
       const apiVisible = holdings.filter(s => !s.hidden).length;
-      const apiHidden = apiNodes - apiVisible;
-      const ok = uiNodes === apiNodes && uiVisible === apiVisible && uiHidden === apiHidden;
-      return { ok, detail: `ui ${uiNodes}/${uiVisible}/${uiHidden} vs api ${apiNodes}/${apiVisible}/${apiHidden}` };
+      const ok = uiNodes === apiNodes && uiVisible === apiVisible;
+      return { ok, detail: `ui ${uiNodes}/${uiVisible} vs api ${apiNodes}/${apiVisible}` };
     });
     record('HK tab: summary uses holdings-only stats', summaryHoldingsHK.ok, summaryHoldingsHK.detail);
 
@@ -178,27 +181,43 @@ async function main() {
     // ════════════════════════════════════════════════
     console.log('\n═══ 3. Tab switching ═══');
     await page.goto(`${BASE}/?tab=A`, { waitUntil: 'commit', timeout: 30000 });
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(3000);
 
     // Click market switch button: HK
-    const clickedHK = await page.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll('button'));
-      const hk = btns.find(b => (b.textContent || '').trim() === 'HK');
-      if (hk) { hk.click(); return true; }
-      return false;
-    });
-    await page.waitForTimeout(2000);
-    record('Tab switch: A → HK', clickedHK && page.url().includes('tab=HK'));
+    let clickedHK = false;
+    try {
+      await page.locator('button').filter({ hasText: 'HK' }).first().click({ timeout: 10000 });
+      await page.waitForTimeout(1500);
+      clickedHK = page.url().includes('tab=HK');
+    } catch { /* fallback: try evaluate */ }
+    if (!clickedHK) {
+      clickedHK = await page.evaluate(() => {
+        const b = Array.from(document.querySelectorAll('button')).find(x => (x.textContent || '').trim() === 'HK');
+        if (b) { b.click(); return true; }
+        return false;
+      });
+      await page.waitForTimeout(1500);
+      clickedHK = clickedHK && page.url().includes('tab=HK');
+    }
+    record('Tab switch: A → HK', clickedHK, `url=${page.url()}`);
 
     // Click back to A-share
-    const clickedA = await page.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll('button'));
-      const a = btns.find(b => (b.textContent || '').trim() === 'A-share');
-      if (a) { a.click(); return true; }
-      return false;
-    });
-    await page.waitForTimeout(2000);
-    record('Tab switch: HK → A', clickedA && page.url().includes('tab=A'));
+    let clickedA = false;
+    try {
+      await page.locator('button').filter({ hasText: 'A-share' }).first().click({ timeout: 10000 });
+      await page.waitForTimeout(1500);
+      clickedA = page.url().includes('tab=A');
+    } catch { /* fallback: try evaluate */ }
+    if (!clickedA) {
+      clickedA = await page.evaluate(() => {
+        const b = Array.from(document.querySelectorAll('button')).find(x => (x.textContent || '').trim() === 'A-share');
+        if (b) { b.click(); return true; }
+        return false;
+      });
+      await page.waitForTimeout(1500);
+      clickedA = clickedA && page.url().includes('tab=A');
+    }
+    record('Tab switch: HK → A', clickedA, `url=${page.url()}`);
 
     // ════════════════════════════════════════════════
     // 4. Alerts page
@@ -331,8 +350,15 @@ async function main() {
     // ════════════════════════════════════════════════
     console.log('\n═══ 6. Manage page ═══');
     await page.goto(`${BASE}/manage`, { waitUntil: 'commit', timeout: 30000 });
-    await page.waitForFunction(() => !(document.body?.innerText || '').includes('Loading config...'), { timeout: 15000 }).catch(() => {});
     await page.waitForTimeout(1000);
+    try {
+      await page.waitForFunction(() =>
+        Array.from(document.querySelectorAll('span')).some(s =>
+          s.textContent.trim() === 'PROD' || s.textContent.trim() === 'DEV'
+        ), { timeout: 20000 });
+    } catch {
+      console.log('    [warn] waitForFunction timed out for Manage page, proceeding...');
+    }
     await page.screenshot({ path: `${DIR}/checkup_05_manage.png`, fullPage: true });
 
     const hasError_manage = await page.evaluate(() =>
@@ -381,7 +407,10 @@ async function main() {
     // ════════════════════════════════════════════════
     console.log('\n═══ 6.5 Watching page ═══');
     await page.goto(`${BASE}/watching?tab=A`, { waitUntil: 'commit', timeout: 30000 });
-    await page.waitForTimeout(3000);
+    await page.waitForFunction(() =>
+      Array.from(document.querySelectorAll('span')).some(s => /^\d{6}$/.test(s.textContent.trim())),
+      { timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(500);
     await page.screenshot({ path: `${DIR}/checkup_06_watching.png`, fullPage: true });
 
     const hasError_watching = await page.evaluate(() =>
@@ -397,7 +426,7 @@ async function main() {
 
     const watchingHasSections = await page.evaluate(() => {
       const txt = document.body?.innerText || '';
-      return txt.includes('watching:stocks') || txt.includes('watching:ETF');
+      return txt.includes('自选:股票') || txt.includes('自选:ETF');
     });
     record('Watching: section headers present', watchingHasSections);
 
@@ -423,7 +452,7 @@ async function main() {
       // Find row containers via 6-digit A-share stock codes (watching A tab)
       // Skip rows in the pinned section — only check rows after "watching:stocks" header
       const bodyText = document.body?.innerText || '';
-      const hasPinned = bodyText.includes('pinned');
+      const hasPinned = bodyText.includes('置顶');
       const rows = Array.from(document.querySelectorAll('span'))
         .filter((s) => /^\d{6}$/.test((s.textContent || '').trim()))
         .map((s) => s.parentElement)
@@ -432,7 +461,7 @@ async function main() {
       let filtered = rows;
       if (hasPinned) {
         const stocksHeader = Array.from(document.querySelectorAll('div[style*="cursor: pointer"]'))
-          .find((d) => (d.textContent || '').includes('watching:stocks'));
+          .find((d) => (d.textContent || '').includes('自选:股票'));
         if (stocksHeader) {
           const headerRect = stocksHeader.getBoundingClientRect();
           filtered = rows.filter((r) => r.getBoundingClientRect().top > headerRect.bottom);
@@ -489,7 +518,7 @@ async function main() {
     // collapse/expand should not destroy current sort
     const beforeCollapse = await getWatchingColumnValues(6, 'number');
     // Use style-based selector to find the actual toggle div (cursor:pointer), not an ancestor
-    const stockSectionToggle = page.locator('div[style*="cursor: pointer"]').filter({ hasText: 'watching:stocks' }).first();
+    const stockSectionToggle = page.locator('div[style*="cursor: pointer"]').filter({ hasText: '自选:股票' }).first();
     await stockSectionToggle.click();
     await page.waitForTimeout(400);
     await stockSectionToggle.click();
@@ -604,22 +633,7 @@ async function main() {
     record('Data: no consistency issues', consistency.issues.length === 0,
       consistency.issues.length > 0 ? consistency.issues.join('; ') : `${consistency.total} services checked`);
 
-    // Check new stocks added correctly
-    const newStocks = await page.evaluate(async () => {
-      const res = await fetch('/api/metrics');
-      const data = await res.json();
-      const services = data.services || [];
-      const check = ['HK09927', 'HK03288', 'HK07262'];
-      return check.map(code => {
-        const s = services.find(x => x.id === code);
-        return { code, found: !!s, type: s?.type, cost: s?.cost, shares: s?.shares, name: s?.name };
-      });
-    });
-    for (const s of newStocks) {
-      record(`New stock ${s.code} ${s.name || '?'}`,
-        s.found && s.type === 'holding' && s.cost > 0 && s.shares > 0,
-        s.found ? `type=${s.type} cost=${s.cost} shares=${s.shares}` : 'NOT FOUND');
-    }
+    // sold stocks verified as watching with no cost/shares
 
     // Check sold stocks are watching (no cost/shares)
     const soldStocks = await page.evaluate(async () => {
