@@ -108,7 +108,8 @@ Keep the existing CLI entry point and add these options:
 Default behavior should be conservative:
 
 - Run the full recognition and validation pipeline.
-- Print the import plan and write it to `--output-json` or the default plan location.
+- Print the import plan and write it to `--output-json` or the default plan location:
+  `.screenshot_import_runs/<import_run_id>/import_plan.json`.
 - Do not mutate config unless `--apply` is present.
 - Never auto-apply rejected, conflicting, or low-confidence rows.
 
@@ -123,7 +124,7 @@ Exit codes:
 - `0`: plan generated, or apply completed without failed rows.
 - `1`: usage error.
 - `2`: input error such as missing image, unreadable file, unsupported file type, or
-  image over the configured size limit.
+  image over the default size limit of 20 MB.
 - `3`: needs user input, such as low-confidence broker/type in non-interactive mode.
 - `4`: provider failure.
 - `5`: schema or validation failure.
@@ -141,8 +142,11 @@ Interactive behavior:
 Path behavior:
 
 - The input image must resolve to an existing regular file.
+- The input image must be 20 MB or smaller by default. A later implementation may add a
+  flag or environment variable for trusted local overrides.
 - The implementation should reject symlink escapes and non-regular files.
-- `--output-json` and `--debug-dir` must be written atomically.
+- `--plan`, `--output-json`, and `--debug-dir` must follow the same allowlist and
+  symlink rules as input files and must be written atomically.
 - Non-interactive runs should allow only paths under the current workspace, the user's
   Downloads directory, or roots explicitly provided through `--allow-path`.
 
@@ -229,6 +233,7 @@ Holding rows require `code`, `name`, `cost`, `shares`, `is_holding=true`, and
 - `provider` and model identifier.
 - `platform`, `screenshot_type`, classifier summary, thresholds, and content
   fingerprint.
+- `plan_hash`: hash of canonical plan content excluding mutable apply state.
 - `actionable_rows_hash`: hash of normalized rows that can be applied.
 - `auto_apply`, `needs_confirmation`, and `rejected` groups.
 - `apply_log`: optional per-row apply status, updated during `--apply`.
@@ -247,6 +252,11 @@ placeholder:
   "json_schema": {"$id": "vision_stock_import_response_v1"}
 }
 ```
+
+`image_path` is local-only process metadata. Provider wire payloads, structured logs,
+debug Tier A artifacts, and support bundles must not include absolute local paths; use
+image bytes plus MIME type for provider calls and hashes or basenames for persisted
+metadata.
 
 ## Prompt Strategy
 
@@ -323,6 +333,7 @@ Each provider wrapper should accept the same request object:
 ```json
 {
   "image_path": "/path/to/screenshot.png",
+  "mime_type": "image/png",
   "prompt": "broker-aware prompt",
   "json_schema": {"$id": "vision_stock_import_response_v1"}
 }
@@ -331,7 +342,8 @@ Each provider wrapper should accept the same request object:
 Each wrapper returns either a parsed provider response or a clear error. Automatic
 fallback is allowed only before an import plan is created and only on transport,
 timeout, or schema-parse failure. A single import plan must not mix rows from multiple
-providers. After any successful `POST /api/config`, fallback is forbidden for that run.
+providers. After `ImportPlanV1` is written, provider fallback is forbidden for that
+run; apply must use the frozen plan and cannot re-enter recognition.
 
 Before the first third-party vision call in a session, the CLI and skill must disclose
 that the screenshot may be uploaded to the selected provider and processed on vendor
@@ -373,13 +385,18 @@ Build an import plan with three groups:
 
 `auto_apply` requires all of these conditions:
 
-- Classifier confidence is at or above the configured threshold, unless the user
-  explicitly supplied `--platform` and `--type`.
+- Classifier confidence is at or above the configured threshold.
 - Model top-level confidence is at or above the configured threshold.
 - Required field confidences are at or above the configured threshold.
 - The row has no duplicate-code conflict in the screenshot.
 - The row is not a name-only match.
 - Existing system data does not show an abnormal cost or shares delta.
+
+If the original classifier confidence is below threshold and the user later supplies
+`--platform` or `--type`, holdings rows may be reclassified from `rejected` to
+`needs_confirmation`, but they must not enter `auto_apply` in the same run. Watchlist
+rows may enter `auto_apply` only if code, name, and model confidence still meet the
+normal threshold rules.
 
 Reasons for `needs_confirmation` include:
 
@@ -422,21 +439,30 @@ Recognition and apply are separate phases:
 
 1. Recognition generates `ImportPlanV1`.
 2. The plan stores `import_run_id`, provider, model id, classifier summary, thresholds,
-   content fingerprint, and `actionable_rows_hash`.
-3. Apply reads `--plan PATH` and checks the plan hash.
+   content fingerprint, `plan_hash`, and `actionable_rows_hash`.
+3. Apply reads `--plan PATH` and checks `plan_hash` against the canonical plan content
+   excluding `apply_log`.
 4. Apply must not call a vision provider or re-run prompt generation.
-5. If a user edits the plan, the hash mismatch must stop apply unless an explicit
-   force mechanism is added in a later design.
+5. Apply may update `apply_log` without changing `plan_hash` or
+   `actionable_rows_hash`.
+6. If a user edits any non-apply-log plan content, the hash mismatch must stop apply
+   unless an explicit force mechanism is added in a later design.
 
 This prevents preview/apply drift when a model returns different results across calls.
 
 ### API Apply Semantics
 
-Version 1 should not assume a config batch endpoint exists. It should call the current
-config API once per symbol:
+Version 1 should not assume a config batch endpoint exists. Although
+`docs/CONFIG_API.md` may mention `batch`, the current implementation path for this
+design is per-symbol `add` / `update`. It should call the current config API once per
+symbol:
 
-- Use `add` when the planner intends an upsert-style row from the screenshot.
-- Use `update` when the row is known to exist and only selected fields should change.
+- Re-read or refresh the config snapshot at apply time before choosing the action,
+  because the plan may be older than the current watchlist.
+- Prefer `add` for screenshot-driven full-row upsert semantics, including new rows and
+  existing rows where type/cost/shares/name are updated from the screenshot.
+- Use `update` only for explicit patch semantics where the target row is known to
+  exist and selected fields should change.
 - Never remove or demote missing holdings in this import path.
 
 The importer should use a stable application order, such as code-sorted rows with
@@ -475,7 +501,8 @@ audit payloads.
 ## Debug Artifacts
 
 Debug artifacts are off by default. Each run may write a debug package only when
-`--debug-dir` is set:
+`--debug-dir` is set. The default directory, when the user does not provide one, is
+`.screenshot_import_runs/<import_run_id>/`.
 
 ```text
 .screenshot_import_runs/<timestamp>/
@@ -492,10 +519,12 @@ them. The redacted request must not include API keys or secrets.
 These artifacts make failures diagnosable: classifier error, prompt error, provider
 error, validation too strict, or validation too loose.
 
-Because debug artifacts can contain real portfolio data, use privacy tiers:
+Because debug artifacts can contain real portfolio data, use privacy tiers. The file
+set is tier-specific; Tier A must not write full `provider_response.json`,
+`validated_result.json`, or full `import_plan.json` containing names, cost, or shares.
 
 - Tier A default: fingerprints, counts, confidence stats, provider name, hashes of
-  codes, and no names, cost, or shares.
+  codes, redacted plan summary, and no names, cost, or shares.
 - Tier B support mode: full codes but masked names and no cost or shares.
 - Tier C sensitive mode: full provider response, validated result, and import plan.
   This requires `--debug-sensitive` and a clear CLI warning.
