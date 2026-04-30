@@ -67,6 +67,44 @@
   "review": {
     "next_review_date": "{YYYY-MM-DD}",
     "interval_days": {按分类: 价值90/成长30/亏损14}
+  },
+  "shareholder_signal": {
+    "non_institutional_ratio_pct": "number",
+    "institutional_ratio_qoq_change_pp": "number",
+    "shareholder_count_qoq_change_pct": "number",
+    "top10_concentration_pct": "number",
+    "controlling_shareholder_pct": "number",
+    "risk_level": "HIGH | MEDIUM | LOW",
+    "trigger_conditions": ["string"],
+    "top10_holders": [{"name": "string", "type": "string", "ratio_pct": "number", "change": "string"}],
+    "institutional_breakdown": {"fund_etf": "number", "private_fund": "number", "social_security": "number", "hkscc": "number", "other": "number"},
+    "report_date": "string"
+  },
+  "technical_signal": {
+    "data_range_days": "number",
+    "data_end_date": "string",
+    "signal_valid_until": "string",
+    "board_type": "main_board | chinext | star",
+    "indicators": {
+      "rsi_14": {"value": "number", "oversold": "boolean", "overbought": "boolean"},
+      "macd": {"dif": "number", "dea": "number", "histogram": "number", "crossover": "string", "divergence": "string"},
+      "kdj": {"k": "number", "d": "number", "j": "number", "crossover": "string"},
+      "ma": {"ma5": "number", "ma10": "number", "ma20": "number", "ma60": "number", "arrangement": "string"},
+      "volume": {"ratio_vs_ma5": "number", "trend": "string"}
+    },
+    "synthesis_signal": "BULLISH | NEUTRAL | BEARISH",
+    "signal_consistency_score": "string",
+    "entry_levels": {
+      "support_1": "number", "support_2": "number", "resistance_1": "number",
+      "recommended_entry_range": "string", "technical_stop_loss": "number",
+      "target_price": "number", "risk_reward_ratio": "number"
+    },
+    "conflicts_with_fundamentals": "boolean"
+  },
+  "fundamental_signal": {
+    "direction": "BUY | HOLD | SELL",
+    "conviction": "HIGH | MEDIUM | LOW",
+    "rationale": "string"
   }
 }
 ```
@@ -172,6 +210,39 @@
 - **平台目标区间**: XX-XX元 (基于前瞻平台估值)
 - **止损位**: XX元
 
+### 3.5 短期技术信号参考
+
+> ⚠️ 技术信号有效期：{data_end_date} 至 {signal_valid_until}（5个交易日）
+
+#### 3.5.1 技术指标现状
+| 指标 | 数值 | 信号 |
+|------|------|------|
+| RSI(14) | {rsi_value} | {超买/超卖/中性} |
+| MACD | DIF={dif}, DEA={dea}, 柱={histogram} | {金叉/死叉/收敛} |
+| KDJ | K={k}, D={d}, J={j} | {金叉/死叉/中性} |
+| MA系统 | {ma5}>{ma10}>{ma20}>{ma60} | **{多头排列/空头排列/混乱}** |
+| 成交量 | 量比{ratio_vs_ma5} | {放量/缩量/正常} |
+
+**综合信号**: {synthesis_signal}（{signal_consistency_score}）
+
+#### 3.5.2 入场参考价位
+| 类型 | 价位 | 逻辑 |
+|------|------|------|
+| 第一支撑 | {support_1}元 | {MA20/布林下轨/近期低点} |
+| 第二支撑 | {support_2}元 | {布林下轨/近期低点} |
+| 建议入场区间 | {recommended_entry_range}元 | 回调至支撑位附近 |
+| 技术止损位 | {technical_stop_loss}元 | 支撑-{atr_pct}%ATR |
+| 目标位 | {target_price}元 | {MA60/前高}，R:R={risk_reward_ratio} |
+
+#### 3.5.3 技术与基本面共振评估
+| 维度 | 方向 | 说明 |
+|------|------|------|
+| 基本面方向 | {fundamental_signal.direction} | {fundamental_signal.rationale} |
+| 技术面方向 | {synthesis_signal} | {AI 描述技术面状态} |
+| **综合结论** | **{共振/分歧}，服从基本面** | {综合操作建议} |
+
+> ⚠️ 技术止损位（{technical_stop_loss}元）不低于基本面止损位（{fundamental_stop_loss}元）。
+
 ### 六、核心逻辑
 **看多逻辑**: 1. 2.
 **风险提示**: 1. 2.
@@ -225,3 +296,30 @@
 **政策风险等级**: 🟢/🟡/🔴
 **ESG评级**: XX
 **对估值影响**: 无/折价XX%
+
+#### F. 股东结构与筹码分析
+
+**筹码集中度评估**
+| 指标 | 数值 | 风险 |
+|------|------|------|
+| 非机构持股比例 | {non_institutional_ratio_pct}% | ✅ LOW / ⚠️ MEDIUM / 🔴 HIGH |
+| 机构持股环比 | {institutional_ratio_qoq_change_pp}pp | ✅ LOW / ⚠️ MEDIUM / 🔴 HIGH |
+| 股东户数环比 | {shareholder_count_qoq_change_pct}% | ✅ LOW / ⚠️ MEDIUM / 🔴 HIGH |
+| 十大股东集中度 | {top10_concentration_pct}% | ✅ LOW / ⚠️ MEDIUM / 🔴 HIGH |
+| 控股股东持股 | {controlling_shareholder_pct}% | ✅ LOW / ⚠️ MEDIUM / 🔴 HIGH |
+
+**综合风险等级**: {risk_level}
+
+> 解读：{AI 根据各指标综合撰写解读文本}
+
+**十大流通股东结构**
+| 类型 | 持股合计 | 环比变化 |
+|------|---------|---------|
+| 控股股东 | {pct}% | {变化} |
+| 证券投资基金/ETF | {pct}% | {变化} |
+| 私募/券商 | {pct}% | {变化} |
+| HKSCC（港股通） | {pct}% | {变化} |
+
+**风险提示**（若无 HIGH 风险则省略此节）：
+- 🔴 HIGH: {具体触发条件}
+- ⚠️ MEDIUM: {具体触发条件}
