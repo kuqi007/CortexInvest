@@ -1,68 +1,68 @@
-# Architecture Hardening All-In-One Implementation Plan
+# 架构稳定性加固一体化实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **给执行 agent：** 实施本计划时必须使用 `superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐步执行。步骤使用 checkbox（`- [ ]`）跟踪。
 
-**Goal:** Implement the full architecture hardening sequence in small, reviewable PRs: secure `/api/indicators`, block root runtime backups, add baseline CI, add architecture guards, document Web mutations, make sector GET read-only, and begin DDL centralization.
+**目标：** 用小而可审查的 PR 完成整套架构加固：修复 `/api/indicators`，阻止根目录运行态备份误提交，补基础 CI，增加架构护栏，记录 Web 写入口，让 sector GET 只读，并启动 DDL 收敛。
 
-**Architecture:** Keep the existing Python daemon + Next.js dashboard + SQLite split architecture. Do not rewrite the system. Add narrow safety rails around the highest-risk boundaries: subprocess execution, runtime data commits, test/build feedback, Web write permissions, route mutation documentation, GET purity, and schema authority.
+**架构：** 保持现有 Python daemon + Next.js dashboard + SQLite 双库架构，不重写系统。只在风险最高的边界上加窄护栏：子进程执行、运行态数据提交、测试/构建反馈、Web 写权限、route mutation 文档、GET 纯读语义和 schema 权威来源。
 
-**Tech Stack:** Python 3, uv, pytest, Next.js 15, TypeScript, Vitest, GitHub Actions, SQLite.
+**技术栈：** Python 3、uv、pytest、Next.js 15、TypeScript、Vitest、GitHub Actions、SQLite。
 
 ---
 
-## Source Spec
+## 设计依据
 
-The rationale and risk model are documented in:
+背景、问题确认和风险判断见：
 
 - `docs/superpowers/specs/2026-05-01-architecture-hardening-plan.md`
 
-This all-in-one plan replaces the need to jump between the split plan files during implementation. The split files can remain as reference copies.
+实施时只需要看这份一体化计划，不需要在多份拆分计划之间来回跳转。
 
-## Execution Order
+## 执行顺序
 
-Implement as separate PRs unless the user explicitly asks to batch:
+除非用户明确要求合并，否则按独立 PR 实施：
 
-1. PR 1: Fix `/api/indicators` subprocess boundary.
-2. PR 2: Protect root `backups/`.
-3. PR 3: Add baseline CI and expand pytest discovery.
-4. PR 4: Add architecture contract checks.
-5. PR 5: Document Web mutation matrix.
-6. PR 6: Make `GET /api/sector` read-only.
-7. PR 7: Centralize DDL migration authority.
+1. PR 1：修复 `/api/indicators` 子进程边界。
+2. PR 2：保护根目录 `backups/`。
+3. PR 3：增加基础 CI，并扩大 pytest 收集范围。
+4. PR 4：增加架构契约检查。
+5. PR 5：记录 Web mutation matrix。
+6. PR 6：让 `GET /api/sector` 只读。
+7. PR 7：收敛 DDL 迁移权威来源。
 
-## Global Rules
+## 全局规则
 
-- Do not modify runtime DBs or JSON files directly.
-- Do not commit files under `backups/`.
-- Do not combine behavior changes with unrelated CI/doc changes unless explicitly requested.
-- Run each PR's focused tests before moving to the next PR.
-- Commit only when the user explicitly asks.
+- 不直接修改运行态 DB 或 JSON 文件。
+- 不提交 `backups/` 下的文件。
+- 除非明确要求，不把行为变更和无关 CI/文档变更混在一个 PR。
+- 每个 PR 完成后先跑对应的聚焦测试，再进入下一个 PR。
+- 只有用户明确要求时才提交 commit。
 
 ---
 
-# PR 1: Fix `/api/indicators` Subprocess Boundary
+# PR 1：修复 `/api/indicators` 子进程边界
 
-## Goal
+## 目标
 
-Replace unsafe `execSync + python -c + user input interpolation` with:
+把不安全的 `execSync + python -c + 用户输入拼接` 替换为：
 
-- strict stock code validation,
-- async `spawn`,
-- JSON over stdin,
-- Python CLI module.
+- 严格股票代码校验；
+- 异步 `spawn`；
+- 通过 stdin 传 JSON；
+- 独立 Python CLI module。
 
-## Files
+## 文件
 
-- Create: `web/app/lib/stock-code.ts`
-- Create: `web/app/lib/stock-code.test.ts`
-- Create: `src/tools/indicators_cli.py`
-- Create: `src/tools/test_indicators_cli.py`
-- Modify: `web/app/api/indicators/route.ts`
-- Create: `web/app/api/indicators/route.test.ts`
+- 新建：`web/app/lib/stock-code.ts`
+- 新建：`web/app/lib/stock-code.test.ts`
+- 新建：`src/tools/indicators_cli.py`
+- 新建：`src/tools/test_indicators_cli.py`
+- 修改：`web/app/api/indicators/route.ts`
+- 新建：`web/app/api/indicators/route.test.ts`
 
-## Task 1.1: Add Stock Code Validation
+## 任务 1.1：增加股票代码校验
 
-- [ ] Create `web/app/lib/stock-code.test.ts`:
+- 新建 `web/app/lib/stock-code.test.ts`：
 
 ```typescript
 import { describe, expect, it } from "vitest";
@@ -90,15 +90,15 @@ describe("parseStockCode", () => {
 });
 ```
 
-- [ ] Run and verify failure:
+- 运行测试并确认先失败：
 
 ```bash
 cd web && npm run test:unit -- app/lib/stock-code.test.ts
 ```
 
-Expected: import failure because `stock-code.ts` does not exist.
+预期：因为 `stock-code.ts` 尚不存在，测试因 import 失败。
 
-- [ ] Create `web/app/lib/stock-code.ts`:
+- 新建 `web/app/lib/stock-code.ts`：
 
 ```typescript
 export type StockCodeParseResult =
@@ -127,17 +127,17 @@ export function parseStockCode(raw: string | null): StockCodeParseResult {
 }
 ```
 
-- [ ] Run:
+- Run:
 
 ```bash
 cd web && npm run test:unit -- app/lib/stock-code.test.ts
 ```
 
-Expected: PASS.
+预期：PASS。
 
-## Task 1.2: Add Python Indicators CLI
+## 任务 1.2：增加 Python 指标 CLI
 
-- [ ] Create `src/tools/test_indicators_cli.py`:
+- 新建 `src/tools/test_indicators_cli.py`：
 
 ```python
 import json
@@ -215,15 +215,15 @@ def test_main_prints_json(monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out) == {"close": 10.0, "rsi": 50.0}
 ```
 
-- [ ] Run and verify failure:
+- 运行测试并确认先失败：
 
 ```bash
 uv run pytest src/tools/test_indicators_cli.py -q
 ```
 
-Expected: import failure because `src/tools/indicators_cli.py` does not exist.
+预期：因为 `src/tools/indicators_cli.py` 尚不存在，测试因 import 失败。
 
-- [ ] Create `src/tools/indicators_cli.py`:
+- 新建 `src/tools/indicators_cli.py`：
 
 ```python
 """CLI bridge for the Next.js indicators API."""
@@ -305,43 +305,41 @@ if __name__ == "__main__":
     raise SystemExit(main())
 ```
 
-- [ ] Run:
+- 运行：
 
 ```bash
 uv run pytest src/tools/test_indicators_cli.py -q
 printf '{"symbol":"603929","live_price":128.5}' | uv run python -m src.tools.indicators_cli
 ```
 
-Expected: tests pass; CLI prints one JSON object and no traceback.
+预期：测试通过；CLI 在 stdout 打印一个 JSON object，不打印 traceback。
 
-## Task 1.3: Rewrite Route to Use Spawn
+## 任务 1.3：把 route 改为使用 spawn
 
-- [ ] Create `web/app/api/indicators/route.test.ts` with mocked `child_process.spawn` and tests for:
-  - missing symbol returns 400,
-  - malformed symbol returns 400 and does not spawn,
-  - valid request calls `uv run python -m src.tools.indicators_cli`,
-  - payload is written via stdin JSON,
-  - CLI JSON error returns 500,
-  - non-zero child exit returns 502,
-  - timeout kills child and returns 504.
-
-- [ ] Run and verify failure:
+- 新建 `web/app/api/indicators/route.test.ts`，mock `child_process.spawn`，覆盖：
+  - 缺少 symbol 返回 400；
+  - 非法 symbol 返回 400 且不启动子进程；
+  - 合法请求调用 `uv run python -m src.tools.indicators_cli`；
+  - payload 通过 stdin JSON 写入；
+  - CLI 返回 JSON error 时返回 500；
+  - 子进程非 0 退出时返回 502；
+  - 超时时 kill 子进程并返回 504。
+- 运行测试并确认先失败：
 
 ```bash
 cd web && npm run test:unit -- app/api/indicators/route.test.ts
 ```
 
-- [ ] Replace `web/app/api/indicators/route.ts` so it:
-  - imports `spawn` from `child_process`,
-  - imports `parseStockCode` from `../../lib/stock-code`,
-  - removes `execSync`,
-  - removes `python -c`,
-  - calls `spawn("uv", ["run", "python", "-m", "src.tools.indicators_cli"], { cwd: ROOT, stdio: ["pipe", "pipe", "pipe"] })`,
-  - sends `child.stdin.write(JSON.stringify(payload))`,
-  - enforces 20s timeout,
-  - returns 400/500/502/504 as described above.
-
-- [ ] Verify:
+- 替换 `web/app/api/indicators/route.ts`，要求：
+  - 从 `child_process` import `spawn`；
+  - 从 `../../lib/stock-code` import `parseStockCode`；
+  - 移除 `execSync`；
+  - 移除 `python -c`；
+  - 调用 `spawn("uv", ["run", "python", "-m", "src.tools.indicators_cli"], { cwd: ROOT, stdio: ["pipe", "pipe", "pipe"] })`；
+  - 使用 `child.stdin.write(JSON.stringify(payload))` 传参；
+  - 保留 20 秒超时；
+  - 按上述要求返回 400/500/502/504。
+- 验证：
 
 ```bash
 cd web && npm run test:unit -- app/lib/stock-code.test.ts app/api/indicators/route.test.ts
@@ -350,24 +348,24 @@ rg "execSync|python -c|poetry run python" web/app/api/indicators/route.ts
 cd web && npm run build
 ```
 
-Expected: tests/build pass; `rg` has no matches.
+预期：测试和 build 通过；`rg` 无匹配。
 
 ---
 
-# PR 2: Protect Root Runtime Backups
+# PR 2：保护根目录运行态备份
 
-## Goal
+## 目标
 
-Reject repository-root `backups/` paths in the existing sensitive path scanner.
+让现有 sensitive path scanner 拒绝仓库根目录 `backups/` 路径。
 
-## Files
+## 文件
 
-- Modify: `scripts/check_sensitive_paths.py`
-- Modify: `scripts/test_check_sensitive_paths.py`
+- 修改：`scripts/check_sensitive_paths.py`
+- 修改：`scripts/test_check_sensitive_paths.py`
 
-## Tasks
+## 任务
 
-- [ ] Add root backups assertions to `test_check_paths_rejects_audit_archive_and_backup_paths()`:
+- 在 `test_check_paths_rejects_audit_archive_and_backup_paths()` 中增加根目录 backups 断言：
 
 ```python
 with pytest.raises(SensitivePathError):
@@ -376,7 +374,7 @@ with pytest.raises(SensitivePathError):
     check_paths(["BACKUPS/data_20260430_102555/config.db"])
 ```
 
-- [ ] Add stdin0 test:
+- 增加 stdin0 测试：
 
 ```python
 def test_main_rejects_root_backups_path_from_stdin(monkeypatch):
@@ -392,13 +390,13 @@ def test_main_rejects_root_backups_path_from_stdin(monkeypatch):
     assert main(["--stdin0"]) == 1
 ```
 
-- [ ] Run and verify failure:
+- 运行测试并确认先失败：
 
 ```bash
 uv run pytest scripts/test_check_sensitive_paths.py -q
 ```
 
-- [ ] Update `SENSITIVE_ROOTS`:
+- 更新 `SENSITIVE_ROOTS`：
 
 ```python
 SENSITIVE_ROOTS = (
@@ -409,39 +407,39 @@ SENSITIVE_ROOTS = (
 )
 ```
 
-- [ ] Verify:
+- 验证：
 
 ```bash
 uv run pytest scripts/test_check_sensitive_paths.py -q
 git ls-files -z | uv run python scripts/check_sensitive_paths.py --stdin0
 ```
 
-Expected: tests pass; tracked files pass if no sensitive runtime paths are already tracked.
+预期：测试通过；如果当前没有已跟踪的敏感运行态路径，`git ls-files` 检查通过。
 
 ---
 
-# PR 3: Add Basic CI Coverage
+# PR 3：增加基础 CI 覆盖
 
-## Goal
+## 目标
 
-Run Python tests, Web unit tests, and Next build in CI; make root `uv run pytest` collect more than `src/sim_trading`.
+在 CI 中运行 Python 测试、Web 单元测试和 Next build；让仓库根目录的 `uv run pytest` 不再只收集 `src/sim_trading`。
 
-## Files
+## 文件
 
-- Modify: `pyproject.toml`
-- Create: `.github/workflows/ci.yml`
+- 修改：`pyproject.toml`
+- 新建：`.github/workflows/ci.yml`
 
-## Tasks
+## 任务
 
-- [ ] Run current collection:
+- 查看当前测试收集范围：
 
 ```bash
 uv run pytest --collect-only -q
 ```
 
-Expected before change: default collection is limited by `testpaths = ["src/sim_trading"]`.
+变更前预期：默认收集范围受 `testpaths = ["src/sim_trading"]` 限制。
 
-- [ ] Update `pyproject.toml`:
+- 更新 `pyproject.toml`：
 
 ```toml
 [tool.pytest.ini_options]
@@ -457,7 +455,7 @@ markers = [
 ]
 ```
 
-If `scripts` causes collection issues, use:
+如果 `scripts` 导致收集问题，则改用：
 
 ```toml
 testpaths = [
@@ -468,9 +466,9 @@ testpaths = [
 ]
 ```
 
-and make CI explicitly run `scripts/test_*.py`.
+并让 CI 显式运行 `scripts/test_*.py`。
 
-- [ ] Create `.github/workflows/ci.yml`:
+- 新建 `.github/workflows/ci.yml`：
 
 ```yaml
 name: CI
@@ -525,7 +523,7 @@ jobs:
         run: npm run build
 ```
 
-- [ ] Verify:
+- 验证：
 
 ```bash
 ls web/package-lock.json
@@ -534,32 +532,31 @@ cd web && npm run test:unit
 cd web && npm run build
 ```
 
-Expected: all pass, or historical failures are recorded and fixed before enabling strict CI.
+预期：全部通过；如果暴露历史失败，先记录并修复，再启用严格 CI。
 
 ---
 
-# PR 4: Add Architecture Contract Checks
+# PR 4：增加架构契约检查
 
-## Goal
+## 目标
 
-Prevent Web API production code from writing `price_snapshots` or `alert_events`.
+防止 Web API 生产代码写入 `price_snapshots` 或 `alert_events`。
 
-## Files
+## 文件
 
-- Create: `scripts/check_architecture_contracts.py`
-- Create: `scripts/test_check_architecture_contracts.py`
-- Modify: `.github/workflows/ci.yml` if PR 3 exists, otherwise `.github/workflows/audit-coverage.yml`
+- 新建：`scripts/check_architecture_contracts.py`
+- 新建：`scripts/test_check_architecture_contracts.py`
+- 修改：如果 PR 3 已存在则改 `.github/workflows/ci.yml`，否则改 `.github/workflows/audit-coverage.yml`
 
-## Tasks
+## 任务
 
-- [ ] Create `scripts/test_check_architecture_contracts.py` with tests that:
-  - flag `INSERT INTO price_snapshots`,
-  - flag `DELETE FROM alert_events`,
-  - allow `SELECT FROM price_snapshots`,
-  - allow mutations in `*.test.ts`,
-  - allow mutations of other tables.
-
-- [ ] Create `scripts/check_architecture_contracts.py`:
+- 新建 `scripts/test_check_architecture_contracts.py`，覆盖：
+  - 标记 `INSERT INTO price_snapshots`；
+  - 标记 `DELETE FROM alert_events`；
+  - 允许 `SELECT FROM price_snapshots`；
+  - 允许 `*.test.ts` 中的测试数据写入；
+  - 允许其它表的合法写入。
+- 新建 `scripts/check_architecture_contracts.py`：
 
 ```python
 #!/usr/bin/env python3
@@ -648,9 +645,9 @@ if __name__ == "__main__":
     raise SystemExit(main())
 ```
 
-- [ ] Wire into CI:
+- 接入 CI：
 
-If `.github/workflows/ci.yml` exists:
+如果 `.github/workflows/ci.yml` 已存在：
 
 ```yaml
   architecture-contracts:
@@ -662,42 +659,42 @@ If `.github/workflows/ci.yml` exists:
         run: uv run python scripts/check_architecture_contracts.py
 ```
 
-If not, add the same command as a step in `.github/workflows/audit-coverage.yml`.
+如果不存在，则把同样的命令作为 step 加到 `.github/workflows/audit-coverage.yml`。
 
-- [ ] Verify:
+- 验证：
 
 ```bash
 uv run pytest scripts/test_check_architecture_contracts.py -q
 uv run python scripts/check_architecture_contracts.py
 ```
 
-Expected: both pass.
+预期：两个命令都通过。
 
 ---
 
-# PR 5: Document Web Mutations
+# PR 5：记录 Web 写入口
 
-## Goal
+## 目标
 
-Make Web write boundaries explicit and fix stale docs.
+明确 Web 写边界，并修正文档中的过时描述。
 
-## Files
+## 文件
 
-- Create: `docs/WEB_MUTATIONS.md`
-- Modify: `web/AGENTS.md`
-- Modify: `docs/ARCHITECTURE.md`
-- Modify: `docs/CONFIG_API.md`
+- 新建：`docs/WEB_MUTATIONS.md`
+- 修改：`web/AGENTS.md`
+- 修改：`docs/ARCHITECTURE.md`
+- 修改：`docs/CONFIG_API.md`
 
-## Tasks
+## 任务
 
-- [ ] Create `docs/WEB_MUTATIONS.md` with:
-  - rules,
-  - mutation routes,
-  - known `GET /api/sector` side effect,
-  - read-only examples,
-  - checklist for adding new mutation routes.
+- 新建 `docs/WEB_MUTATIONS.md`，包含：
+  - 规则；
+  - mutation routes；
+  - 已知 `GET /api/sector` 副作用；
+  - 只读 route 示例；
+  - 新增 mutation route 的检查清单。
 
-Required mutation rows:
+必须包含以下 mutation rows：
 
 ```markdown
 | Method | Route | DB | Tables | Audit | Owner / Notes |
@@ -709,14 +706,12 @@ Required mutation rows:
 | `POST` | `/api/earnings` | `trading.db` | `portfolio_config`, `trading_audit_outbox` | Yes | Earnings check trigger. |
 ```
 
-- [ ] Replace `web/AGENTS.md` with an updated DB-first summary:
-  - no `market_data.json` runtime source,
-  - no “only config writes” claim,
-  - link to `../docs/WEB_MUTATIONS.md`.
-
-- [ ] Update `docs/ARCHITECTURE.md` with a `Web API Mutation Matrix` section linking to `WEB_MUTATIONS.md`.
-
-- [ ] Update `docs/CONFIG_API.md` top section:
+- 用 DB-first 摘要替换 `web/AGENTS.md`：
+  - 不再把 `market_data.json` 写成运行态数据源；
+  - 不再声称“只有 config 会写”；
+  - 链接到 `../docs/WEB_MUTATIONS.md`。
+- 在 `docs/ARCHITECTURE.md` 增加 `Web API Mutation Matrix` 小节并链接到 `WEB_MUTATIONS.md`。
+- 更新 `docs/CONFIG_API.md` 开头：
 
 ```markdown
 所有自选/真实持仓/监控设置配置变更必须通过 `POST /api/config`，禁止直接修改 JSON 或 SQLite。
@@ -724,33 +719,33 @@ Required mutation rows:
 其它领域写入口（如板块标签、交易计划、earnings trigger）见 [WEB_MUTATIONS.md](WEB_MUTATIONS.md)。这些入口同样必须写 SQLite + audit outbox；不得恢复 runtime JSON 写源。
 ```
 
-- [ ] Verify:
+- 验证：
 
 ```bash
 rg "market_data.json|only write endpoint|exports JSON" web/AGENTS.md docs/ARCHITECTURE.md docs/CONFIG_API.md
 rg "WEB_MUTATIONS.md" docs web/AGENTS.md
 ```
 
-Expected: stale claims gone; links present.
+预期：过时描述消失；链接存在。
 
 ---
 
-# PR 6: Make `GET /api/sector` Read-Only
+# PR 6：让 `GET /api/sector` 只读
 
-## Goal
+## 目标
 
-Remove hidden `GET /api/sector` writes by moving live sector refresh to explicit POST.
+移除 `GET /api/sector` 的隐藏写库副作用，把实时板块刷新移动到显式 POST。
 
-## Files
+## 文件
 
-- Modify: `web/app/api/sector/route.ts`
-- Create or modify: `web/app/api/sector/route.test.ts`
-- Modify: `docs/SECTOR.md`
-- Modify: `docs/WEB_MUTATIONS.md` if PR 5 exists
+- 修改：`web/app/api/sector/route.ts`
+- 新建或修改：`web/app/api/sector/route.test.ts`
+- 修改：`docs/SECTOR.md`
+- 如果 PR 5 已存在，修改：`docs/WEB_MUTATIONS.md`
 
-## Tasks
+## 任务
 
-- [ ] Add test proving GET opens DBs readonly and does not call writable `openTradingDb()`:
+- 增加测试，证明 GET 只用 readonly DB，不调用可写 `openTradingDb()`：
 
 ```typescript
 expect(openConfigDbMock).toHaveBeenCalledWith(true);
@@ -759,21 +754,21 @@ expect(openTradingDbMock).not.toHaveBeenCalledWith();
 expect(openTradingDbMock).not.toHaveBeenCalledWith(false);
 ```
 
-- [ ] Change `refreshLiveRotation(category)` to return:
+- 修改 `refreshLiveRotation(category)`，让它返回：
 
 ```typescript
 Promise<{ refreshed: boolean; reason?: string; rows?: number }>
 ```
 
-Return status objects for outside trading hours, throttled, unknown category, failed fetch, parse failure, empty boards, success, and caught failures.
+针对非交易时间、throttled、未知 category、fetch 失败、解析失败、空 boards、成功和捕获异常，都返回 status object。
 
-- [ ] Remove from `GET`:
+- 从 `GET` 中移除：
 
 ```typescript
 await refreshLiveRotation(category);
 ```
 
-- [ ] Add POST action:
+- 增加 POST action：
 
 ```typescript
 case "refresh-live-rotation": {
@@ -783,7 +778,7 @@ case "refresh-live-rotation": {
 }
 ```
 
-- [ ] Update `docs/SECTOR.md` API section:
+- 更新 `docs/SECTOR.md` API 小节：
 
 ```markdown
 - `GET /api/sector` → indices + alerts + rotation（只读 SQLite）
@@ -792,7 +787,7 @@ case "refresh-live-rotation": {
 - `POST /api/sector` with `{"action":"refresh-live-rotation","category":"industry"}` → 显式刷新实时新浪板块排名（过渡方案，长期建议迁到 Python 后台任务）
 ```
 
-- [ ] Verify:
+- 验证：
 
 ```bash
 cd web && npm run test:unit -- app/api/sector/route.test.ts
@@ -800,32 +795,31 @@ rg "await refreshLiveRotation" web/app/api/sector/route.ts
 cd web && npm run build
 ```
 
-Expected: tests/build pass; `await refreshLiveRotation` appears only in POST path or not at all.
+预期：测试和 build 通过；`await refreshLiveRotation` 只出现在 POST 路径中，或完全不出现。
 
 ---
 
-# PR 7: Centralize DDL Migration Authority
+# PR 7：收敛 DDL 迁移权威来源
 
-## Goal
+## 目标
 
-Stop Web API request handlers from adding business-table columns at request time.
+停止让 Web API 请求 handler 在请求时给业务表补列。
 
-## Files
+## 文件
 
-- Modify: `web/app/api/trade-plans/route.ts`
-- Modify: `web/app/api/sim/route.ts`
-- Possibly modify: `web/app/api/config/route.ts`
-- Modify: `scripts/check_architecture_contracts.py`
-- Modify: `scripts/test_check_architecture_contracts.py`
-- Modify: `docs/ARCHITECTURE.md`
+- 修改：`web/app/api/trade-plans/route.ts`
+- 修改：`web/app/api/sim/route.ts`
+- 可能修改：`web/app/api/config/route.ts`
+- 修改：`scripts/check_architecture_contracts.py`
+- 修改：`scripts/test_check_architecture_contracts.py`
+- 修改：`docs/ARCHITECTURE.md`
 
-## Tasks
+## 任务
 
-- [ ] Extend architecture scanner tests with:
-  - flag `ALTER TABLE trade_plans ...` in production route,
-  - allow `ALTER TABLE` in `*.test.ts`.
-
-- [ ] Add `ALTER_RE` to `scripts/check_architecture_contracts.py`:
+- 扩展 architecture scanner 测试：
+  - 标记生产 route 中的 `ALTER TABLE trade_plans ...`；
+  - 允许 `*.test.ts` 中的 `ALTER TABLE`。
+- 在 `scripts/check_architecture_contracts.py` 中增加 `ALTER_RE`：
 
 ```python
 ALTER_RE = re.compile(
@@ -834,28 +828,26 @@ ALTER_RE = re.compile(
 )
 ```
 
-In `scan_file()`, append findings for `ALTER TABLE`.
+在 `scan_file()` 中对 `ALTER TABLE` 追加 finding。
 
-- [ ] Remove `ensureScopeColumn()` from `web/app/api/trade-plans/route.ts` and remove calls to it.
-
-- [ ] Remove lazy `ALTER TABLE trade_plans ADD COLUMN scope TEXT NOT NULL DEFAULT 'real'` from `web/app/api/sim/route.ts`.
-
-- [ ] Compare config route ALTERs with Python schema:
+- 从 `web/app/api/trade-plans/route.ts` 移除 `ensureScopeColumn()` 及其调用。
+- 从 `web/app/api/sim/route.ts` 移除惰性 `ALTER TABLE trade_plans ADD COLUMN scope TEXT NOT NULL DEFAULT 'real'`。
+- 对比 config route 中的 ALTER 和 Python schema：
 
 ```bash
 rg "ALTER TABLE" web/app/api/config/route.ts
 rg "dip_buy|alias|tags|watch_price|watch_price_date|pin_order|type_from|type_to|flushed_at|flush_id|flush_started_at_ms" src/sim_trading/db.py
 ```
 
-If safe, remove config route ALTERs too. If not safe for local legacy DBs, leave them temporarily with:
+如果安全，也移除 config route 中的 ALTER。如果考虑本地 legacy DB 兼容性暂时不能移除，则保留并增加：
 
 ```typescript
 // ARCH-COMPAT: legacy config.db field backfill. Do not add new route-level ALTER TABLE.
 ```
 
-and make scanner allow only `ARCH-COMPAT` lines.
+并让 scanner 只允许带 `ARCH-COMPAT` 标记的行。
 
-- [ ] Add to `docs/ARCHITECTURE.md`:
+- 添加到 `docs/ARCHITECTURE.md`：
 
 ```markdown
 ## Schema Authority
@@ -868,7 +860,7 @@ and make scanner allow only `ARCH-COMPAT` lines.
 - A future migration runner may replace this convention, but there must still be one schema authority.
 ```
 
-- [ ] Verify:
+- 验证：
 
 ```bash
 uv run pytest scripts/test_check_architecture_contracts.py -q
@@ -877,13 +869,13 @@ cd web && npm run test:unit -- app/api/trade-plans/route.test.ts app/api/sim/rou
 cd web && npm run build
 ```
 
-Expected: all pass; no unexplained route-level `ALTER TABLE` remains.
+预期：全部通过；不再有未解释的 route-level `ALTER TABLE`。
 
 ---
 
-# Global Verification After PR 1-4
+# PR 1-4 后的全局验证
 
-Run:
+运行：
 
 ```bash
 uv run pytest
@@ -894,25 +886,26 @@ cd web && npm run test:unit
 cd web && npm run build
 ```
 
-Skip `check_architecture_contracts.py` until PR 4 has landed.
+在 PR 4 落地前，跳过 `check_architecture_contracts.py`。
 
-# Stop Conditions
+# 暂停条件
 
-Pause and ask before proceeding if:
+遇到以下情况先暂停并询问：
 
-- `uv run pytest` reveals many unrelated historical failures.
-- `cd web && npm run build` fails because of missing environment/runtime data.
-- Plan 6 affects visible sector dashboard behavior and no explicit refresh UX is agreed.
-- Plan 7 finds real local DB compatibility concerns requiring legacy `ALTER TABLE` support.
+- `uv run pytest` 暴露大量无关历史失败。
+- `cd web && npm run build` 因缺少环境或运行态数据失败。
+- PR 6 影响 sector dashboard 可见行为，且还没有明确的显式刷新 UX。
+- PR 7 发现真实本地 DB 兼容性问题，需要保留 legacy `ALTER TABLE`。
 
-# Completion Definition
+# 完成定义
 
-This hardening phase is complete when:
+满足以下条件时，本轮架构加固完成：
 
-- `/api/indicators` no longer uses `execSync` or `python -c`.
-- Root `backups/` paths are blocked.
-- CI runs Python tests, Web unit tests, and Web build.
-- Web production API cannot write `price_snapshots` or `alert_events` without failing a guard.
-- Web mutation routes are documented.
-- `GET /api/sector` is read-only.
-- New Web route-level `ALTER TABLE` statements are blocked or explicitly marked as temporary compatibility backfills.
+- `/api/indicators` 不再使用 `execSync` 或 `python -c`。
+- 根目录 `backups/` 路径被拦截。
+- CI 会运行 Python tests、Web unit tests 和 Web build。
+- Web 生产 API 写 `price_snapshots` 或 `alert_events` 会被 guard 拦截。
+- Web mutation routes 已记录成文档。
+- `GET /api/sector` 是只读的。
+- 新增 Web route-level `ALTER TABLE` 会被拦截，或明确标记为临时兼容 backfill。
+
