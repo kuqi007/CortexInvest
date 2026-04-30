@@ -112,6 +112,8 @@ Default behavior should be conservative:
   `.screenshot_import_runs/<import_run_id>/import_plan.json`.
 - Do not mutate config unless `--apply` is present.
 - Never auto-apply rejected, conflicting, or low-confidence rows.
+- The default plan location is always written for recognition runs. Extra debug files
+  are written only when `--debug-dir` is set.
 
 `--dry-run` and `--apply` are mutually exclusive. `--dry-run` must never call
 `POST /api/config` and must never write SQLite. `--apply` must apply a frozen plan from
@@ -500,34 +502,38 @@ audit payloads.
 
 ## Debug Artifacts
 
-Debug artifacts are off by default. Each run may write a debug package only when
-`--debug-dir` is set. The default directory, when the user does not provide one, is
-`.screenshot_import_runs/<import_run_id>/`.
-
-```text
-.screenshot_import_runs/<timestamp>/
-  image_fingerprint.json
-  provider_request_redacted.json
-  provider_response.json
-  validated_result.json
-  import_plan.json
-```
+Recognition always writes the frozen plan to
+`.screenshot_import_runs/<import_run_id>/import_plan.json` unless `--output-json`
+overrides that path. Extra debug artifacts are off by default and are written only when
+`--debug-dir` is set. If `--debug-dir` is passed without a path in a future CLI design,
+the default debug directory should be `.screenshot_import_runs/<import_run_id>/debug/`.
 
 The debug directory must be created with private permissions where the OS supports
-them. The redacted request must not include API keys or secrets.
+them. Redacted request files must not include API keys, secrets, absolute local paths,
+or raw image bytes.
 
 These artifacts make failures diagnosable: classifier error, prompt error, provider
 error, validation too strict, or validation too loose.
 
 Because debug artifacts can contain real portfolio data, use privacy tiers. The file
-set is tier-specific; Tier A must not write full `provider_response.json`,
-`validated_result.json`, or full `import_plan.json` containing names, cost, or shares.
+set is tier-specific:
 
-- Tier A default: fingerprints, counts, confidence stats, provider name, hashes of
-  codes, redacted plan summary, and no names, cost, or shares.
-- Tier B support mode: full codes but masked names and no cost or shares.
-- Tier C sensitive mode: full provider response, validated result, and import plan.
-  This requires `--debug-sensitive` and a clear CLI warning.
+- Tier A default:
+  - `image_fingerprint_redacted.json`
+  - `provider_request_redacted.json`
+  - `import_plan_summary_redacted.json`
+  - Contains fingerprints, counts, confidence stats, provider name, hashes of codes,
+    and no names, cost, shares, absolute paths, raw image bytes, full provider
+    response, full validated result, or full import plan.
+- Tier B support mode:
+  - Tier A files plus `validated_result_masked.json`
+  - May contain full codes, masked names, and no cost or shares.
+- Tier C sensitive mode:
+  - `provider_response.json`
+  - `validated_result.json`
+  - `import_plan.json`
+  - Contains full provider response, validated result, and import plan. This requires
+    `--debug-sensitive` and a clear CLI warning.
 
 Debug directories must be ignored by git and should not be used as committed test
 fixtures. Sanitized or synthetic fixtures belong under the test fixture directory.
