@@ -1593,12 +1593,15 @@ def generate_daily_summary(date_str: str | None = None) -> dict | None:
     try:
         conn = sqlite3.connect(TRADING_DB_PATH)
         conn.execute(
-            "INSERT OR REPLACE INTO daily_summaries (date, market, stats_json, per_stock_json, generated_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO daily_summaries "
+            "(date, market, stats_json, per_stock_json, report_md, generated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
             (
                 today,
                 market,
                 json.dumps(stats, ensure_ascii=False),
                 json.dumps(summary.get("perStock", []), ensure_ascii=False),
+                report,
                 summary["generatedAt"],
             ),
         )

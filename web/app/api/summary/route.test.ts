@@ -9,9 +9,9 @@ import Database from "better-sqlite3";
 import { join } from "path";
 import { tmpdir } from "os";
 import { unlinkSync } from "fs";
-import { NextResponse } from "next/server";
 
 const TEST_DB_PATH = join(tmpdir(), "test_summary.db");
+let getSummary: typeof import("./route").GET;
 
 function setupTestDb() {
   const db = new Database(TEST_DB_PATH);
@@ -22,6 +22,7 @@ function setupTestDb() {
       market TEXT NOT NULL,
       stats_json TEXT NOT NULL,
       per_stock_json TEXT,
+      report_md TEXT,
       generated_at INTEGER
     );
     CREATE TABLE IF NOT EXISTS morning_briefings (
@@ -39,77 +40,31 @@ function cleanupTestDb() {
   try { unlinkSync(TEST_DB_PATH + "-shm"); } catch { /* ignore */ }
 }
 
-async function getHandler() {
-  const db = new Database(TEST_DB_PATH, { readonly: true });
-  try {
-    const today = new Date().toISOString().slice(0, 10);
-
-    const summaryRow = db
-      .prepare("SELECT date, market, stats_json, per_stock_json, generated_at FROM daily_summaries WHERE date = ?")
-      .get(today) as
-      | { date: string; market: string; stats_json: string; per_stock_json: string | null; generated_at: number | null }
-      | undefined;
-
-    if (summaryRow) {
-      const summary: Record<string, any> = {
-        date: summaryRow.date,
-        market: summaryRow.market,
-        stats: JSON.parse(summaryRow.stats_json),
-        perStock: summaryRow.per_stock_json ? JSON.parse(summaryRow.per_stock_json) : [],
-        generatedAt: summaryRow.generated_at,
-      };
-
-      const morningRow = db
-        .prepare("SELECT date, generated_at, content_json FROM morning_briefings WHERE date = ?")
-        .get(today) as
-        | { date: string; generated_at: string; content_json: string }
-        | undefined;
-
-      if (morningRow) {
-        summary.morning = JSON.parse(morningRow.content_json);
-      } else {
-        summary.morning = null;
-      }
-
-      return NextResponse.json({ data: summary });
-    }
-
-    const morningRow = db
-      .prepare("SELECT date, generated_at, content_json FROM morning_briefings WHERE date = ?")
-      .get(today) as
-      | { date: string; generated_at: string; content_json: string }
-      | undefined;
-
-    if (morningRow) {
-      return NextResponse.json({
-        data: { morning: JSON.parse(morningRow.content_json) },
-      });
-    }
-
-    return NextResponse.json({ data: null });
-  } catch (error: any) {
-    return NextResponse.json({ data: null, error: error.message }, { status: 500 });
-  } finally {
-    db.close();
-  }
-}
-
 describe("GET /api/summary", () => {
-  beforeAll(setupTestDb);
-  afterAll(cleanupTestDb);
+  beforeAll(async () => {
+    process.env.AI_INVESTOR_ALLOW_TEST_DB_OVERRIDE = "1";
+    process.env.AI_INVESTOR_TRADING_DB_PATH = TEST_DB_PATH;
+    setupTestDb();
+    getSummary = (await import("./route")).GET;
+  });
+  afterAll(() => {
+    delete process.env.AI_INVESTOR_TRADING_DB_PATH;
+    delete process.env.AI_INVESTOR_ALLOW_TEST_DB_OVERRIDE;
+    cleanupTestDb();
+  });
 
   it("returns summary + morning briefing when daily_summary exists", async () => {
     const today = new Date().toISOString().slice(0, 10);
     const db = new Database(TEST_DB_PATH);
     db.exec(`
-      INSERT INTO daily_summaries (date, market, stats_json, per_stock_json, generated_at)
-      VALUES ('${today}', 'A-share', '{"total_turnover": 8500, "up_count": 2500, "down_count": 1800}', '[{"symbol":"000001","change":2.5}]', 1714118400);
+      INSERT INTO daily_summaries (date, market, stats_json, per_stock_json, report_md, generated_at)
+      VALUES ('${today}', 'A-share', '{"total_turnover": 8500, "up_count": 2500, "down_count": 1800}', '[{"symbol":"000001","change":2.5}]', '## Daily report', 1714118400);
       INSERT INTO morning_briefings (date, generated_at, content_json)
       VALUES ('${today}', '2024-04-26T08:00:00Z', '{"title": "Morning Brief", "highlights": ["Fed pause"]}');
     `);
     db.close();
 
-    const response = await getHandler();
+    const response = await getSummary();
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.data).toBeDefined();
@@ -117,6 +72,7 @@ describe("GET /api/summary", () => {
     expect(body.data.market).toBe("A-share");
     expect(body.data.stats).toEqual({ total_turnover: 8500, up_count: 2500, down_count: 1800 });
     expect(body.data.perStock).toEqual([{ symbol: "000001", change: 2.5 }]);
+    expect(body.data.report).toBe("## Daily report");
     expect(body.data.generatedAt).toBe(1714118400);
     expect(body.data.morning).toEqual({ title: "Morning Brief", highlights: ["Fed pause"] });
   });
@@ -128,7 +84,7 @@ describe("GET /api/summary", () => {
     db.exec(`DELETE FROM daily_summaries WHERE date = '${today}';`);
     db.close();
 
-    const response = await getHandler();
+    const response = await getSummary();
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.data).toBeDefined();
@@ -144,7 +100,7 @@ describe("GET /api/summary", () => {
     db.exec(`DELETE FROM morning_briefings WHERE date = '${today}';`);
     db.close();
 
-    const response = await getHandler();
+    const response = await getSummary();
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.data).toBeNull();
@@ -169,7 +125,7 @@ describe("GET /api/summary", () => {
     `);
     db.close();
 
-    const response = await getHandler();
+    const response = await getSummary();
     const body = await response.json();
     expect(body.data.stats).toEqual(stats);
     expect(body.data.perStock).toEqual(perStock);
@@ -189,7 +145,7 @@ describe("GET /api/summary", () => {
     `);
     db.close();
 
-    const response = await getHandler();
+    const response = await getSummary();
     const body = await response.json();
     expect(body.data.perStock).toEqual([]);
   });
@@ -208,7 +164,7 @@ describe("GET /api/summary", () => {
     `);
     db.close();
 
-    const response = await getHandler();
+    const response = await getSummary();
     const body = await response.json();
     expect(body.data.perStock).toEqual([]);
   });

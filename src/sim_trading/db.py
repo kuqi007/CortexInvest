@@ -7,6 +7,7 @@ Split from single sim_trading.db into:
 
 import os
 import sqlite3
+import time
 from pathlib import Path
 
 # ── DATA_DIR resolution (no machine-specific symlinks) ──────────────────────
@@ -177,6 +178,12 @@ CREATE TABLE IF NOT EXISTS config_restore_applied_events (
 """
 
 TRADING_SCHEMA = """
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version TEXT PRIMARY KEY,
+    applied_at_ms INTEGER NOT NULL,
+    description TEXT NOT NULL
+);
+
 -- 历史信号归档
 CREATE TABLE IF NOT EXISTS signals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -541,15 +548,106 @@ CREATE INDEX IF NOT EXISTS idx_stock_data_fetch_snapshots_date
 
 CREATE TABLE IF NOT EXISTS daily_summaries (
     date TEXT PRIMARY KEY,
-    summary_json TEXT NOT NULL,
-    updated_at_ms INTEGER NOT NULL
+    market TEXT NOT NULL DEFAULT '',
+    stats_json TEXT NOT NULL DEFAULT '{}',
+    per_stock_json TEXT,
+    report_md TEXT,
+    generated_at INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS morning_briefings (
     date TEXT PRIMARY KEY,
-    briefing_json TEXT NOT NULL,
-    updated_at_ms INTEGER NOT NULL
+    generated_at TEXT NOT NULL,
+    content_json TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS earnings_calendar (
+    symbol TEXT NOT NULL,
+    report_date TEXT NOT NULL,
+    name TEXT,
+    source TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT,
+    PRIMARY KEY (symbol, report_date)
+);
+CREATE INDEX IF NOT EXISTS idx_earnings_calendar_date
+    ON earnings_calendar(report_date);
+
+CREATE TABLE IF NOT EXISTS earnings_history (
+    symbol TEXT NOT NULL,
+    report_date TEXT NOT NULL,
+    eps REAL,
+    revenue REAL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (symbol, report_date)
+);
+
+CREATE TABLE IF NOT EXISTS job_requests (
+    id TEXT PRIMARY KEY,
+    job_type TEXT NOT NULL,
+    requested_by TEXT NOT NULL,
+    request_payload_json TEXT,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'claimed', 'completed', 'failed', 'cancelled')),
+    correlation_id TEXT NOT NULL,
+    created_at_ms INTEGER NOT NULL,
+    claimed_at_ms INTEGER,
+    completed_at_ms INTEGER,
+    UNIQUE(job_type, correlation_id)
+);
+CREATE INDEX IF NOT EXISTS idx_job_requests_status
+    ON job_requests(status, job_type, created_at_ms);
+
+CREATE TABLE IF NOT EXISTS job_runs (
+    id TEXT PRIMARY KEY,
+    request_id TEXT,
+    job_type TEXT NOT NULL,
+    runner TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('running', 'success', 'failed', 'skipped')),
+    started_at_ms INTEGER NOT NULL,
+    finished_at_ms INTEGER,
+    heartbeat_at_ms INTEGER,
+    input_json TEXT,
+    output_json TEXT,
+    error TEXT,
+    correlation_id TEXT NOT NULL,
+    FOREIGN KEY(request_id) REFERENCES job_requests(id)
+);
+CREATE INDEX IF NOT EXISTS idx_job_runs_type_status
+    ON job_runs(job_type, status, started_at_ms);
+CREATE INDEX IF NOT EXISTS idx_job_runs_correlation
+    ON job_runs(correlation_id);
+
+CREATE TABLE IF NOT EXISTS ai_investment_events (
+    id TEXT PRIMARY KEY,
+    event_date TEXT NOT NULL,
+    symbol TEXT,
+    name TEXT,
+    source TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    severity TEXT NOT NULL CHECK (severity IN ('critical', 'high', 'normal', 'low')),
+    delivery_scope TEXT NOT NULL DEFAULT 'web_only'
+        CHECK (delivery_scope IN ('feishu_high', 'feishu_normal', 'daily_only', 'web_only', 'suppressed')),
+    verdict TEXT NOT NULL,
+    confidence REAL NOT NULL DEFAULT 0,
+    dedupe_key TEXT NOT NULL,
+    source_record_id TEXT,
+    source_run_id TEXT,
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    reasons_json TEXT NOT NULL,
+    metrics_json TEXT,
+    recommendation_json TEXT,
+    notify_status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (notify_status IN ('pending', 'sent', 'suppressed', 'web_only', 'failed')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(dedupe_key)
+);
+CREATE INDEX IF NOT EXISTS idx_ai_investment_events_notify
+    ON ai_investment_events(notify_status, delivery_scope, severity, created_at);
+CREATE INDEX IF NOT EXISTS idx_ai_investment_events_symbol_date
+    ON ai_investment_events(symbol, event_date);
 
 CREATE TABLE IF NOT EXISTS trading_audit_outbox (
     event_id TEXT PRIMARY KEY,
@@ -641,6 +739,25 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
+def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+    return {
+        row["name"]
+        for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    }
+
+
+def _record_schema_migration(
+    conn: sqlite3.Connection, version: str, description: str
+) -> None:
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO schema_migrations (version, applied_at_ms, description)
+        VALUES (?, ?, ?)
+        """,
+        (version, int(time.time() * 1000), description),
+    )
+
+
 def init_config_db() -> None:
     """Create config tables if they don't exist."""
     conn = get_config_connection()
@@ -706,10 +823,168 @@ def init_config_db() -> None:
     conn.close()
 
 
+def _reconcile_daily_summaries(conn: sqlite3.Connection) -> None:
+    """Migrate daily_summaries to the DB contract used by generator/Web."""
+    cols = _table_columns(conn, "daily_summaries")
+    required = {
+        "date",
+        "market",
+        "stats_json",
+        "per_stock_json",
+        "report_md",
+        "generated_at",
+    }
+    if required <= cols and "summary_json" not in cols:
+        return
+
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        conn.execute("DROP TABLE IF EXISTS __daily_summaries_new")
+        conn.execute(
+            """
+            CREATE TABLE __daily_summaries_new (
+                date TEXT PRIMARY KEY,
+                market TEXT NOT NULL DEFAULT '',
+                stats_json TEXT NOT NULL DEFAULT '{}',
+                per_stock_json TEXT,
+                report_md TEXT,
+                generated_at INTEGER
+            )
+            """
+        )
+
+        if "summary_json" in cols:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO __daily_summaries_new
+                    (date, market, stats_json, per_stock_json, report_md, generated_at)
+                SELECT
+                    date,
+                    '',
+                    '{}',
+                    '[]',
+                    summary_json,
+                    updated_at_ms
+                FROM daily_summaries
+                """
+            )
+        else:
+            market_expr = "market" if "market" in cols else "''"
+            stats_expr = "stats_json" if "stats_json" in cols else "'{}'"
+            per_stock_expr = "per_stock_json" if "per_stock_json" in cols else "'[]'"
+            report_expr = "report_md" if "report_md" in cols else "NULL"
+            generated_expr = (
+                "generated_at"
+                if "generated_at" in cols
+                else "updated_at_ms"
+                if "updated_at_ms" in cols
+                else "NULL"
+            )
+            conn.execute(
+                f"""
+                INSERT OR REPLACE INTO __daily_summaries_new
+                    (date, market, stats_json, per_stock_json, report_md, generated_at)
+                SELECT
+                    date,
+                    COALESCE({market_expr}, ''),
+                    COALESCE({stats_expr}, '{{}}'),
+                    {per_stock_expr},
+                    {report_expr},
+                    {generated_expr}
+                FROM daily_summaries
+                """
+            )
+
+        conn.execute("DROP TABLE daily_summaries")
+        conn.execute("ALTER TABLE __daily_summaries_new RENAME TO daily_summaries")
+        _record_schema_migration(
+            conn,
+            "20260501_reconcile_daily_summaries",
+            "Reconcile daily_summaries to report_md/stats contract",
+        )
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+
+
+def _reconcile_morning_briefings(conn: sqlite3.Connection) -> None:
+    """Migrate morning_briefings to the DB contract used by generator/Web."""
+    cols = _table_columns(conn, "morning_briefings")
+    required = {"date", "generated_at", "content_json"}
+    if required <= cols and "briefing_json" not in cols:
+        return
+
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        conn.execute("DROP TABLE IF EXISTS __morning_briefings_new")
+        conn.execute(
+            """
+            CREATE TABLE __morning_briefings_new (
+                date TEXT PRIMARY KEY,
+                generated_at TEXT NOT NULL,
+                content_json TEXT NOT NULL
+            )
+            """
+        )
+
+        if "briefing_json" in cols:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO __morning_briefings_new
+                    (date, generated_at, content_json)
+                SELECT
+                    date,
+                    CAST(updated_at_ms AS TEXT),
+                    briefing_json
+                FROM morning_briefings
+                """
+            )
+        else:
+            generated_expr = (
+                "generated_at"
+                if "generated_at" in cols
+                else "updated_at_ms"
+                if "updated_at_ms" in cols
+                else "datetime('now')"
+            )
+            content_expr = "content_json" if "content_json" in cols else "'{}'"
+            conn.execute(
+                f"""
+                INSERT OR REPLACE INTO __morning_briefings_new
+                    (date, generated_at, content_json)
+                SELECT
+                    date,
+                    COALESCE(CAST({generated_expr} AS TEXT), datetime('now')),
+                    COALESCE({content_expr}, '{{}}')
+                FROM morning_briefings
+                """
+            )
+
+        conn.execute("DROP TABLE morning_briefings")
+        conn.execute("ALTER TABLE __morning_briefings_new RENAME TO morning_briefings")
+        _record_schema_migration(
+            conn,
+            "20260501_reconcile_morning_briefings",
+            "Reconcile morning_briefings to generated_at/content_json contract",
+        )
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+
+
 def init_trading_db() -> None:
     """Create all trading tables if they don't exist."""
     conn = get_connection()
     conn.executescript(TRADING_SCHEMA)
+    _record_schema_migration(
+        conn,
+        "20260501_ai_investment_foundation",
+        "Add AI investment foundation tables and schema migrations",
+    )
+    _reconcile_daily_summaries(conn)
+    _reconcile_morning_briefings(conn)
     # Migration: add daily_score column if missing (existing DBs)
     try:
         conn.execute("SELECT daily_score FROM live_state LIMIT 1")

@@ -17,9 +17,9 @@ export async function GET() {
 
     // Try daily summary first
     const summaryRow = db
-      .prepare("SELECT date, market, stats_json, per_stock_json, generated_at FROM daily_summaries WHERE date = ?")
+      .prepare("SELECT date, market, stats_json, per_stock_json, report_md, generated_at FROM daily_summaries WHERE date = ?")
       .get(today) as
-      | { date: string; market: string; stats_json: string; per_stock_json: string | null; generated_at: number | null }
+      | { date: string; market: string; stats_json: string; per_stock_json: string | null; report_md: string | null; generated_at: number | null }
       | undefined;
 
     if (summaryRow) {
@@ -28,6 +28,7 @@ export async function GET() {
         market: summaryRow.market,
         stats: JSON.parse(summaryRow.stats_json),
         perStock: summaryRow.per_stock_json ? JSON.parse(summaryRow.per_stock_json) : [],
+        report: summaryRow.report_md || "",
         generatedAt: summaryRow.generated_at,
       };
 
