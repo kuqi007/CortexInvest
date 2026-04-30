@@ -354,6 +354,33 @@ def _collect_plan_codes(plan: ImportPlan) -> list[str]:
     return codes
 
 
+def _print_classification_debug(*, fingerprint: Any, classification: Any, threshold: float, reason: str) -> None:
+    debug_payload = {
+        "reason": reason,
+        "threshold": threshold,
+        "fingerprint": {
+            "width": fingerprint.width,
+            "height": fingerprint.height,
+            "top_bar_color": fingerprint.top_bar_color,
+            "background_color": fingerprint.background_color,
+            "red_ratio_top": round(float(fingerprint.red_ratio_top), 4),
+            "orange_ratio_top": round(float(fingerprint.orange_ratio_top), 4),
+            "dark_ratio_top": round(float(fingerprint.dark_ratio_top), 4),
+            "light_ratio_total": round(float(fingerprint.light_ratio_total), 4),
+            "layout": fingerprint.layout,
+        },
+        "classification": classification.model_dump(mode="json"),
+    }
+    print("[screenshot-import-debug] local classification", file=sys.stderr)
+    print(json.dumps(debug_payload, ensure_ascii=False, indent=2), file=sys.stderr)
+    if classification.confidence < threshold:
+        print(
+            "[screenshot-import-debug] classification confidence below threshold; "
+            "rerun with --platform/--type if you know the broker.",
+            file=sys.stderr,
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Vision screenshot import (frozen plan) or apply a saved plan."
@@ -385,6 +412,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-json", type=Path, help="Write plan to this path (default: under .screenshot_import_runs/)")
     parser.add_argument("--debug-dir", type=Path, default=None)
     parser.add_argument("--debug-sensitive", action="store_true")
+    parser.add_argument(
+        "--debug-log",
+        action="store_true",
+        help="Print local classifier and prompt diagnostics to stderr",
+    )
     parser.add_argument("--allow-path", action="append", default=[], metavar="PATH", help="Additional allowed root (repeatable)")
 
     args = parser.parse_args(argv)
@@ -491,6 +523,12 @@ def main(argv: list[str] | None = None) -> int:
         and classification.confidence < confirm_thr
     )
     if auto_class_low_confidence and (not sys.stdin.isatty() or args.yes):
+        _print_classification_debug(
+            fingerprint=fingerprint,
+            classification=classification,
+            threshold=confirm_thr,
+            reason="needs_user_input",
+        )
         print(
             json.dumps(
                 {"needs_user_input": True, "classification": classification.model_dump(mode="json")},
@@ -498,6 +536,14 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         return 3
+
+    if args.debug_log:
+        _print_classification_debug(
+            fingerprint=fingerprint,
+            classification=classification,
+            threshold=confirm_thr,
+            reason="debug_log",
+        )
 
     try:
         resolved_name = resolve_provider_name(args.provider)
@@ -526,6 +572,9 @@ def main(argv: list[str] | None = None) -> int:
         pass
 
     prompt = build_vision_prompt(classification)
+    if args.debug_log:
+        print("[screenshot-import-debug] prompt preview", file=sys.stderr)
+        print(prompt, file=sys.stderr)
     recognition_run_id = uuid.uuid4().hex
     mime_type = _image_mime_type(image_path)
     request = VisionRequest(
