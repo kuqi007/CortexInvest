@@ -590,8 +590,9 @@ function Home() {
           </span>
         </div>
 
-        {/* stale warning banner — only show when data is stale for > 3 minutes */}
+        {/* stale warning banner — only show when data is stale for > 3 minutes and market is open */}
         {isStale && (Date.now() - ts > pollMs * 6) && (
+          tradingStatus?.trading ? (
           <div style={{
             border: `1px solid ${D.orange}`,
             borderLeft: `3px solid ${D.orange}`,
@@ -611,6 +612,24 @@ function Home() {
               行情已停止更新 <span style={{ color: D.orange, fontWeight: 700 }}>{Math.round((Date.now() - ts) / 60000)}</span> 分钟 — 请检查 poller 进程是否在运行
             </span>
           </div>
+          ) : (
+          <div style={{
+            border: `1px solid ${D.comment}`,
+            borderLeft: `3px solid ${D.comment}`,
+            background: "rgba(98, 114, 164, 0.06)",
+            color: D.comment,
+            padding: "9px 16px",
+            borderRadius: 6,
+            marginBottom: 12,
+            fontSize: 12,
+            fontWeight: 500,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}>
+            <span>● 已休市，行情暂时停止更新</span>
+          </div>
+          )
         )}
 
         {/* error banner */}
