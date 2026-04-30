@@ -533,14 +533,36 @@ function Home() {
         <div style={{ color: D.comment, marginBottom: 6 }}>
           <span>每 {pollMs / 1000} 秒轮询一次</span>
           <span style={{ float: "right" }}>
-            {isStale && (
-              <span style={{ color: D.red, fontWeight: 500, marginRight: 8 }}>过期</span>
+            {isStale ? (
+              <span style={{ color: D.red, fontWeight: 700 }}>
+                ⚠ 数据已过期 {Math.round((Date.now() - ts) / 60000)} 分钟
+              </span>
+            ) : (
+              <span style={{ color: D.green }}>
+                数据 {Math.round((Date.now() - ts) / 1000)} 秒前更新
+              </span>
             )}
+            {" | "}
             {tradingStatus?.trading ? "交易中" : "休市"}
             {" | "}
             时间: <span style={{ color: isStale ? D.red : D.comment }}>{now}</span> &nbsp; 刷新 #{tick}
           </span>
         </div>
+
+        {/* stale warning banner — only show when data is stale for > 3 minutes */}
+        {isStale && (Date.now() - ts > pollMs * 6) && (
+          <div style={{
+            backgroundColor: D.yellow,
+            color: "#1a1a2e",
+            padding: "10px 16px",
+            borderRadius: 6,
+            marginBottom: 12,
+            fontWeight: 600,
+            fontSize: 13,
+          }}>
+            ⚠ 行情已停止更新 {Math.round((Date.now() - ts) / 60000)} 分钟 — 请检查 poller 进程是否在运行
+          </div>
+        )}
 
         {/* error banner */}
         {fetchError && (
