@@ -218,6 +218,70 @@ def test_weekday_fallback_respects_cache_not_empty(monkeypatch):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# _ensure_cache re-fetches when today is missing from cache
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_ensure_cache_re_fetches_when_today_missing_from_db_cache(monkeypatch):
+    """Regression test: if DB cache has today's row mtime but no entry for today,
+    _ensure_cache must still re-fetch from Futu — it should NOT short-circuit
+    on `_cache_date == today`.
+
+    Bug: previously `_ensure_cache` used `if _cache_date == today and cache_key
+    in _cache` — this matched when DB row was updated today but data was stale
+    (e.g. row mtime=04-30 but cache only had 04-28), causing HK's
+    is_trading_day to incorrectly return False on 04-30.
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    today_month = today[:7]
+
+    # Simulate DB cache: row updated today but only has yesterday's data
+    with patch.object(tc, "_load_cache_from_db", return_value=True):
+        tc._cache = {("HK", today_month): {"2026-04-28": "WHOLE"}}  # stale, no today
+        tc._cache_date = today  # row mtime = today (deceiving)
+
+    fetch_calls = []
+    def tracking_fetch(market, start, end):
+        fetch_calls.append((market, start, end))
+        return {"2026-04-28": "WHOLE", today: "WHOLE"}  # today's data now available
+
+    with patch.object(tc, "_fetch_trading_days", tracking_fetch):
+        tc._ensure_cache("HK")
+
+    # Verify Futu was called (not short-circuited)
+    assert len(fetch_calls) == 1, f"Expected 1 fetch call, got {len(fetch_calls)}: {fetch_calls}"
+    assert fetch_calls[0][0] == "HK"
+
+    # Verify today's entry is now in cache
+    assert today in tc._cache[("HK", today_month)], \
+        f"Today ({today}) not in cache after re-fetch: {tc._cache[('HK', today_month)]}"
+
+
+def test_is_trading_day_correct_after_db_cache_stale(monkeypatch):
+    """End-to-end regression: is_trading_day(HK) must return True on a trading day
+    even when the DB cache was loaded with stale data (no today entry) and
+    _cache_date matched today — i.e. the bug that caused HK is_trading_day to
+    return False on 04-30 when cache only had 04-28 data.
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    today_month = today[:7]
+
+    with patch.object(tc, "_load_cache_from_db", return_value=True):
+        # DB cache has stale data (yesterday), row mtime = today
+        tc._cache = {("HK", today_month): {"2026-04-28": "WHOLE"}}
+        tc._cache_date = today
+
+    def fresh_fetch(market, start, end):
+        # Futu returns today's date as a trading day
+        return {today: "WHOLE", "2026-04-28": "WHOLE"}
+
+    with patch.object(tc, "_fetch_trading_days", fresh_fetch):
+        result = tc.is_trading_day("HK")
+
+    assert result is True, \
+        f"is_trading_day(HK) should be True on {today}, got {result}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # DB cache round-trip (existing tests — preserved)
 # ─────────────────────────────────────────────────────────────────────────────
 

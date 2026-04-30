@@ -33,17 +33,12 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.utils.llm_clients import LLMClientFactory
 from src.utils.logging_config import setup_logger
-from src.sim_trading.db import TRADING_DB_PATH
+from src.sim_trading.db import CONFIG_DB_PATH, DATA_DIR, TRADING_DB_PATH
 
 logger = setup_logger("daily_summary")
 
-# ── Data file paths ──
-DATA_DIR = PROJECT_ROOT / "src" / "data"
 # Config read from DB (primary) or JSON (backup)
 from src.utils.config_reader import read_monitor_config
-
-CONFIG_DB_PATH = DATA_DIR / "config.db"
-TRADING_DB_PATH = DATA_DIR / "trading.db"
 
 # Rate limiting flag - set to True when API daily limit is reached
 _morning_api_rate_limited = False

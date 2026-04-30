@@ -147,7 +147,11 @@ def _ensure_cache(market: str):
     month_key = today[:7]  # "2026-03"
     cache_key = (market.upper(), month_key)
 
-    if _cache_date == today and cache_key in _cache:
+    # Re-fetch if today's date is not in the cache for this market/month.
+    # Previously used `_cache_date == today` (DB row mtime), which incorrectly
+    # triggered early-return when the row was updated today but only contained
+    # older dates (e.g. 04-28 cached on 04-30 → stale cache not refreshed).
+    if cache_key in _cache and today in _cache[cache_key]:
         return
 
     # Fetch current month ± 7 days to cover edges

@@ -2095,9 +2095,6 @@ def check_market_open_close(
 # 6. Trade Plan Engine
 # ══════════════════════════════════════════
 
-TRADING_DB_PATH = PROJECT_ROOT / "src" / "data" / "trading.db"
-
-
 def _get_trading_conn() -> sqlite3.Connection:
     from src.sim_trading.db import get_connection, init_trading_db
 

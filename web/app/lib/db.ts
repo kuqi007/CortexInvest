@@ -1,7 +1,22 @@
 import { join } from "path";
 import Database from "better-sqlite3";
 
-const DATA_DIR = join(process.cwd(), "..", "src", "data");
+function resolveDataDir(): string {
+  // 1. Check env var first (absolute path)
+  const envOverride = process.env.AI_INVESTOR_DATA_DIR;
+  if (envOverride) return envOverride;
+
+  const repoRoot = join(process.cwd(), "..");
+
+  const srcDataPath = join(repoRoot, "src", "data");
+
+  // 2. Fall back to <repo>/src/data (same symlink path as Python)
+  // 3. Fall back to <repo>/data
+  // NOTE: Without fs access we can't detect symlink existence, so prefer src/data
+  return srcDataPath;
+}
+
+const DATA_DIR = resolveDataDir();
 
 function dbPath(envName: string, defaultPath: string) {
   const override = process.env[envName];

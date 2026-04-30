@@ -60,11 +60,9 @@ from src.utils.notification_audit import record_notification_sent
 
 EM_UT = "fa5fd1943c7b386f172d6893dbfba10b"
 from src.utils.logging_config import setup_logger
+from src.sim_trading.db import CONFIG_DB_PATH
 
 logger = setup_logger("stock_monitor")
-
-# ── 数据库路径 ──
-CONFIG_DB_PATH = PROJECT_ROOT / "src" / "data" / "config.db"
 
 # ── 默认配置 ──
 DEFAULT_SETTINGS = {

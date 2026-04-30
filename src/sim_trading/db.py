@@ -5,10 +5,25 @@ Split from single sim_trading.db into:
 - trading.db: all operational data (WAL mode)
 """
 
+import os
 import sqlite3
 from pathlib import Path
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+# ── DATA_DIR resolution (no machine-specific symlinks) ──────────────────────
+# Priority:
+#   1. AI_INVESTOR_DATA_DIR env var (absolute path) — machine-specific override
+#   2. Original symlink-based path (src/data) — preserved for backward compat on
+#      machines where the OneDrive symlink is live; silently skipped if broken
+#   3. <repo>/data  — relative fallback, works on any machine with a local data dir
+_DATA_DIR_ENV = os.environ.get("AI_INVESTOR_DATA_DIR", "").strip()
+if _DATA_DIR_ENV:
+    DATA_DIR = Path(_DATA_DIR_ENV).expanduser().resolve()
+else:
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+    # Fallback (2): original symlink path — preserve existing behaviour on
+    # machines where the OneDrive symlink src/data is live and readable
+    _symlink_data_dir = PROJECT_ROOT / "src" / "data"
+    DATA_DIR = _symlink_data_dir if _symlink_data_dir.exists() else PROJECT_ROOT / "data"
 CONFIG_DB_PATH = DATA_DIR / "config.db"
 TRADING_DB_PATH = DATA_DIR / "trading.db"
 LEGACY_DB_PATH = DATA_DIR / "sim_trading.db"

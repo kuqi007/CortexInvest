@@ -47,8 +47,8 @@ logger = setup_logger("earnings_calendar")
 LOCK_FILE = PROJECT_ROOT / "data" / ".earnings_calendar.lock"
 
 # ── 数据缓存路径 ──
-DATA_DIR = PROJECT_ROOT / "src" / "data"
-TRADING_DB = PROJECT_ROOT / "src" / "data" / "trading.db"
+from src.sim_trading.db import DATA_DIR, TRADING_DB_PATH
+TRADING_DB = TRADING_DB_PATH  # alias for compatibility
 
 # ── 飞书推送阈值 ──
 ALERT_BEFORE_DAYS = 3   # 提前 N 天预警

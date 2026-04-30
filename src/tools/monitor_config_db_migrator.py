@@ -17,11 +17,10 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from src.sim_trading.db import get_config_connection, init_db
+from src.sim_trading.db import DATA_DIR, get_config_connection, init_db
 from src.utils.audit_log import insert_config_outbox
 from src.utils.audit_system import build_audit_event_v2, make_actor
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 MONITOR_CONFIG_PATH = DATA_DIR / "monitor_config.json"
 
 
