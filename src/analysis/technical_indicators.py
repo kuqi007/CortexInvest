@@ -65,6 +65,11 @@ def calc_macd(
         }
     """
     closes_arr = np.array(closes, dtype=float)
+    if len(closes_arr) < slow + signal:
+        return {
+            'dif': 0.0, 'dea': 0.0, 'histogram': 0.0,
+            'crossover': 'none', 'divergence': 'none'
+        }
     ema_fast = _ema(closes_arr, fast)
     ema_slow = _ema(closes_arr, slow)
     dif = ema_fast - ema_slow

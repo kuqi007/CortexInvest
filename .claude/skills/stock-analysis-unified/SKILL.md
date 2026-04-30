@@ -807,7 +807,7 @@ from src.analysis.shareholder_analyzer import assess_shareholder_risk
 
 **数据来源**（已由 Phase 1 收集）：
 - T1: mx_data_*近{N}日每日*.json
-- 数据范围：主板 30+ 日，创业板/科创板 20+ 日
+- 数据范围：主板 35日（确保≥30交易日），创业板/科创板 25日
 
 **Python 解析函数**（位于 `src/analysis/`）：
 ```python
@@ -838,12 +838,14 @@ from src.analysis.technical_indicators import (
    elif 总分 <= -3: synthesis_signal = "BEARISH"
    else: synthesis_signal = "NEUTRAL"
    ```
-4. **计算入场价位**：
+4. **计算入场价位**（N = K线数据条数，通常 25-35）：
    ```
+   近期低点 = min(收盘价[-(N-1):-(N-5)])  # 最近5日内最低（不含今日）
+   近期高点 = max(收盘价[-(N-1):-(N-5)])  # 最近5日内最高（不含今日）
    支撑位 = min(MA20, 近期低点, 布林下轨)
    阻力位 = max(MA60, 近期高点)
    技术止损 = 支撑位 - 2% × ATR
-   目标位 = max(MA60, 近期高点, 阻力位)
+   目标位 = 阻力位 + 2 × ATR  # 至少1倍ATR空间
    ```
 5. **冲突检测**：若 `technical_signal.synthesis_signal == "BEARISH"` 且基本面方向为 BUY，则 `conflicts_with_fundamentals = True`
 6. **写入 valuation_result.json** — technical_signal + fundamental_signal 字段

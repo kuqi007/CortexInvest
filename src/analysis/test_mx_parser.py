@@ -118,11 +118,14 @@ class TestParseKlineOhlcv:
         try:
             rows = parse_kline_ohlcv(path)
             assert len(rows) == 3
-            assert rows[0]['date'] == '2026-04-29'
-            assert rows[0]['成交量'] == 348.1
-            assert rows[0]['收盘价'] == 1401.0
-            # 最新在 Table 1 行[0] = 2026-04-29
-            assert rows[-1]['date'] == '2026-04-27'
+            # oldest-first (升序): headName=[newest,mid,oldest] → reversed → oldest first
+            # 成交量=['348.1','340','728'] → index2='728' becomes rows[0] after reverse
+            assert rows[0]['date'] == '2026-04-27'
+            assert rows[0]['成交量'] == 728.0
+            assert rows[0]['收盘价'] == 1403.0
+            # newest last
+            assert rows[-1]['date'] == '2026-04-29'
+            assert rows[-1]['成交量'] == 348.1
         finally:
             os.unlink(path)
 
@@ -185,6 +188,6 @@ class TestParseKlineOhlcv:
         try:
             rows = parse_kline_ohlcv(path)
             assert len(rows) == 2
-            assert rows[0]['收盘价'] == 1401.0
+            assert rows[0]['收盘价'] == 1405.0  # oldest-first: 04-28
         finally:
             os.unlink(path)

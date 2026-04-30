@@ -5,6 +5,19 @@ import json
 from pathlib import Path
 
 
+def _strip_pct(val: str) -> float:
+    """Strip % suffix and convert to float. Returns 0.0 on failure."""
+    if val is None:
+        return 0.0
+    s = str(val).strip().replace('%', '').replace(',', '').replace(' ', '')
+    if s == '' or s.lower() == 'nan':
+        return 0.0
+    try:
+        return float(s)
+    except (ValueError, TypeError):
+        return 0.0
+
+
 def parse_institutional_ratio(raw_json_path: str) -> dict:
     """解析 mx-data 机构持股比例数据
 
@@ -21,7 +34,7 @@ def parse_institutional_ratio(raw_json_path: str) -> dict:
         }
 
     Raises:
-        ValueError: col_id 100000000003145 不存在
+        ValueError: col_id 100000000003145 不存在或无有效数据
     """
     with open(raw_json_path) as f:
         data = json.load(f)
@@ -32,14 +45,17 @@ def parse_institutional_ratio(raw_json_path: str) -> dict:
     col_id = '100000000003145'
     if col_id not in raw:
         raise ValueError(f"Column {col_id} not found in mx-data response")
-    ratios = raw[col_id]
+    ratios_raw = raw[col_id]
     dates = raw.get('headName', [])
 
-    latest_ratio = float(ratios[0])
-    prev_ratio = float(ratios[1]) if len(ratios) > 1 else None
+    if not ratios_raw or len(ratios_raw) == 0:
+        raise ValueError(f"No ratio values found in column {col_id}")
+
+    latest_ratio = _strip_pct(ratios_raw[0])
+    prev_ratio = _strip_pct(ratios_raw[1]) if len(ratios_raw) > 1 else None
     qoq_change = round(latest_ratio - prev_ratio, 3) if prev_ratio is not None else None
 
-    all_dates = list(zip(dates, ratios)) if dates else []
+    all_dates = list(zip(dates, ratios_raw)) if dates else []
 
     return {
         'latest_ratio_pct': latest_ratio,
@@ -76,7 +92,9 @@ def parse_kline_ohlcv(raw_json_path: str) -> list[dict]:
     for i, date in enumerate(dates):
         row = {'date': date}
         for f in fields:
-            val_str = raw[f][i] if i < len(raw[f]) else None
+            if i >= len(raw.get(f, [])):
+                continue
+            val_str = raw[f][i]
             if val_str is None:
                 continue
             # 去除常见单位
@@ -90,12 +108,15 @@ def parse_kline_ohlcv(raw_json_path: str) -> list[dict]:
                 .replace(',', '')
                 .replace(' ', '')
             )
-            if val_clean == '':
+            if val_clean == '' or val_clean.lower() == 'nan':
                 continue
             try:
                 row[dt['nameMap'].get(f, f)] = float(val_clean)
             except ValueError:
                 continue
         rows.append(row)
+
+    # mx-data 历史序列通常 newest-first → 反转使其 oldest-first（升序）
+    rows.reverse()
 
     return rows
