@@ -125,3 +125,19 @@ class TestClassifyTop10Holders:
         ]
         result = classify_top10_holders(holders)
         assert result['institutional_breakdown']['fund_etf'] == 1.5
+
+    def test_broker(self):
+        holders = [
+            {'name': '中信证券股份有限公司', 'ratio_pct': 2.0, 'type_raw': '证券公司'},
+            {'name': '华泰证券', 'ratio_pct': 1.0, 'type_raw': '其它'},
+        ]
+        result = classify_top10_holders(holders)
+        assert result['institutional_breakdown']['broker'] == 3.0
+
+    def test_national_capital(self):
+        holders = [
+            {'name': '国有石油集团', 'ratio_pct': 5.0, 'type_raw': '国有企业'},
+            {'name': '国资运营公司', 'ratio_pct': 2.0, 'type_raw': '其它'},
+        ]
+        result = classify_top10_holders(holders)
+        assert result['institutional_breakdown']['national_capital'] == 7.0

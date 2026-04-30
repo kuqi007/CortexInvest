@@ -40,7 +40,7 @@ def assess_shareholder_risk(
     if non_institutional_ratio_pct > ni_threshold_high:
         high_count += 1
         triggers.append(f"非机构持股比例 {non_institutional_ratio_pct:.1f}% > {ni_threshold_high}%")
-    elif non_institutional_ratio_pct > ni_threshold_medium:
+    elif non_institutional_ratio_pct >= ni_threshold_medium:
         medium_count += 1
         triggers.append(f"非机构持股比例 {non_institutional_ratio_pct:.1f}% ({ni_threshold_medium}~{ni_threshold_high}%)")
 
@@ -121,6 +121,8 @@ def classify_top10_holders(holders: list[dict]) -> dict:
     private_fund = 0.0
     social_security = 0.0
     hkscc = 0.0
+    national_capital = 0.0
+    broker = 0.0
     other = 0.0
     classified_holders = []
 
@@ -129,15 +131,15 @@ def classify_top10_holders(holders: list[dict]) -> dict:
         ratio = h.get('ratio_pct', 0.0)
         type_raw = h.get('type_raw', '')
 
-        if '控股股东' in name or '实控人' in name or '集团' in name or '酒厂' in name or '总公司' in name:
+        if '控股股东' in name or '实控人' in name or '酒厂' in name or '总公司' in name:
             holder_type = '控股股东'
             controlling_pct += ratio
         elif '香港中央结算' in name:
             holder_type = 'HKSCC'
             hkscc += ratio
-        elif '国有' in name or '国资' in type_raw:
+        elif '国有' in name or '国资' in name or '国资' in type_raw:
             holder_type = '国资'
-            other += ratio
+            national_capital += ratio
         elif '证券投资基金' in type_raw or 'ETF' in name or '指数' in name:
             holder_type = '证券投资基金'
             fund_etf += ratio
@@ -147,6 +149,9 @@ def classify_top10_holders(holders: list[dict]) -> dict:
         elif '社保' in name or '保险' in type_raw:
             holder_type = '社保/保险'
             social_security += ratio
+        elif '券商' in name or '证券' in name or '证券' in type_raw:
+            holder_type = '券商'
+            broker += ratio
         else:
             holder_type = '其他'
             other += ratio
@@ -162,6 +167,8 @@ def classify_top10_holders(holders: list[dict]) -> dict:
             'private_fund': round(private_fund, 2),
             'social_security': round(social_security, 2),
             'hkscc': round(hkscc, 2),
+            'national_capital': round(national_capital, 2),
+            'broker': round(broker, 2),
             'other': round(other, 2),
         },
         'top10_concentration_pct': round(top10_concentration, 2),

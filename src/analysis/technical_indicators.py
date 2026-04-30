@@ -181,16 +181,18 @@ def calc_ma(closes: list[float], periods: tuple = (5, 10, 20, 60)) -> dict:
         else:
             result[f'ma{p}'] = None
 
-    # 判断均线排列
+    # 判断均线排列（按数值周期排序，而非字符串）
     valid_mas = {p: result.get(f'ma{p}') for p in periods if result.get(f'ma{p}') is not None}
     if len(valid_mas) < 2:
         arrangement = 'neutral'
-    elif all(valid_mas[p1] > valid_mas[p2] for p1, p2 in zip(sorted(valid_mas), sorted(valid_mas)[1:])):
-        arrangement = 'bullish'
-    elif all(valid_mas[p1] < valid_mas[p2] for p1, p2 in zip(sorted(valid_mas), sorted(valid_mas)[1:])):
-        arrangement = 'bearish'
     else:
-        arrangement = 'neutral'
+        sorted_periods = sorted(valid_mas.keys())  # [5, 10, 20, 60] numeric sort
+        if all(valid_mas[p1] > valid_mas[p2] for p1, p2 in zip(sorted_periods, sorted_periods[1:])):
+            arrangement = 'bullish'
+        elif all(valid_mas[p1] < valid_mas[p2] for p1, p2 in zip(sorted_periods, sorted_periods[1:])):
+            arrangement = 'bearish'
+        else:
+            arrangement = 'neutral'
     result['arrangement'] = arrangement
 
     return result
