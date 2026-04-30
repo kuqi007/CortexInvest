@@ -532,35 +532,84 @@ function Home() {
         {/* watch header */}
         <div style={{ color: D.comment, marginBottom: 6 }}>
           <span>每 {pollMs / 1000} 秒轮询一次</span>
-          <span style={{ float: "right" }}>
-            {isStale ? (
-              <span style={{ color: D.red, fontWeight: 700 }}>
-                ⚠ 数据已过期 {Math.round((Date.now() - ts) / 60000)} 分钟
-              </span>
+          <span style={{ float: "right", display: "flex", alignItems: "center", gap: 10 }}>
+            {tradingStatus?.trading ? (
+              <span style={{ color: D.green, fontSize: 11, fontWeight: 600 }}>● 交易中</span>
             ) : (
-              <span style={{ color: D.green }}>
-                数据 {Math.round((Date.now() - ts) / 1000)} 秒前更新
-              </span>
+              <span style={{ color: D.comment, fontSize: 11 }}>○ 休市</span>
             )}
-            {" | "}
-            {tradingStatus?.trading ? "交易中" : "休市"}
-            {" | "}
-            时间: <span style={{ color: isStale ? D.red : D.comment }}>{now}</span> &nbsp; 刷新 #{tick}
+            <span style={{ color: D.comment }}>|</span>
+            {/* Freshness chip */}
+            {isStale && Date.now() - ts > pollMs * 10 ? (
+              // Very stale (>5 min) — show "已休市"
+              <span style={{
+                color: D.comment,
+                fontSize: 11,
+                fontWeight: 600,
+                background: "rgba(98, 114, 164, 0.15)",
+                border: `1px solid ${D.comment}`,
+                padding: "1px 8px",
+                borderRadius: 20,
+              }}>已休市</span>
+            ) : isStale ? (
+              // Stale (2–5 min) — show minutes in orange
+              <span style={{
+                color: D.orange,
+                fontSize: 11,
+                fontWeight: 600,
+                background: "rgba(255, 184, 108, 0.12)",
+                border: `1px solid ${D.orange}`,
+                padding: "1px 8px",
+                borderRadius: 20,
+              }}>数据 {Math.round((Date.now() - ts) / 60000)} 分钟前更新</span>
+            ) : (
+              // Fresh (<=2 min) — show seconds in green
+              <span style={{
+                color: D.green,
+                fontSize: 11,
+                fontWeight: 600,
+                background: "rgba(80, 250, 123, 0.10)",
+                border: `1px solid ${D.green}`,
+                padding: "1px 8px",
+                borderRadius: 20,
+              }}>数据 {Math.round((Date.now() - ts) / 1000)} 秒前更新</span>
+            )}
+            {/* Alert status pill */}
+            <span style={{
+              fontSize: 11,
+              fontWeight: 600,
+              color: isStale ? D.red : D.green,
+              background: isStale ? "rgba(255, 85, 85, 0.12)" : "rgba(80, 250, 123, 0.10)",
+              border: `1px solid ${isStale ? D.red : D.green}`,
+              padding: "1px 8px",
+              borderRadius: 20,
+            }}>告警 {isStale ? "过期" : "正常"}</span>
+            <span style={{ color: D.comment }}>|</span>
+            <span style={{ color: isStale ? D.red : D.comment }}>时间: {now}</span>
+            <span style={{ color: D.comment }}> #{tick}</span>
           </span>
         </div>
 
         {/* stale warning banner — only show when data is stale for > 3 minutes */}
         {isStale && (Date.now() - ts > pollMs * 6) && (
           <div style={{
-            backgroundColor: D.yellow,
-            color: "#1a1a2e",
-            padding: "10px 16px",
+            border: `1px solid ${D.orange}`,
+            borderLeft: `3px solid ${D.orange}`,
+            background: "rgba(255, 184, 108, 0.06)",
+            color: D.fg,
+            padding: "9px 16px",
             borderRadius: 6,
             marginBottom: 12,
-            fontWeight: 600,
-            fontSize: 13,
+            fontSize: 12,
+            fontWeight: 500,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
           }}>
-            ⚠ 行情已停止更新 {Math.round((Date.now() - ts) / 60000)} 分钟 — 请检查 poller 进程是否在运行
+            <span style={{ color: D.orange, fontSize: 14 }}>⚠</span>
+            <span>
+              行情已停止更新 <span style={{ color: D.orange, fontWeight: 700 }}>{Math.round((Date.now() - ts) / 60000)}</span> 分钟 — 请检查 poller 进程是否在运行
+            </span>
           </div>
         )}
 
@@ -596,7 +645,6 @@ function Home() {
           <span style={{ color: chgColor(tabAvgChg) }}>
             {tabAvgChg >= 0 ? "+" : ""}{tabAvgChg.toFixed(2)}%
           </span>
-          {"  "}告警:<span style={{ color: isStale ? D.red : D.green }}>{isStale ? "过期" : "正常"}</span>
         </div>
         {/* tab portfolio summary */}
         {tabHoldings.length > 0 && (
