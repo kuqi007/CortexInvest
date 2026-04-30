@@ -129,7 +129,7 @@ class ImportPlan(StrictModel):
     content_fingerprint: str
     plan_hash: str
     actionable_rows_hash: str
-    auto_apply: bool
-    needs_confirmation: bool
+    auto_apply: list[PlannedAction] = Field(default_factory=list)
+    needs_confirmation: list[PlannedAction] = Field(default_factory=list)
     rejected: list[dict[str, object]] = Field(default_factory=list)
     apply_log: list[ApplyLogEntry] = Field(default_factory=list)

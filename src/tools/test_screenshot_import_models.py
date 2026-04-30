@@ -105,8 +105,8 @@ def test_import_plan_hashes_distinct_and_plan_group_empty_ok():
         content_fingerprint="cfp",
         plan_hash="hash-plan",
         actionable_rows_hash="hash-rows",
-        auto_apply=False,
-        needs_confirmation=True,
+        auto_apply=[],
+        needs_confirmation=[],
     )
     assert plan.plan_hash == "hash-plan"
     assert plan.actionable_rows_hash == "hash-rows"
