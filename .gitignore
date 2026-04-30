@@ -112,6 +112,10 @@ web/screenshots/review/
 web/screenshots/sort-all/
 web/screenshots/sort/
 web/screenshots/verify/
+web/screenshots/latest/
+web/screenshots/rounds/
+web/.e2e-data/
+web/.e2e-runs/
 web/tsconfig.tsbuildinfo
 
 

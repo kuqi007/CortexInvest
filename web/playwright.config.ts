@@ -1,4 +1,7 @@
 import { defineConfig } from "@playwright/test";
+import { join } from "path";
+
+const e2eDataDir = process.env.AI_INVESTOR_E2E_DATA_DIR ?? join(process.cwd(), ".e2e-data");
 
 export default defineConfig({
   testDir: "./e2e",
@@ -14,9 +17,13 @@ export default defineConfig({
     { name: "chromium", use: { browserName: "chromium" } },
   ],
   webServer: {
-    command: "npm run build && npm run start",
+    command: "node scripts/prepare-e2e-data.mjs && npm run build && npm run start",
     port: 3120,
-    reuseExistingServer: true,
-    timeout: 60_000,
+    reuseExistingServer: false,
+    timeout: 120_000,
+    env: {
+      AI_INVESTOR_DATA_DIR: e2eDataDir,
+      AI_INVESTOR_E2E_DATA_DIR: e2eDataDir,
+    },
   },
 });
