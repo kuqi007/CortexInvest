@@ -18,15 +18,24 @@ class ConfigApiError(RuntimeError):
 
 @dataclass(frozen=True)
 class AppliedRow:
+    row_apply_id: str
     code: str
     status_code: int
+    ok: bool
     message: str = ""
 
 
 @dataclass(frozen=True)
 class ApplyResult:
-    applied: list[AppliedRow]
-    failed: list[AppliedRow]
+    rows: list[AppliedRow]
+
+    @property
+    def applied(self) -> list[AppliedRow]:
+        return [r for r in self.rows if r.ok]
+
+    @property
+    def failed(self) -> list[AppliedRow]:
+        return [r for r in self.rows if not r.ok]
 
 
 def _require_loopback_url(base_url: str) -> None:
@@ -65,16 +74,21 @@ class ConfigApiClient:
     def apply_actions(
         self, actions: list[PlannedAction], import_run_id: str
     ) -> ApplyResult:
-        applied: list[AppliedRow] = []
-        failed: list[AppliedRow] = []
         ordered = sorted(actions, key=lambda a: a.plan_sequence)
+        rows_out: list[AppliedRow] = []
 
         for action in ordered:
             try:
                 current = self.fetch_watchlist()
             except ConfigApiError as exc:
-                failed.append(
-                    AppliedRow(code=action.code, status_code=0, message=str(exc))
+                rows_out.append(
+                    AppliedRow(
+                        row_apply_id=action.row_apply_id,
+                        code=action.code,
+                        status_code=0,
+                        ok=False,
+                        message=str(exc),
+                    )
                 )
                 continue
 
@@ -116,24 +130,17 @@ class ConfigApiClient:
                 else:
                     msg = "apply failed"
 
-            if ok:
-                applied.append(
-                    AppliedRow(
-                        code=action.code,
-                        status_code=post_resp.status_code,
-                        message="",
-                    )
+            rows_out.append(
+                AppliedRow(
+                    row_apply_id=action.row_apply_id,
+                    code=action.code,
+                    status_code=post_resp.status_code,
+                    ok=ok,
+                    message=msg,
                 )
-            else:
-                failed.append(
-                    AppliedRow(
-                        code=action.code,
-                        status_code=post_resp.status_code,
-                        message=msg,
-                    )
-                )
+            )
 
-        return ApplyResult(applied=applied, failed=failed)
+        return ApplyResult(rows=rows_out)
 
 
 def _is_apply_success(status_code: int, payload: object) -> bool:

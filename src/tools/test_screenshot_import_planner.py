@@ -134,3 +134,69 @@ def test_low_model_confidence_marks_below_model_threshold() -> None:
     assert plan.auto_apply == []
     assert len(plan.needs_confirmation) == 1
     assert "below_model_threshold" in plan.needs_confirmation[0].reason_codes
+
+
+def test_name_only_match_reason_when_code_low_name_high() -> None:
+    row = NormalizedRow(
+        code="600519",
+        name="贵州茅台",
+        is_holding=False,
+        field_confidence=_fc(code=0.7, name=0.95),
+    )
+    classification = ClassificationResult(
+        platform="ths",
+        screenshot_type="watchlist",
+        confidence=0.95,
+        candidate_platforms=[PlatformCandidate(platform="ths", confidence=0.95)],
+    )
+    plan = build_import_plan(
+        rows=[row],
+        provider="kimi",
+        model="moonshot-v1",
+        classification=classification,
+        model_confidence=0.95,
+        threshold=0.8,
+        content_fingerprint="fp-noname",
+        existing_codes=frozenset(),
+        manual_platform_after_low_confidence=False,
+    )
+    assert plan.auto_apply == []
+    assert len(plan.needs_confirmation) == 1
+    rc = plan.needs_confirmation[0].reason_codes
+    assert "name_only_match" in rc
+    assert "below_field_threshold" in rc
+
+
+def test_abnormal_holding_delta_routes_to_needs_confirmation() -> None:
+    row = NormalizedRow(
+        code="600519",
+        name="贵州茅台",
+        is_holding=True,
+        cost=500.0,
+        shares=100,
+        field_confidence=_fc(code=0.95, name=0.94, cost=0.92, shares=0.91),
+    )
+    classification = ClassificationResult(
+        platform="ths",
+        screenshot_type="holding",
+        confidence=0.92,
+        candidate_platforms=[PlatformCandidate(platform="ths", confidence=0.92)],
+    )
+    existing_wl: dict[str, object] = {
+        "600519": {"cost": 100.0, "shares": 100},
+    }
+    plan = build_import_plan(
+        rows=[row],
+        provider="kimi",
+        model="moonshot-v1",
+        classification=classification,
+        model_confidence=0.92,
+        threshold=0.8,
+        content_fingerprint="fp-ab",
+        existing_codes=frozenset(["600519"]),
+        manual_platform_after_low_confidence=False,
+        existing_watchlist=existing_wl,
+    )
+    assert plan.auto_apply == []
+    assert len(plan.needs_confirmation) == 1
+    assert "abnormal_delta" in plan.needs_confirmation[0].reason_codes

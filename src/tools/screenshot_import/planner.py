@@ -31,6 +31,11 @@ def _sha256(payload: object) -> str:
     return f"sha256:{digest}"
 
 
+def apply_log_request_payload_hash(payload: Mapping[str, object]) -> str:
+    """Hash for ApplyLogEntry.request_payload_hash (canonical JSON)."""
+    return _sha256(dict(payload))
+
+
 def _row_payload(row: NormalizedRow) -> dict[str, object]:
     payload: dict[str, object] = {
         "code": row.code,
@@ -68,6 +73,50 @@ def _action_for(row: NormalizedRow, existing_codes: Collection[str]) -> Literal[
     return "add"
 
 
+def _existing_holding_numbers(
+    code: str, existing_watchlist: Mapping[str, object] | None
+) -> tuple[float, float] | None:
+    if existing_watchlist is None:
+        return None
+    raw = existing_watchlist.get(code)
+    if not isinstance(raw, dict):
+        return None
+    cost_raw = raw.get("cost")
+    shares_raw = raw.get("shares")
+    try:
+        if cost_raw is None or shares_raw is None:
+            return None
+        c = float(cost_raw)
+        s = float(shares_raw)
+        if c <= 0 or s <= 0:
+            return None
+        return c, s
+    except (TypeError, ValueError):
+        return None
+
+
+def _relative_delta(a: float, b: float) -> float:
+    if a == 0.0 and b == 0.0:
+        return 0.0
+    if a == 0.0 or b == 0.0:
+        return 1.0
+    return abs(a - b) / max(abs(a), abs(b))
+
+
+def _abnormal_holdings_delta(
+    row: NormalizedRow, existing_watchlist: Mapping[str, object] | None
+) -> bool:
+    if not row.is_holding or row.cost is None or row.shares is None:
+        return False
+    prev = _existing_holding_numbers(row.code, existing_watchlist)
+    if prev is None:
+        return False
+    old_c, old_s = prev
+    new_c = float(row.cost)
+    new_s = float(row.shares)
+    return _relative_delta(old_c, new_c) > 0.5 or _relative_delta(old_s, new_s) > 0.5
+
+
 def _row_apply_id(import_run_id: str, row: NormalizedRow, action: str) -> str:
     return _sha256(
         {
@@ -86,6 +135,7 @@ def _reason_codes_for_row(
     threshold: float,
     code_counts: Mapping[str, int],
     manual_platform_after_low_confidence: bool,
+    existing_watchlist: Mapping[str, object] | None = None,
 ) -> list[ReasonCode]:
     reasons: list[ReasonCode] = []
     if not is_valid_normalized_code(row.code):
@@ -102,6 +152,13 @@ def _reason_codes_for_row(
         reasons.append("below_classifier_threshold")
     if _min_required_confidence(row) < threshold:
         reasons.append("below_field_threshold")
+    fc = row.field_confidence
+    name_c = float(fc.name) if fc.name is not None else None
+    code_c = float(fc.code)
+    if code_c < threshold and name_c is not None and name_c >= threshold:
+        reasons.append("name_only_match")
+    if _abnormal_holdings_delta(row, existing_watchlist):
+        reasons.append("abnormal_delta")
     return reasons
 
 
@@ -136,6 +193,7 @@ def build_import_plan(
     content_fingerprint: str,
     existing_codes: Collection[str],
     manual_platform_after_low_confidence: bool,
+    existing_watchlist: Mapping[str, object] | None = None,
 ) -> ImportPlan:
     import_run_id = str(uuid.uuid4())
     created_at = datetime.now(timezone.utc)
@@ -159,6 +217,7 @@ def build_import_plan(
             threshold=threshold,
             code_counts=code_counts,
             manual_platform_after_low_confidence=manual_platform_after_low_confidence,
+            existing_watchlist=existing_watchlist,
         )
         if _is_hard_reject(reasons):
             rejected.append(

@@ -21,6 +21,7 @@ import sys
 import time
 import uuid
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -47,15 +48,20 @@ from src.tools.screenshot_import import DEFAULT_CONFIRM_THRESHOLD
 from src.tools.screenshot_import.classifier import classify_fingerprint, extract_fingerprint
 from src.tools.screenshot_import.config_api import ConfigApiClient, ConfigApiError
 from src.tools.screenshot_import.debug_artifacts import tier_a_debug_payload, write_tier_a_bundle
-from src.tools.screenshot_import.models import ImportPlan, VisionResponse
+from src.tools.screenshot_import.models import ApplyLogEntry, ImportPlan, VisionResponse
 from src.tools.screenshot_import.path_safety import (
     PathSafetyError,
     atomic_write_json,
+    validate_debug_output_dir,
     validate_existing_image_path,
     validate_existing_plan_json_path,
     validate_output_path,
 )
-from src.tools.screenshot_import.planner import build_import_plan, verify_import_plan_integrity
+from src.tools.screenshot_import.planner import (
+    apply_log_request_payload_hash,
+    build_import_plan,
+    verify_import_plan_integrity,
+)
 from src.tools.screenshot_import.prompts import (
     build_upload_disclosure,
     build_vision_prompt,
@@ -410,7 +416,35 @@ def main(argv: list[str] | None = None) -> int:
             return 5
 
         client = ConfigApiClient()
-        result = client.apply_actions(plan.auto_apply, import_run_id=plan.import_run_id)
+        successful_ids = {e.row_apply_id for e in plan.apply_log if e.response_ok}
+        to_apply = [a for a in plan.auto_apply if a.row_apply_id not in successful_ids]
+        for a in plan.auto_apply:
+            if a.row_apply_id in successful_ids:
+                print(f"  skip (already applied)  {a.code}")
+
+        if not to_apply:
+            if plan.auto_apply:
+                print("  no pending auto_apply rows")
+            return 0
+
+        result = client.apply_actions(to_apply, import_run_id=plan.import_run_id)
+        new_entries: list[ApplyLogEntry] = []
+        for action, row in zip(to_apply, result.rows, strict=True):
+            new_entries.append(
+                ApplyLogEntry(
+                    row_apply_id=action.row_apply_id,
+                    code=action.code,
+                    action=action.action,
+                    request_payload_hash=apply_log_request_payload_hash(action.payload),
+                    response_ok=row.ok,
+                    ts=datetime.now(timezone.utc),
+                    http_status=row.status_code,
+                    message=row.message or None,
+                )
+            )
+        updated_plan = plan.model_copy(update={"apply_log": [*plan.apply_log, *new_entries]})
+        atomic_write_json(plan_path, updated_plan.model_dump(mode="json"))
+
         for row in result.applied:
             print(f"  applied  {row.code}  HTTP {row.status_code}")
         for row in result.failed:
@@ -423,6 +457,14 @@ def main(argv: list[str] | None = None) -> int:
 
     extra_roots = [Path(p).expanduser() for p in (args.allow_path or [])]
     allowed_roots = [PROJECT_ROOT, Path.home() / "Downloads", *extra_roots]
+
+    debug_dir: Path | None = None
+    if args.debug_dir is not None:
+        try:
+            debug_dir = validate_debug_output_dir(args.debug_dir, allowed_roots)
+        except PathSafetyError as e:
+            print(f"错误: {e}", file=sys.stderr)
+            return 2
 
     try:
         image_path = validate_existing_image_path(args.image_path, allowed_roots)
@@ -472,9 +514,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     existing_codes: set[str] = set()
+    existing_watchlist: dict[str, object] | None = None
     try:
         wl = ConfigApiClient().fetch_watchlist()
         if isinstance(wl, dict):
+            existing_watchlist = wl
             existing_codes = {str(k) for k in wl.keys()}
     except ConfigApiError:
         pass
@@ -518,6 +562,7 @@ def main(argv: list[str] | None = None) -> int:
         threshold=confirm_thr,
         content_fingerprint=content_fp,
         existing_codes=existing_codes,
+        existing_watchlist=existing_watchlist,
         manual_platform_after_low_confidence=manual_platform,
     )
 
@@ -531,8 +576,7 @@ def main(argv: list[str] | None = None) -> int:
 
     atomic_write_json(out_path, plan.model_dump(mode="json"))
 
-    if args.debug_dir is not None:
-        debug_dir = Path(args.debug_dir)
+    if debug_dir is not None:
         plan_summary_obj = tier_a_debug_payload(
             outcome.provider,
             _collect_plan_codes(plan),
@@ -577,6 +621,16 @@ def main(argv: list[str] | None = None) -> int:
             )
             (debug_dir / "provider_response.json").write_text(
                 json.dumps(outcome.response.model_dump(mode="json"), ensure_ascii=False, indent=2)
+                + "\n",
+                encoding="utf-8",
+            )
+            validated_payload = [r.model_dump(mode="json") for r in norm_rows]
+            (debug_dir / "validated_result.json").write_text(
+                json.dumps(validated_payload, ensure_ascii=False, indent=2, default=str) + "\n",
+                encoding="utf-8",
+            )
+            (debug_dir / "import_plan.json").write_text(
+                json.dumps(plan.model_dump(mode="json"), ensure_ascii=False, indent=2, default=str)
                 + "\n",
                 encoding="utf-8",
             )

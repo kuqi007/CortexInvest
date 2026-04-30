@@ -11,6 +11,8 @@ from src.tools.screenshot_import import DEFAULT_MAX_IMAGE_BYTES
 
 DEFAULT_MAX_PLAN_JSON_BYTES = 4 * 1024 * 1024
 
+_DEBUG_DIR_SENTINEL = ".screenshot_import_debug_keep"
+
 
 class PathSafetyError(ValueError):
     """Raised when a path fails screenshot-import safety checks."""
@@ -114,6 +116,13 @@ def validate_output_path(path: str | Path, allowed_roots: Iterable[Path]) -> Pat
 
     _symlink_escape_in_chain(candidate, roots)
 
+    return candidate
+
+
+def validate_debug_output_dir(path: str | Path, allowed_roots: Iterable[Path]) -> Path:
+    """Validate a debug directory using the same rules as output paths (parent allowlist, no symlink escape)."""
+    candidate = Path(path).expanduser()
+    validate_output_path(candidate / _DEBUG_DIR_SENTINEL, allowed_roots)
     return candidate
 
 

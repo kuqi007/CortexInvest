@@ -73,7 +73,15 @@ def test_apply_posts_add_with_audit_context():
     run_id = "run-abc"
     act = _action()
     result = client.apply_actions([act], import_run_id=run_id)
-    assert result.applied == [AppliedRow(code="HK00700", status_code=200, message="")]
+    assert result.applied == [
+        AppliedRow(
+            row_apply_id=act.row_apply_id,
+            code="HK00700",
+            status_code=200,
+            ok=True,
+            message="",
+        )
+    ]
     assert result.failed == []
     post_calls = [c for c in sess.calls if c[0] == "POST"]
     assert len(post_calls) == 1
@@ -116,8 +124,10 @@ def test_partial_failure_collects_failed_row():
     result = client.apply_actions([a1, a2], import_run_id="run-x")
     assert len(result.applied) == 1
     assert result.applied[0].code == "000001"
+    assert result.applied[0].ok is True
     assert len(result.failed) == 1
     assert result.failed[0].code == "000002"
+    assert result.failed[0].ok is False
     assert result.failed[0].message == "bad row"
 
 

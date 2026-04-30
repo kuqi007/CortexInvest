@@ -6,6 +6,7 @@ import pytest
 from src.tools.screenshot_import.path_safety import (
     PathSafetyError,
     atomic_write_json,
+    validate_debug_output_dir,
     validate_existing_image_path,
     validate_output_path,
 )
@@ -43,3 +44,14 @@ def test_atomic_write_json_writes_complete_json(tmp_path):
     assert json.loads(text) == {"a": 1, "b": ["x"]}
     assert text.endswith("\n")
     assert text.index('"a"') < text.index('"b"')
+
+
+def test_validate_debug_output_dir_rejects_symlink_escape(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    link = allowed / "escape"
+    link.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(PathSafetyError):
+        validate_debug_output_dir(link / "dbg", allowed_roots=[allowed])
