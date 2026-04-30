@@ -39,7 +39,7 @@ def _load_cache_from_db() -> bool:
         rows = conn.execute(
             "SELECT date, calendar_json, updated_at_ms FROM trading_calendar_cache"
         ).fetchall()
-        _cache = {}
+        _cache.clear()
         latest_ms = 0
         for row in rows:
             parts = row["date"].split("|||")
@@ -47,7 +47,13 @@ def _load_cache_from_db() -> bool:
                 payload = json.loads(row["calendar_json"])
                 days = payload.get("days", {})
                 if isinstance(days, dict):
-                    _cache[(parts[0], parts[1])] = days
+                    # Split by month — DB stores flat date range per row, split into month buckets
+                    for date_str, trade_type in days.items():
+                        month_key = date_str[:7]
+                        month_cache_key = (parts[0], month_key)
+                        if month_cache_key not in _cache:
+                            _cache[month_cache_key] = {}
+                        _cache[month_cache_key][date_str] = trade_type
                 latest_ms = max(latest_ms, int(row["updated_at_ms"] or 0))
         if latest_ms:
             _cache_date = datetime.fromtimestamp(latest_ms / 1000).strftime("%Y-%m-%d")
@@ -150,7 +156,13 @@ def _ensure_cache(market: str):
 
     data = _fetch_trading_days(market, start, end)
     if data is not None:
-        _cache[cache_key] = data
+        # Group by month — Futu returns a flat date range, split into month buckets
+        for date_str, trade_type in data.items():
+            month_key = date_str[:7]  # "2026-04"
+            month_cache_key = (market.upper(), month_key)
+            if month_cache_key not in _cache:
+                _cache[month_cache_key] = {}
+            _cache[month_cache_key][date_str] = trade_type
         _cache_date = today
         _save_cache_to_db()
         logger.info(f"Trading calendar cached: {market} {len(data)} days ({start}~{end})")
@@ -177,9 +189,12 @@ def is_trading_day(market: str = "CN", date_str: Optional[str] = None) -> bool:
     cal = _cache.get(cache_key)
 
     if cal is not None:
-        return date_str in cal
+        trade_type = cal.get(date_str)
+        # WHOLE=全天交易, MORNING=上午交易, AFTERNOON=下午交易
+        # 不在日历里 = 周末或假期（非交易日，不要 fallback 到 weekday）
+        return trade_type in ("WHOLE", "MORNING", "AFTERNOON")
 
-    # Fallback: weekday check (no holiday awareness)
+    # Fallback: weekday check (only when cache is completely empty, e.g., Futu unreachable)
     try:
         d = datetime.strptime(date_str, "%Y-%m-%d")
         return d.weekday() < 5
