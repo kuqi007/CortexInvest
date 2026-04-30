@@ -7,7 +7,12 @@ from typing import Literal, TypeAlias
 
 from PIL import Image
 
-from src.tools.screenshot_import.models import ClassificationResult, Platform, ScreenshotType
+from src.tools.screenshot_import.models import (
+    ClassificationResult,
+    Platform,
+    PlatformCandidate,
+    ScreenshotType,
+)
 
 Layout: TypeAlias = Literal["dense_table", "wide_table"]
 ForcedPlatform: TypeAlias = Literal["auto"] | Platform
@@ -152,6 +157,15 @@ def _classify_core(fp: ImageFingerprint) -> tuple[Platform, float, list[str]]:
     return "unknown", 0.35, signals
 
 
+def _candidate_list_for_unknown() -> list[PlatformCandidate]:
+    return [
+        PlatformCandidate(platform="ths", confidence=0.40),
+        PlatformCandidate(platform="eastmoney", confidence=0.38),
+        PlatformCandidate(platform="hk_panda", confidence=0.36),
+        PlatformCandidate(platform="other", confidence=0.30),
+    ]
+
+
 def classify_fingerprint(
     fingerprint: ImageFingerprint,
     forced_platform: ForcedPlatform = "auto",
@@ -165,11 +179,16 @@ def classify_fingerprint(
         screenshot_type = forced_type
     if forced_platform != "auto":
         platform = forced_platform
+        candidates = [PlatformCandidate(platform=platform, confidence=1.0)]
+    elif platform == "unknown":
+        candidates = _candidate_list_for_unknown()
+    else:
+        candidates = [PlatformCandidate(platform=platform, confidence=confidence)]
 
     return ClassificationResult(
         platform=platform,
         screenshot_type=screenshot_type,
         confidence=confidence,
         signals=signals,
-        candidate_platforms=[],
+        candidate_platforms=candidates,
     )

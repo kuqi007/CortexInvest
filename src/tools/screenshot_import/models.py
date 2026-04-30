@@ -74,12 +74,19 @@ class VisionResponse(StrictModel):
     warnings: list[str] = Field(default_factory=list, max_length=20)
 
 
+class PlatformCandidate(StrictModel):
+    """Ranked broker guess: first entry is the best match for auto classification."""
+
+    platform: Platform
+    confidence: float = Field(ge=0, le=1)
+
+
 class ClassificationResult(StrictModel):
     platform: Platform
     screenshot_type: ScreenshotType
     confidence: float = Field(ge=0, le=1)
     signals: list[str] = Field(default_factory=list)
-    candidate_platforms: list[Platform] = Field(default_factory=list)
+    candidate_platforms: list[PlatformCandidate] = Field(default_factory=list)
 
 
 class NormalizedRow(StrictModel):

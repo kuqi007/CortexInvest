@@ -9,6 +9,8 @@ from pathlib import Path
 
 from src.tools.screenshot_import import DEFAULT_MAX_IMAGE_BYTES
 
+DEFAULT_MAX_PLAN_JSON_BYTES = 4 * 1024 * 1024
+
 
 class PathSafetyError(ValueError):
     """Raised when a path fails screenshot-import safety checks."""
@@ -71,6 +73,29 @@ def validate_existing_image_path(
     size = st.st_size
     if size > max_bytes:
         raise PathSafetyError(f"file is larger than {max_bytes} bytes")
+
+    return resolved
+
+
+def validate_existing_plan_json_path(
+    path: str | Path,
+    allowed_roots: Iterable[Path],
+    max_bytes: int = DEFAULT_MAX_PLAN_JSON_BYTES,
+) -> Path:
+    """Ensure plan file exists, is a regular file under allowed_roots, and is not huge."""
+    roots = _resolve_roots(allowed_roots)
+    resolved = Path(path).expanduser().resolve(strict=True)
+
+    if not _is_under(resolved, roots):
+        raise PathSafetyError("plan path is outside allowed roots")
+
+    st = resolved.stat()
+    if not stat.S_ISREG(st.st_mode):
+        raise PathSafetyError("plan path is not a regular file")
+
+    size = st.st_size
+    if size > max_bytes:
+        raise PathSafetyError(f"plan file is larger than {max_bytes} bytes")
 
     return resolved
 

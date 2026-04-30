@@ -238,8 +238,27 @@ class OpenAICompatibleVisionProvider:
         return _parse_vision_payload(content, self._name, self._model)
 
 
-def create_provider(provider: str) -> OpenAICompatibleVisionProvider:
+def resolve_provider_name(provider: str) -> str:
+    """Resolve ``auto`` to kimi / glm / minimax from env; pass-through for explicit names."""
     p = (provider or "").strip().lower()
+    if p == "auto":
+        if os.environ.get("KIMI_API_KEY"):
+            return "kimi"
+        if os.environ.get("GLM_API_KEY"):
+            return "glm"
+        if os.environ.get("MINIMAX_API_KEY"):
+            return "minimax"
+        raise ValueError(
+            "no API key configured for --provider auto "
+            "(set one of KIMI_API_KEY, GLM_API_KEY, MINIMAX_API_KEY)"
+        )
+    if p in ("kimi", "glm", "minimax"):
+        return p
+    raise ValueError(f"unsupported vision provider: {provider!r}")
+
+
+def create_provider(provider: str) -> OpenAICompatibleVisionProvider:
+    p = resolve_provider_name(provider)
     if p == "kimi":
         key = os.environ.get("KIMI_API_KEY", "")
         if not key:
@@ -270,4 +289,4 @@ def create_provider(provider: str) -> OpenAICompatibleVisionProvider:
         )
         return OpenAICompatibleVisionProvider("minimax", key, base, model)
 
-    raise ValueError(f"unsupported vision provider: {provider!r}")
+    raise ValueError(f"unsupported vision provider: {p!r}")

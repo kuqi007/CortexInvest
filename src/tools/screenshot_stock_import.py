@@ -45,20 +45,22 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from src.sim_trading.db import get_config_connection, init_config_db
 from src.tools.screenshot_import import DEFAULT_CONFIRM_THRESHOLD
 from src.tools.screenshot_import.classifier import classify_fingerprint, extract_fingerprint
-from src.tools.screenshot_import.config_api import ConfigApiClient
+from src.tools.screenshot_import.config_api import ConfigApiClient, ConfigApiError
+from src.tools.screenshot_import.debug_artifacts import tier_a_debug_payload, write_tier_a_bundle
 from src.tools.screenshot_import.models import ImportPlan, VisionResponse
 from src.tools.screenshot_import.path_safety import (
     PathSafetyError,
     atomic_write_json,
     validate_existing_image_path,
+    validate_existing_plan_json_path,
     validate_output_path,
 )
-from src.tools.screenshot_import.planner import build_import_plan
+from src.tools.screenshot_import.planner import build_import_plan, verify_import_plan_integrity
 from src.tools.screenshot_import.prompts import (
     build_upload_disclosure,
     build_vision_prompt,
 )
-from src.tools.screenshot_import.providers import VisionRequest, create_provider
+from src.tools.screenshot_import.providers import VisionRequest, create_provider, resolve_provider_name
 from src.tools.screenshot_import.validator import normalize_row
 from src.utils.audit_log import insert_config_outbox
 from src.utils.audit_system import build_audit_event_v2, make_actor
@@ -318,15 +320,32 @@ def _content_fingerprint_sha256(path: Path) -> str:
     return f"sha256:{digest}"
 
 
-def _resolve_provider_cli(name: str) -> str:
-    p = (name or "auto").strip().lower()
-    if p == "auto":
-        return "kimi"
-    return p
+def _image_mime_type(image_path: Path) -> str:
+    if not HAS_PIL:
+        return "image/png"
+    try:
+        with Image.open(image_path) as im:
+            fmt = (im.format or "").upper()
+    except OSError:
+        return "image/png"
+    mapping = {
+        "PNG": "image/png",
+        "JPEG": "image/jpeg",
+        "GIF": "image/gif",
+        "WEBP": "image/webp",
+        "BMP": "image/bmp",
+        "TIFF": "image/tiff",
+    }
+    return mapping.get(fmt, "image/png")
 
 
-def _low_classification_confidence(confidence: float, platform: str) -> bool:
-    return platform == "unknown" or confidence < 0.5
+def _collect_plan_codes(plan: ImportPlan) -> list[str]:
+    codes = [a.code for a in plan.auto_apply] + [a.code for a in plan.needs_confirmation]
+    for r in plan.rejected:
+        c = r.get("code")
+        if c is not None:
+            codes.append(str(c))
+    return codes
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -348,7 +367,7 @@ def main(argv: list[str] | None = None) -> int:
         choices=["auto", "kimi", "glm", "minimax"],
         default="auto",
     )
-    parser.add_argument("--yes", action="store_true", help="Acknowledge risk; triggers needs_user_input gate when platform auto and classification uncertain")
+    parser.add_argument("--yes", action="store_true", help="With uncertain auto classification, force exit 3 instead of calling vision (same as non-interactive stdin)")
     parser.add_argument("--plan", type=Path, help="ImportPlan JSON for --apply")
     parser.add_argument("--confirm-threshold", type=float, default=DEFAULT_CONFIRM_THRESHOLD)
     parser.add_argument("--type", dest="shot_type", choices=["auto", "holding", "watchlist"], default="auto")
@@ -368,12 +387,27 @@ def main(argv: list[str] | None = None) -> int:
         if not args.plan:
             print("错误: --apply 需要 --plan", file=sys.stderr)
             return 1
+        extra_roots = [Path(p).expanduser() for p in (args.allow_path or [])]
+        allowed_roots_apply = [PROJECT_ROOT, Path.home() / "Downloads", *extra_roots]
         try:
-            raw_plan = json.loads(Path(args.plan).expanduser().read_text(encoding="utf-8"))
+            plan_path = validate_existing_plan_json_path(args.plan, allowed_roots_apply)
+        except PathSafetyError as e:
+            print(f"错误: {e}", file=sys.stderr)
+            return 2
+        except OSError as e:
+            print(f"错误: {e}", file=sys.stderr)
+            return 2
+        try:
+            raw_plan = json.loads(plan_path.read_text(encoding="utf-8"))
             plan = ImportPlan.model_validate(raw_plan)
-        except (OSError, json.JSONDecodeError, ValueError, ValidationError) as e:
+        except (json.JSONDecodeError, ValueError, ValidationError) as e:
             print(f"错误: 无法加载计划文件: {e}", file=sys.stderr)
             return 2
+
+        ok, integrity_msg = verify_import_plan_integrity(plan)
+        if not ok:
+            print(f"错误: {integrity_msg}", file=sys.stderr)
+            return 5
 
         client = ConfigApiClient()
         result = client.apply_actions(plan.auto_apply, import_run_id=plan.import_run_id)
@@ -408,11 +442,13 @@ def main(argv: list[str] | None = None) -> int:
         forced_type=forced_type,
     )
 
-    if (
-        args.yes
-        and args.platform == "auto"
-        and _low_classification_confidence(classification.confidence, classification.platform)
-    ):
+    confirm_thr = float(args.confirm_threshold)
+    auto_class_low_confidence = (
+        args.platform == "auto"
+        and args.shot_type == "auto"
+        and classification.confidence < confirm_thr
+    )
+    if auto_class_low_confidence and (not sys.stdin.isatty() or args.yes):
         print(
             json.dumps(
                 {"needs_user_input": True, "classification": classification.model_dump(mode="json")},
@@ -421,33 +457,36 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 3
 
-    if args.debug_dir is not None:
-        debug_dir = Path(args.debug_dir)
-        debug_dir.mkdir(parents=True, exist_ok=True)
-        dbg_fp = asdict(fingerprint) if args.debug_sensitive else {"width": fingerprint.width, "height": fingerprint.height, "layout": fingerprint.layout}
-        (debug_dir / "fingerprint.json").write_text(
-            json.dumps(dbg_fp, ensure_ascii=False, indent=2, default=str) + "\n",
-            encoding="utf-8",
-        )
-        (debug_dir / "classification.json").write_text(
-            json.dumps(classification.model_dump(mode="json"), ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-
-    resolved_provider_key = _resolve_provider_cli(args.provider)
-    print(build_upload_disclosure(resolved_provider_key))
-
     try:
-        provider = create_provider(resolved_provider_key)
+        resolved_name = resolve_provider_name(args.provider)
     except ValueError as e:
         print(f"错误: {e}", file=sys.stderr)
         return 2
 
+    print(build_upload_disclosure(resolved_name))
+
+    try:
+        provider = create_provider(args.provider)
+    except ValueError as e:
+        print(f"错误: {e}", file=sys.stderr)
+        return 2
+
+    existing_codes: set[str] = set()
+    try:
+        wl = ConfigApiClient().fetch_watchlist()
+        if isinstance(wl, dict):
+            existing_codes = {str(k) for k in wl.keys()}
+    except ConfigApiError:
+        pass
+    except OSError:
+        pass
+
     prompt = build_vision_prompt(classification)
     recognition_run_id = uuid.uuid4().hex
+    mime_type = _image_mime_type(image_path)
     request = VisionRequest(
         image_path=str(image_path),
-        mime_type="image/png",
+        mime_type=mime_type,
         prompt=prompt,
         json_schema=VisionResponse.model_json_schema(),
         timeout_s=60.0,
@@ -467,17 +506,18 @@ def main(argv: list[str] | None = None) -> int:
             print(f"警告: 跳过无法规范化的行 {i}: {e}", file=sys.stderr)
 
     content_fp = _content_fingerprint_sha256(image_path)
-    confirm_thr = float(args.confirm_threshold)
     manual_platform = args.platform != "auto" and classification.confidence < confirm_thr
+    model_confidence = float(outcome.response.confidence)
 
     plan = build_import_plan(
         norm_rows,
         provider=outcome.provider,
         model=outcome.model,
         classification=classification,
+        model_confidence=model_confidence,
         threshold=confirm_thr,
         content_fingerprint=content_fp,
-        existing_codes=set(),
+        existing_codes=existing_codes,
         manual_platform_after_low_confidence=manual_platform,
     )
 
@@ -490,6 +530,57 @@ def main(argv: list[str] | None = None) -> int:
         out_path = validate_output_path(default_path, allowed_roots)
 
     atomic_write_json(out_path, plan.model_dump(mode="json"))
+
+    if args.debug_dir is not None:
+        debug_dir = Path(args.debug_dir)
+        plan_summary_obj = tier_a_debug_payload(
+            outcome.provider,
+            _collect_plan_codes(plan),
+            {
+                "classifier": float(classification.confidence),
+                "model": model_confidence,
+            },
+            {
+                "auto_apply_count": len(plan.auto_apply),
+                "needs_confirmation_count": len(plan.needs_confirmation),
+                "rejected_count": len(plan.rejected),
+            },
+        )
+        fp_redacted = {
+            "width": fingerprint.width,
+            "height": fingerprint.height,
+            "layout": fingerprint.layout,
+            "classification_confidence": float(classification.confidence),
+        }
+        prov_redacted = {
+            "provider": outcome.provider,
+            "model": outcome.model,
+            "mime_type": mime_type,
+            "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+            "run_id": recognition_run_id,
+        }
+        write_tier_a_bundle(
+            debug_dir,
+            image_fingerprint_redacted=fp_redacted,
+            provider_request_redacted=prov_redacted,
+            import_plan_summary_redacted=plan_summary_obj,
+        )
+        if args.debug_sensitive:
+            dbg_fp = asdict(fingerprint)
+            (debug_dir / "fingerprint.json").write_text(
+                json.dumps(dbg_fp, ensure_ascii=False, indent=2, default=str) + "\n",
+                encoding="utf-8",
+            )
+            (debug_dir / "classification.json").write_text(
+                json.dumps(classification.model_dump(mode="json"), ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            (debug_dir / "provider_response.json").write_text(
+                json.dumps(outcome.response.model_dump(mode="json"), ensure_ascii=False, indent=2)
+                + "\n",
+                encoding="utf-8",
+            )
+
     print(str(out_path))
     return 0
 

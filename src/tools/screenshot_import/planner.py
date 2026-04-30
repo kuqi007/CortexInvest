@@ -82,6 +82,7 @@ def _reason_codes_for_row(
     row: NormalizedRow,
     *,
     classification: ClassificationResult,
+    model_confidence: float,
     threshold: float,
     code_counts: Mapping[str, int],
     manual_platform_after_low_confidence: bool,
@@ -93,6 +94,8 @@ def _reason_codes_for_row(
         reasons.append("missing_required_field")
     if code_counts.get(row.code, 0) > 1:
         reasons.append("duplicate_code_conflict")
+    if model_confidence < threshold:
+        reasons.append("below_model_threshold")
     if manual_platform_after_low_confidence and row.is_holding:
         reasons.append("manual_platform_low_confidence")
     elif classification.confidence < threshold:
@@ -106,11 +109,29 @@ def _is_hard_reject(reasons: Sequence[ReasonCode]) -> bool:
     return "invalid_code" in reasons or "missing_required_field" in reasons
 
 
+def compute_plan_integrity_hash(plan: ImportPlan) -> str:
+    """Canonical hash over persisted plan fields, excluding mutable apply_log and plan_hash."""
+    payload = plan.model_dump(mode="json", exclude={"apply_log", "plan_hash"})
+    return _sha256(payload)
+
+
+def verify_import_plan_integrity(plan: ImportPlan) -> tuple[bool, str]:
+    expected = plan.plan_hash
+    computed = compute_plan_integrity_hash(plan)
+    if expected == computed:
+        return True, ""
+    return (
+        False,
+        "plan content does not match plan_hash — file may have been edited after export",
+    )
+
+
 def build_import_plan(
     rows: Sequence[NormalizedRow],
     provider: str,
     model: str,
     classification: ClassificationResult,
+    model_confidence: float,
     threshold: float,
     content_fingerprint: str,
     existing_codes: Collection[str],
@@ -126,16 +147,6 @@ def build_import_plan(
         code = item.code
         code_counts[code] = code_counts.get(code, 0) + 1
 
-    plan_body = {
-        "actionable_rows_hash": actionable_rows_hash,
-        "classification": classification.model_dump(mode="python"),
-        "import_run_id": import_run_id,
-        "model": model,
-        "provider": provider,
-        "rows": [r.model_dump(mode="python") for r in sorted_rows],
-    }
-    plan_hash = _sha256(plan_body)
-
     auto_apply: list[PlannedAction] = []
     needs_confirmation: list[PlannedAction] = []
     rejected: list[dict[str, object]] = []
@@ -144,6 +155,7 @@ def build_import_plan(
         reasons = _reason_codes_for_row(
             row,
             classification=classification,
+            model_confidence=model_confidence,
             threshold=threshold,
             code_counts=code_counts,
             manual_platform_after_low_confidence=manual_platform_after_low_confidence,
@@ -173,7 +185,7 @@ def build_import_plan(
         else:
             auto_apply.append(pa)
 
-    return ImportPlan(
+    plan = ImportPlan(
         import_run_id=import_run_id,
         created_at=created_at,
         provider=provider,
@@ -183,10 +195,11 @@ def build_import_plan(
         classification=classification,
         thresholds={"confirm_threshold": threshold},
         content_fingerprint=content_fingerprint,
-        plan_hash=plan_hash,
+        plan_hash="",
         actionable_rows_hash=actionable_rows_hash,
         auto_apply=auto_apply,
         needs_confirmation=needs_confirmation,
         rejected=rejected,
         apply_log=[],
     )
+    return plan.model_copy(update={"plan_hash": compute_plan_integrity_hash(plan)})

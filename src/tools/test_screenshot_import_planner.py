@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from src.tools.screenshot_import.models import ClassificationResult, FieldConfidence, NormalizedRow
+from src.tools.screenshot_import.models import (
+    ClassificationResult,
+    FieldConfidence,
+    NormalizedRow,
+    PlatformCandidate,
+)
 from src.tools.screenshot_import.planner import build_import_plan, compute_actionable_rows_hash
 
 
@@ -26,12 +31,14 @@ def test_high_confidence_holding_enters_auto_apply() -> None:
         platform="ths",
         screenshot_type="holding",
         confidence=0.92,
+        candidate_platforms=[PlatformCandidate(platform="ths", confidence=0.92)],
     )
     plan = build_import_plan(
         rows=[row],
         provider="kimi",
         model="moonshot-v1",
         classification=classification,
+        model_confidence=0.92,
         threshold=0.8,
         content_fingerprint="fp1",
         existing_codes=frozenset(),
@@ -57,12 +64,14 @@ def test_manual_platform_after_low_confidence_holdings_only_manual_reason() -> N
         platform="hk_panda",
         screenshot_type="holding",
         confidence=0.35,
+        candidate_platforms=[PlatformCandidate(platform="hk_panda", confidence=0.35)],
     )
     plan = build_import_plan(
         rows=[row],
         provider="glm",
         model="glm-4",
         classification=classification,
+        model_confidence=0.95,
         threshold=0.8,
         content_fingerprint="fp2",
         existing_codes=frozenset(),
@@ -96,3 +105,32 @@ def test_actionable_rows_hash_is_deterministic() -> None:
     h2 = compute_actionable_rows_hash([b, a])
     assert h1 == h2
     assert h1.startswith("sha256:")
+
+
+def test_low_model_confidence_marks_below_model_threshold() -> None:
+    row = NormalizedRow(
+        code="600519",
+        name="贵州茅台",
+        is_holding=False,
+        field_confidence=_fc(code=0.99, name=0.99),
+    )
+    classification = ClassificationResult(
+        platform="ths",
+        screenshot_type="watchlist",
+        confidence=0.95,
+        candidate_platforms=[PlatformCandidate(platform="ths", confidence=0.95)],
+    )
+    plan = build_import_plan(
+        rows=[row],
+        provider="kimi",
+        model="moonshot-v1",
+        classification=classification,
+        model_confidence=0.1,
+        threshold=0.8,
+        content_fingerprint="fp-model",
+        existing_codes=frozenset(),
+        manual_platform_after_low_confidence=False,
+    )
+    assert plan.auto_apply == []
+    assert len(plan.needs_confirmation) == 1
+    assert "below_model_threshold" in plan.needs_confirmation[0].reason_codes
