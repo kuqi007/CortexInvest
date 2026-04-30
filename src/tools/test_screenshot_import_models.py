@@ -26,6 +26,11 @@ def test_vision_response_holding_accepts_cost_shares_and_field_confidence():
                 "is_holding": True,
                 "cost": 12.5,
                 "shares": 1000,
+                "current_price": 13.2,
+                "market_value": 13200,
+                "available_shares": 800,
+                "daily_pnl": 120.5,
+                "daily_pnl_pct": 0.42,
                 "field_confidence": {
                     "code": 0.99,
                     "name": 0.9,
@@ -41,9 +46,61 @@ def test_vision_response_holding_accepts_cost_shares_and_field_confidence():
     assert row.is_holding is True
     assert row.cost == 12.5
     assert row.shares == 1000
+    assert row.current_price == 13.2
+    assert row.market_value == 13200
+    assert row.available_shares == 800
+    assert row.daily_pnl == 120.5
+    assert row.daily_pnl_pct == 0.42
     assert row.field_confidence.code == 0.99
     assert row.field_confidence.cost == 0.85
     assert row.field_confidence.shares == 0.88
+
+
+def test_vision_response_accepts_name_only_holding_identity():
+    data = {
+        "schema_version": 1,
+        "platform": "eastmoney",
+        "screenshot_type": "holding",
+        "confidence": 0.9,
+        "stocks": [
+            {
+                "name": "比亚迪股份",
+                "is_holding": True,
+                "cost": 127.825,
+                "shares": 1100,
+                "field_confidence": {
+                    "name": 0.95,
+                    "cost": 0.92,
+                    "shares": 0.91,
+                },
+            }
+        ],
+    }
+
+    vr = VisionResponse.model_validate(data)
+
+    row = vr.stocks[0]
+    assert row.code is None
+    assert row.name == "比亚迪股份"
+    assert row.field_confidence.code is None
+
+
+def test_vision_response_rejects_missing_identity():
+    with pytest.raises(ValidationError, match="code or name"):
+        VisionResponse.model_validate(
+            {
+                "schema_version": 1,
+                "platform": "ths",
+                "screenshot_type": "watchlist",
+                "confidence": 0.9,
+                "stocks": [
+                    {
+                        "is_holding": False,
+                        "field_confidence": {"name": 0.9},
+                    }
+                ],
+            }
+        )
 
 
 def test_vision_response_watchlist_rejects_cost_or_shares():
@@ -54,36 +111,30 @@ def test_vision_response_watchlist_rejects_cost_or_shares():
         "confidence": 0.9,
         "stocks": [],
     }
-    with pytest.raises(ValidationError, match="watchlist row must not include"):
-        VisionResponse.model_validate(
-            {
-                **base,
-                "stocks": [
-                    {
-                        "code": "000001",
-                        "name": "平安银行",
-                        "is_holding": False,
-                        "cost": 1.0,
-                        "field_confidence": {"code": 0.9},
-                    }
-                ],
-            }
-        )
-    with pytest.raises(ValidationError, match="watchlist row must not include"):
-        VisionResponse.model_validate(
-            {
-                **base,
-                "stocks": [
-                    {
-                        "code": "000001",
-                        "name": "平安银行",
-                        "is_holding": False,
-                        "shares": 100,
-                        "field_confidence": {"code": 0.9},
-                    }
-                ],
-            }
-        )
+    for field_name in (
+        "cost",
+        "shares",
+        "current_price",
+        "market_value",
+        "available_shares",
+        "daily_pnl",
+        "daily_pnl_pct",
+    ):
+        with pytest.raises(ValidationError, match="watchlist row must not include"):
+            VisionResponse.model_validate(
+                {
+                    **base,
+                    "stocks": [
+                        {
+                            "code": "000001",
+                            "name": "平安银行",
+                            "is_holding": False,
+                            field_name: 1.0,
+                            "field_confidence": {"code": 0.9},
+                        }
+                    ],
+                }
+            )
 
 
 

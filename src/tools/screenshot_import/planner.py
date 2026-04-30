@@ -37,6 +37,22 @@ def apply_log_request_payload_hash(payload: Mapping[str, object]) -> str:
 
 
 def _row_payload(row: NormalizedRow) -> dict[str, object]:
+    if row.code is None:
+        msg = "cannot build payload for row without normalized code"
+        raise ValueError(msg)
+    payload: dict[str, object] = {
+        "code": row.code,
+        "name": row.name,
+        "type": "holding" if row.is_holding else "watching",
+        "star": True,
+    }
+    if row.is_holding:
+        payload["cost"] = row.cost
+        payload["shares"] = row.shares
+    return payload
+
+
+def _row_hash_payload(row: NormalizedRow) -> dict[str, object]:
     payload: dict[str, object] = {
         "code": row.code,
         "name": row.name,
@@ -50,15 +66,17 @@ def _row_payload(row: NormalizedRow) -> dict[str, object]:
 
 
 def compute_actionable_rows_hash(rows: Sequence[NormalizedRow]) -> str:
-    payloads = [_row_payload(r) for r in rows]
+    payloads = [_row_hash_payload(r) for r in rows]
     payloads.sort(key=lambda p: str(p["code"]))
     return _sha256(payloads)
 
 
 def _min_required_confidence(row: NormalizedRow) -> float:
     fc = row.field_confidence
-    parts: list[float] = [float(fc.code)]
-    parts.append(float(fc.name) if fc.name is not None else 0.0)
+    code_c = float(fc.code) if fc.code is not None else 0.0
+    name_c = float(fc.name) if fc.name is not None else 0.0
+    identity_c = max(code_c, name_c)
+    parts: list[float] = [identity_c]
     if row.is_holding:
         parts.append(float(fc.cost) if fc.cost is not None else 0.0)
         parts.append(float(fc.shares) if fc.shares is not None else 0.0)
@@ -68,7 +86,7 @@ def _min_required_confidence(row: NormalizedRow) -> float:
 def _action_for(row: NormalizedRow, existing_codes: Collection[str]) -> Literal["add", "update"]:
     if row.is_holding:
         return "add"
-    if row.code in existing_codes:
+    if row.code is not None and row.code in existing_codes:
         return "update"
     return "add"
 
@@ -154,7 +172,7 @@ def _reason_codes_for_row(
         reasons.append("below_field_threshold")
     fc = row.field_confidence
     name_c = float(fc.name) if fc.name is not None else None
-    code_c = float(fc.code)
+    code_c = float(fc.code) if fc.code is not None else 0.0
     if code_c < threshold and name_c is not None and name_c >= threshold:
         reasons.append("name_only_match")
     if _abnormal_holdings_delta(row, existing_watchlist):
@@ -197,13 +215,14 @@ def build_import_plan(
 ) -> ImportPlan:
     import_run_id = str(uuid.uuid4())
     created_at = datetime.now(timezone.utc)
-    sorted_rows = sorted(rows, key=lambda r: r.code)
+    sorted_rows = sorted(rows, key=lambda r: (r.code or "", r.name))
     actionable_rows_hash = compute_actionable_rows_hash(sorted_rows)
 
     code_counts: dict[str, int] = {}
     for item in sorted_rows:
-        code = item.code
-        code_counts[code] = code_counts.get(code, 0) + 1
+        if item.code is not None:
+            code = item.code
+            code_counts[code] = code_counts.get(code, 0) + 1
 
     auto_apply: list[PlannedAction] = []
     needs_confirmation: list[PlannedAction] = []
@@ -230,6 +249,9 @@ def build_import_plan(
             )
             continue
 
+        if row.code is None or not is_valid_normalized_code(row.code):
+            msg = "planner invariant violated: actionable row must have a valid code"
+            raise AssertionError(msg)
         action = _action_for(row, existing_codes)
         pa = PlannedAction(
             row_apply_id=_row_apply_id(import_run_id, row, action),

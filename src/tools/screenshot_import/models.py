@@ -31,24 +31,35 @@ class Evidence(StrictModel):
 
 
 class FieldConfidence(StrictModel):
-    code: float = Field(ge=0, le=1)
+    code: float | None = Field(default=None, ge=0, le=1)
     name: float | None = Field(default=None, ge=0, le=1)
     cost: float | None = Field(default=None, ge=0, le=1)
     shares: float | None = Field(default=None, ge=0, le=1)
 
 
 class BaseStockRow(StrictModel):
-    code: str
-    name: str
+    code: str | None = None
+    name: str = ""
     is_holding: bool
     field_confidence: FieldConfidence
     evidence: Evidence = Field(default_factory=Evidence)
+
+    @model_validator(mode="after")
+    def _require_identity(self) -> "BaseStockRow":
+        if self.code is None and not self.name.strip():
+            raise ValueError("stock row must include code or name")
+        return self
 
 
 class HoldingStockRow(BaseStockRow):
     is_holding: Literal[True]
     cost: float = Field(gt=0)
     shares: float = Field(gt=0)
+    current_price: float | None = Field(default=None, gt=0)
+    market_value: float | None = Field(default=None, ge=0)
+    available_shares: float | None = Field(default=None, ge=0)
+    daily_pnl: float | None = None
+    daily_pnl_pct: float | None = None
 
 
 class WatchlistStockRow(BaseStockRow):
@@ -57,8 +68,17 @@ class WatchlistStockRow(BaseStockRow):
     @model_validator(mode="before")
     @classmethod
     def _reject_cost_or_shares(cls, data: object) -> object:
-        if isinstance(data, dict) and ("cost" in data or "shares" in data):
-            raise ValueError("watchlist row must not include cost or shares")
+        holding_only_fields = {
+            "cost",
+            "shares",
+            "current_price",
+            "market_value",
+            "available_shares",
+            "daily_pnl",
+            "daily_pnl_pct",
+        }
+        if isinstance(data, dict) and holding_only_fields.intersection(data):
+            raise ValueError("watchlist row must not include holding-only fields")
         return data
 
 
@@ -90,11 +110,16 @@ class ClassificationResult(StrictModel):
 
 
 class NormalizedRow(StrictModel):
-    code: str
+    code: str | None = None
     name: str
     is_holding: bool
     cost: float | None = None
     shares: float | None = None
+    current_price: float | None = None
+    market_value: float | None = None
+    available_shares: float | None = None
+    daily_pnl: float | None = None
+    daily_pnl_pct: float | None = None
     field_confidence: FieldConfidence
     source_row_index: int | None = None
 

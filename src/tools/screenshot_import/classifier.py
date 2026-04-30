@@ -28,6 +28,10 @@ class ImageFingerprint:
     red_ratio_top: float
     orange_ratio_top: float
     dark_ratio_top: float
+    red_ratio_total: float
+    blue_ratio_total: float
+    green_ratio_total: float
+    dark_ratio_total: float
     light_ratio_total: float
     layout: Layout
     visible_keywords: tuple[str, ...] = ()
@@ -48,11 +52,11 @@ def _color_name(rgb: tuple[int, int, int]) -> str:
     if b >= mx - 15 and b >= r + 25 and b >= g + 15 and mx < 200:
         return "dark_blue_or_black"
 
-    if r >= 140 and r >= g + 35 and r >= b + 35:
-        return "red"
-
     if r >= 160 and g >= 70 and b <= g - 15 and r >= b + 40:
         return "orange"
+
+    if r >= 140 and r >= g + 35 and r >= b + 35:
+        return "red"
 
     if mx - mn < 45 and 80 <= tot // 3 <= 200:
         return "mixed"
@@ -94,6 +98,29 @@ def _is_light(rgb: tuple[int, int, int]) -> bool:
     return (r + g + b) / 3.0 >= 220.0
 
 
+def _is_red_text(rgb: tuple[int, int, int]) -> bool:
+    r, g, b = rgb
+    return r >= 140 and r >= g + 35 and r >= b + 35
+
+
+def _is_blue_text(rgb: tuple[int, int, int]) -> bool:
+    r, g, b = rgb
+    return b >= 120 and b >= r + 30 and b >= g + 15
+
+
+def _is_green_text(rgb: tuple[int, int, int]) -> bool:
+    r, g, b = rgb
+    return g >= 120 and g >= r + 35 and g >= b + 35
+
+
+def _is_dark(rgb: tuple[int, int, int]) -> bool:
+    return _color_name(rgb) == "dark_blue_or_black"
+
+
+def _is_dark_mode(fp: ImageFingerprint) -> bool:
+    return fp.background_color == "dark_blue_or_black" or fp.dark_ratio_total >= 0.75
+
+
 def extract_fingerprint(image_path: Path) -> ImageFingerprint:
     with Image.open(image_path) as im:
         rgb = im.convert("RGB")
@@ -111,9 +138,11 @@ def extract_fingerprint(image_path: Path) -> ImageFingerprint:
     orange_ratio_top = _ratio(
         top_pixels, lambda p: _color_name(p) == "orange"
     )
-    dark_ratio_top = _ratio(
-        top_pixels, lambda p: _color_name(p) == "dark_blue_or_black"
-    )
+    dark_ratio_top = _ratio(top_pixels, _is_dark)
+    red_ratio_total = _ratio(all_pixels, _is_red_text)
+    blue_ratio_total = _ratio(all_pixels, _is_blue_text)
+    green_ratio_total = _ratio(all_pixels, _is_green_text)
+    dark_ratio_total = _ratio(all_pixels, _is_dark)
     light_ratio_total = _ratio(all_pixels, _is_light)
 
     layout: Layout = "dense_table" if h > w else "wide_table"
@@ -126,6 +155,10 @@ def extract_fingerprint(image_path: Path) -> ImageFingerprint:
         red_ratio_top=red_ratio_top,
         orange_ratio_top=orange_ratio_top,
         dark_ratio_top=dark_ratio_top,
+        red_ratio_total=red_ratio_total,
+        blue_ratio_total=blue_ratio_total,
+        green_ratio_total=green_ratio_total,
+        dark_ratio_total=dark_ratio_total,
         light_ratio_total=light_ratio_total,
         layout=layout,
         visible_keywords=(),
@@ -137,17 +170,71 @@ def _classify_core(fp: ImageFingerprint) -> tuple[Platform, float, list[str]]:
     if fp.layout == "dense_table":
         signals.append("dense_numeric_table")
 
+    if (
+        fp.red_ratio_top >= 0.25
+        and (fp.background_color == "white" or fp.light_ratio_total >= 0.75)
+        and fp.green_ratio_total >= 0.005
+        and fp.blue_ratio_total < 0.005
+    ):
+        signals.append("top_red")
+        signals.append("light_theme")
+        signals.append("green_text")
+        signals.append("watchlist_rows")
+        return "ths", 0.82, signals
+
+    if (
+        fp.red_ratio_top >= 0.25
+        and (fp.background_color == "white" or fp.light_ratio_total >= 0.75)
+        and fp.blue_ratio_total >= 0.02
+    ):
+        signals.append("top_red")
+        signals.append("light_theme")
+        signals.append("blue_text")
+        return "ths", 0.82, signals
+
     if fp.red_ratio_top >= 0.25:
         signals.append("top_red")
         return "ths", 0.78, signals
 
     if fp.orange_ratio_top >= 0.2:
         signals.append("top_orange")
-        return "eastmoney", 0.72, signals
+        return "eastmoney", 0.82, signals
+
+    if (
+        _is_dark_mode(fp)
+        and fp.red_ratio_total + fp.blue_ratio_total >= 0.02
+        and fp.red_ratio_total >= 0.005
+        and fp.blue_ratio_total >= 0.005
+    ):
+        signals.append("dark_theme")
+        signals.append("red_blue_text")
+        return "ths", 0.82, signals
+
+    if (
+        _is_dark_mode(fp)
+        and fp.dark_ratio_top >= 0.2
+        and fp.green_ratio_total >= 0.005
+        and fp.light_ratio_total >= 0.015
+    ):
+        signals.append("dark_theme")
+        signals.append("white_green_red_text")
+        return "eastmoney", 0.82, signals
 
     if fp.dark_ratio_top >= 0.2:
         signals.append("top_dark_bar")
         return "eastmoney", 0.62, signals
+
+    if (
+        fp.top_bar_color == "white"
+        and fp.background_color == "white"
+        and fp.light_ratio_total >= 0.85
+        and fp.dark_ratio_top < 0.05
+        and fp.red_ratio_top < 0.05
+        and fp.orange_ratio_top < 0.05
+    ):
+        signals.append("light_background")
+        signals.append("minimal_top_chrome")
+        return "hk_panda", 0.82, signals
 
     if fp.light_ratio_total >= 0.75:
         signals.append("light_background")
@@ -175,6 +262,8 @@ def classify_fingerprint(
     screenshot_type: ScreenshotType = (
         "holding" if fingerprint.layout == "dense_table" else "watchlist"
     )
+    if "watchlist_rows" in signals:
+        screenshot_type = "watchlist"
     if forced_type != "auto":
         screenshot_type = forced_type
     if forced_platform != "auto":

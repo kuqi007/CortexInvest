@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import sys
 import time
@@ -27,18 +28,12 @@ from typing import Any
 
 from pydantic import ValidationError
 
-# 尝试导入 PIL 和 pytesseract 进行 OCR
+# 尝试导入 PIL；pytesseract 仅在旧 OCR 路径中懒加载，避免视觉导入启动时触发原生库崩溃。
 try:
     from PIL import Image
     HAS_PIL = True
 except ImportError:
     HAS_PIL = False
-
-try:
-    import pytesseract
-    HAS_TESSERACT = True
-except ImportError:
-    HAS_TESSERACT = False
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -87,8 +82,10 @@ def extract_text_from_image(image_path: Path) -> str:
     """从图片中提取文本"""
     if not HAS_PIL:
         raise ImportError("需要安装 Pillow: uv pip install Pillow")
-    if not HAS_TESSERACT:
-        raise ImportError("需要安装 pytesseract: uv pip install pytesseract")
+    try:
+        import pytesseract
+    except ImportError as exc:
+        raise ImportError("需要安装 pytesseract: uv pip install pytesseract") from exc
     
     image = Image.open(image_path)
     text = pytesseract.image_to_string(image, lang='chi_sim+eng')
@@ -345,6 +342,40 @@ def _image_mime_type(image_path: Path) -> str:
     return mapping.get(fmt, "image/png")
 
 
+def _provider_raw_response_path(out_path: Path) -> Path:
+    return out_path.with_name(f"{out_path.stem}.provider_raw_response.txt")
+
+
+def _write_provider_failure_artifacts(
+    *,
+    error: Any,
+    output_json: Path | None,
+    recognition_run_id: str,
+    allowed_roots: list[Path],
+) -> Path | None:
+    raw_response = getattr(error, "raw_response", "")
+    if not raw_response:
+        return None
+    if output_json is not None:
+        base_path = validate_output_path(output_json, allowed_roots)
+        raw_path = validate_output_path(_provider_raw_response_path(base_path), allowed_roots)
+    else:
+        raw_path = validate_output_path(
+            PROJECT_ROOT
+            / ".screenshot_import_runs"
+            / recognition_run_id
+            / "provider_raw_response.txt",
+            allowed_roots,
+        )
+    raw_path.parent.mkdir(parents=True, exist_ok=True)
+    raw_path.write_text(raw_response, encoding="utf-8")
+    try:
+        os.chmod(raw_path, 0o600)
+    except OSError:
+        pass
+    return raw_path
+
+
 def _collect_plan_codes(plan: ImportPlan) -> list[str]:
     codes = [a.code for a in plan.auto_apply] + [a.code for a in plan.needs_confirmation]
     for r in plan.rejected:
@@ -366,6 +397,10 @@ def _print_classification_debug(*, fingerprint: Any, classification: Any, thresh
             "red_ratio_top": round(float(fingerprint.red_ratio_top), 4),
             "orange_ratio_top": round(float(fingerprint.orange_ratio_top), 4),
             "dark_ratio_top": round(float(fingerprint.dark_ratio_top), 4),
+            "red_ratio_total": round(float(fingerprint.red_ratio_total), 4),
+            "blue_ratio_total": round(float(fingerprint.blue_ratio_total), 4),
+            "green_ratio_total": round(float(fingerprint.green_ratio_total), 4),
+            "dark_ratio_total": round(float(fingerprint.dark_ratio_total), 4),
             "light_ratio_total": round(float(fingerprint.light_ratio_total), 4),
             "layout": fingerprint.layout,
         },
@@ -416,6 +451,11 @@ def main(argv: list[str] | None = None) -> int:
         "--debug-log",
         action="store_true",
         help="Print local classifier and prompt diagnostics to stderr",
+    )
+    parser.add_argument(
+        "--no-external-name-lookup",
+        action="store_true",
+        help="Disable MX API fallback for name-only rows; use only watchlist and stocks/catalog.json",
     )
     parser.add_argument("--allow-path", action="append", default=[], metavar="PATH", help="Additional allowed root (repeatable)")
 
@@ -589,12 +629,32 @@ def main(argv: list[str] | None = None) -> int:
     if not outcome.ok or outcome.response is None:
         msg = outcome.error.message if outcome.error else "vision request failed"
         print(f"错误: {msg}", file=sys.stderr)
+        if outcome.error is not None and outcome.error.kind == "schema_parse":
+            try:
+                raw_path = _write_provider_failure_artifacts(
+                    error=outcome.error,
+                    output_json=args.output_json,
+                    recognition_run_id=recognition_run_id,
+                    allowed_roots=allowed_roots,
+                )
+            except (OSError, PathSafetyError) as e:
+                print(f"警告: 无法保存 provider raw response: {e}", file=sys.stderr)
+            else:
+                if raw_path is not None:
+                    print(f"已保存 provider raw response: {raw_path}", file=sys.stderr)
         return 4
 
     norm_rows: list[Any] = []
     for i, stock in enumerate(outcome.response.stocks):
         try:
-            norm_rows.append(normalize_row(stock, source_row_index=i))
+            norm_rows.append(
+                normalize_row(
+                    stock,
+                    source_row_index=i,
+                    existing_watchlist=existing_watchlist,
+                    allow_external_lookup=not args.no_external_name_lookup,
+                )
+            )
         except (TypeError, ValueError) as e:
             print(f"警告: 跳过无法规范化的行 {i}: {e}", file=sys.stderr)
 

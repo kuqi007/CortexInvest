@@ -121,6 +121,60 @@ def test_cli_noninteractive_low_classification_exits_3_without_provider(tmp_path
     assert not (tmp_path / "out.json").exists()
 
 
+def test_cli_schema_parse_failure_writes_raw_response_sidecar(tmp_path, monkeypatch):
+    image = tmp_path / "shot.png"
+    Image.new("RGB", (200, 300), "white").save(image)
+    out = tmp_path / "plan.json"
+
+    monkeypatch.setattr(
+        cli,
+        "classify_fingerprint",
+        lambda *args, **kwargs: ClassificationResult(
+            platform="ths",
+            screenshot_type="holding",
+            confidence=0.95,
+            signals=[],
+            candidate_platforms=[PlatformCandidate(platform="ths", confidence=0.95)],
+        ),
+    )
+    monkeypatch.setattr(cli, "ConfigApiClient", lambda: _StubConfigApiEmptyWatchlist())
+
+    class FakeProvider:
+        def complete(self, request):
+            from src.tools.screenshot_import.providers import ProviderError, VisionResult
+
+            return VisionResult(
+                ok=False,
+                provider="stub",
+                model="stub-model",
+                error=ProviderError(
+                    kind="schema_parse",
+                    message="bad json",
+                    retryable=False,
+                    raw_response='{"platform":"ths","stocks":[bad]}',
+                ),
+            )
+
+    monkeypatch.setattr(cli, "create_provider", lambda provider: FakeProvider())
+
+    exit_code = cli.main(
+        [
+            str(image),
+            "--provider",
+            "kimi",
+            "--dry-run",
+            "--output-json",
+            str(out),
+            "--allow-path",
+            str(tmp_path),
+        ]
+    )
+
+    assert exit_code == 4
+    raw_path = tmp_path / "plan.provider_raw_response.txt"
+    assert raw_path.read_text(encoding="utf-8") == '{"platform":"ths","stocks":[bad]}'
+
+
 def test_cli_apply_plan_hash_mismatch_exits_5_without_client(tmp_path, monkeypatch):
     from src.tools.screenshot_import.models import FieldConfidence, NormalizedRow
     from src.tools.screenshot_import.planner import build_import_plan

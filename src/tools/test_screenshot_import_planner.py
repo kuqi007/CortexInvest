@@ -25,6 +25,11 @@ def test_high_confidence_holding_enters_auto_apply() -> None:
         is_holding=True,
         cost=1500.0,
         shares=200,
+        current_price=1510.0,
+        market_value=302000.0,
+        available_shares=100,
+        daily_pnl=2000.0,
+        daily_pnl_pct=0.66,
         field_confidence=_fc(code=0.95, name=0.94, cost=0.92, shares=0.91),
     )
     classification = ClassificationResult(
@@ -47,8 +52,112 @@ def test_high_confidence_holding_enters_auto_apply() -> None:
     assert len(plan.auto_apply) == 1
     assert plan.auto_apply[0].code == "600519"
     assert plan.auto_apply[0].action == "add"
+    assert plan.auto_apply[0].payload == {
+        "code": "600519",
+        "name": "贵州茅台",
+        "type": "holding",
+        "star": True,
+        "cost": 1500.0,
+        "shares": 200,
+    }
     assert plan.auto_apply[0].reason_codes == []
     assert plan.needs_confirmation == []
+
+
+def test_code_only_watchlist_identity_can_auto_apply() -> None:
+    row = NormalizedRow(
+        code="600519",
+        name="",
+        is_holding=False,
+        field_confidence=_fc(code=0.95),
+    )
+    classification = ClassificationResult(
+        platform="ths",
+        screenshot_type="watchlist",
+        confidence=0.92,
+        candidate_platforms=[PlatformCandidate(platform="ths", confidence=0.92)],
+    )
+
+    plan = build_import_plan(
+        rows=[row],
+        provider="kimi",
+        model="moonshot-v1",
+        classification=classification,
+        model_confidence=0.92,
+        threshold=0.8,
+        content_fingerprint="fp-code-only",
+        existing_codes=frozenset(),
+        manual_platform_after_low_confidence=False,
+    )
+
+    assert len(plan.auto_apply) == 1
+    assert plan.auto_apply[0].reason_codes == []
+
+
+def test_name_only_resolved_identity_routes_to_confirmation() -> None:
+    row = NormalizedRow(
+        code="HK01211",
+        name="比亚迪股份",
+        is_holding=True,
+        cost=127.825,
+        shares=1100,
+        field_confidence=_fc(code=0.0, name=0.95, cost=0.92, shares=0.91),
+    )
+    classification = ClassificationResult(
+        platform="eastmoney",
+        screenshot_type="holding",
+        confidence=0.92,
+        candidate_platforms=[PlatformCandidate(platform="eastmoney", confidence=0.92)],
+    )
+
+    plan = build_import_plan(
+        rows=[row],
+        provider="kimi",
+        model="moonshot-v1",
+        classification=classification,
+        model_confidence=0.92,
+        threshold=0.8,
+        content_fingerprint="fp-name-only",
+        existing_codes=frozenset(["HK01211"]),
+        manual_platform_after_low_confidence=False,
+    )
+
+    assert plan.auto_apply == []
+    assert len(plan.needs_confirmation) == 1
+    assert "name_only_match" in plan.needs_confirmation[0].reason_codes
+    assert "below_field_threshold" not in plan.needs_confirmation[0].reason_codes
+
+
+def test_unresolved_name_only_row_is_rejected_before_payload() -> None:
+    row = NormalizedRow(
+        code=None,
+        name="未匹配股票",
+        is_holding=False,
+        field_confidence=_fc(code=0.0, name=0.95),
+    )
+    classification = ClassificationResult(
+        platform="ths",
+        screenshot_type="watchlist",
+        confidence=0.92,
+        candidate_platforms=[PlatformCandidate(platform="ths", confidence=0.92)],
+    )
+
+    plan = build_import_plan(
+        rows=[row],
+        provider="kimi",
+        model="moonshot-v1",
+        classification=classification,
+        model_confidence=0.92,
+        threshold=0.8,
+        content_fingerprint="fp-unresolved",
+        existing_codes=frozenset(),
+        manual_platform_after_low_confidence=False,
+    )
+
+    assert plan.auto_apply == []
+    assert plan.needs_confirmation == []
+    assert len(plan.rejected) == 1
+    assert "invalid_code" in plan.rejected[0]["reason_codes"]
 
 
 def test_manual_platform_after_low_confidence_holdings_only_manual_reason() -> None:
@@ -164,7 +273,7 @@ def test_name_only_match_reason_when_code_low_name_high() -> None:
     assert len(plan.needs_confirmation) == 1
     rc = plan.needs_confirmation[0].reason_codes
     assert "name_only_match" in rc
-    assert "below_field_threshold" in rc
+    assert "below_field_threshold" not in rc
 
 
 def test_abnormal_holding_delta_routes_to_needs_confirmation() -> None:
