@@ -587,7 +587,11 @@ function Home() {
           </span>
         </div>
 
-        {/* stale warning banner — only show when data is stale for > 3 min and A股 is open */}
+        {/* stale warning/info banner — shows after > 3 min stale:
+            - A股交易中 → orange warning "行情已停止更新" (poller可能挂了)
+            - A股收盘 + 港股交易中 → gray "A股已收盘，港股仍在交易" (正常，无需警告)
+            - A股和港股都收盘 → gray "已休市" (正常休市)
+        */}
         {isStale && (Date.now() - ts > pollMs * 6) && (
           tradingStatus?.markets?.cn ? (
           <div style={{
@@ -609,7 +613,26 @@ function Home() {
               行情已停止更新 <span style={{ color: D.orange, fontWeight: 700 }}>{Math.round((Date.now() - ts) / 60000)}</span> 分钟 — 请检查 poller 进程是否在运行
             </span>
           </div>
+          ) : tradingStatus?.markets?.hk ? (
+          // A股收盘，港股仍在交易——数据陈旧是正常的，不警告
+          <div style={{
+            border: `1px solid ${D.comment}`,
+            borderLeft: `3px solid ${D.comment}`,
+            background: "rgba(98, 114, 164, 0.06)",
+            color: D.comment,
+            padding: "9px 16px",
+            borderRadius: 6,
+            marginBottom: 12,
+            fontSize: 12,
+            fontWeight: 500,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}>
+            <span>● A股已收盘，港股仍在交易</span>
+          </div>
           ) : (
+          // A股和港股都收盘——正常休市
           <div style={{
             border: `1px solid ${D.comment}`,
             borderLeft: `3px solid ${D.comment}`,
