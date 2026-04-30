@@ -648,8 +648,10 @@ def fetch_realtime_tencent(symbols: list[str]) -> list[dict]:
             continue  # 腾讯不支持韩股
         elif s.startswith("sh") or s.startswith("sz"):
             codes.append(s.lower())
+        elif s.startswith("6"):
+            codes.append(f"sh{s}")  # 沪市
         else:
-            codes.append(f"sz{s}")  # 默认深市
+            codes.append(f"sz{s}")  # 深市（0/3开头）
 
     try:
         resp = requests.get(
