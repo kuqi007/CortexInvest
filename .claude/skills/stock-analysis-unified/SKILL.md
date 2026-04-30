@@ -36,8 +36,10 @@ Step 2.5: 估值前防守检查 (A-E五项必做)
     ├─ B. 竞争量化分析
     ├─ C. 公司治理
     ├─ D. 股本稀释检查
-    └─ E. ESG/政策风险
+    ├─ E. ESG/政策风险
+    └─ F. 股东结构与筹码分析
     ↓
+Step 3.5: 短期技术信号（入场时机参考）
 Step 3: 匹配估值方法 (主方法 + 条件触发双轨)
     ├─ 价值股 → PE/PB/股息率
     ├─ 成长股 → PEG/Forward PE/DCF
@@ -142,6 +144,38 @@ Phase 2 执行规则:
 | 11 | 现金流质量 | 经营性现金流 vs 净利润趋势 | mx-data |
 | 12 | **前瞻盈利预测** | **FY1/FY2经调整净利润（含方向变化：上调/下调至±XX亿）** | mx-data预测table + mx-search |
 | 13 | **货币单位确认** | **报表原始币种 vs mx-data标准化口径（港股必需，防止单位混淆）** | mx-data |
+| **F1** | **机构持股比例合计** | 近3年报 机构持股比例合计 | mx-data |
+| **F2** | **股东户数** | 股东户数 总股本 流通股本 | mx-data |
+| **F3** | **十大流通股东明细** | 十大流通股东 | mx-data |
+| **T1** | **每日 OHLCV** | 近{N}日 每日开盘价收盘价最高价最低价成交量 | mx-data |
+| **T2** | **主力资金流向**（可选） | 近{N}日 主力资金流向 | mx-data |
+
+**前置数据补充说明**:
+
+> 股东数据（F1-F3）和技术数据（T1-T2）在 Step 1 原有 14 项完成后，作为补充步骤收集。
+
+**股东数据（F1-F3）收集说明**:
+```
+A股 (.SH/.SZ)：使用季度数据（最近4期）
+港股 (.HK)：使用半年度数据（最近2期）
+
+保存路径：mx_data_*机构持股比例*.json → stocks/{CODE}_{NAME}/v{N}_{DATE}/data/
+         mx_data_*股东户数*.json → 同上
+         mx_data_*十大流通股东*.json → 同上
+```
+
+**技术数据（T1-T2）收集说明**:
+```
+数据范围确定：
+  - 主板股：近35日（确保≥30交易日）
+  - 创业板/科创板：近25日
+  - 识别方式：检查 entityTagDTO.className
+    · 含"创业板" → 25日
+    · 含"科创板" → 25日
+    · 其他 → 35日
+
+保存路径：mx_data_*近{N}日每日*.json → stocks/{CODE}_{NAME}/v{N}_{DATE}/data/
+```
 
 **前瞻数据双源优先级链 (v1.8 新增)**:
 ```
@@ -704,6 +738,51 @@ elif SOTP vs Forward 差异 > 60%:
 - **C. 公司治理评估** — 6项检查清单，治理折价10-15%，与执行风险折扣叠加关系
 - **D. 股本稀释检查** — 完全稀释股数计算，披露分级规则，稀释质量评估
 - **E. ESG/政策风险评估** — 政策逆风/ESG评级/转型资本开支，高风险折价10-20%
+- **F. 股东结构与筹码分析** — 非机构持股比例/机构持股环比/股东户数环比/十大股东集中度/控股股东持股
+
+---
+
+## Step 2.5-F: 股东结构与筹码分析（新增 v1.9）
+
+> 评估筹码分散度和主力动向。所有股票都执行此检查。
+
+**数据来源**（已由 Phase 1 收集）：
+- F1: mx_data_*机构持股比例*.json
+- F2: mx_data_*股东户数*.json
+- F3: mx_data_*十大流通股东*.json
+
+**Python 解析函数**（位于 `src/analysis/`）：
+```python
+from src.analysis import parse_institutional_ratio, classify_top10_holders
+from src.analysis.shareholder_analyzer import assess_shareholder_risk
+```
+
+**执行步骤**：
+1. **解析机构持股比例** — 调用 `parse_institutional_ratio()`，提取最新一期和上一期数据
+2. **计算非机构持股比例** — `non_institutional_ratio_pct = 100 - latest_ratio_pct`
+3. **计算环比变化** — 机构持股环比、股东户数环比
+4. **分类十大股东** — 调用 `classify_top10_holders()`，识别控股股东/基金/HKSCC 等类型
+5. **评估风险等级** — 调用 `assess_shareholder_risk()`，使用市场差异化阈值
+6. **写入 valuation_result.json** — shareholder_signal 字段
+7. **输出报告章节** — `## 2.5-F 股东结构与筹码分析`
+
+**HKSCC 特殊处理**：
+- 港股十大股东中"香港中央结算有限公司"为代名人，记录但单独标记
+- 不参与"有效机构持股"计算
+- 报告中注明"港股 HKSCC 持股为代表持有人，实际投资者结构未知"
+
+**阈值差异化**：
+| 市场 | 非机构持股 HIGH | 非机构持股 MEDIUM |
+|------|----------------|-----------------|
+| A股  | > 35%          | 25%~35%         |
+| 港股 | > 50%          | 35%~50%         |
+
+**错误处理**：
+- 机构持股数据缺失 → 标注"数据受限，无法计算股东风险"
+- 仅有单一报告期 → 标注"数据不足"，环比变化记为 None
+- 股东户数不可用 → 跳过，不影响整体风险评级
+
+**⚠️ 硬性规则**：Step 2.5-F 必须完成，才能进入 Step 3。即使数据受限，也必须标注后继续。
 
 ---
 
@@ -719,6 +798,62 @@ elif SOTP vs Forward 差异 > 60%:
 | 方法4 | 转型股SOTP | ./docs/method-transformation.md |
 | 方法5 | 亏损股PS/终局 | ./docs/method-lossmaking.md |
 | 方法6 | 困境股估值 | ./docs/method-distressed.md |
+
+---
+
+## Step 3.5: 短期技术信号（新增 v1.9 — 入场时机参考）
+
+> 基于 20-30 个交易日的技术指标，提供短期入场价位建议。**技术信号服从基本面**——不改变基本面方向，只辅助判断入场时机。
+
+**数据来源**（已由 Phase 1 收集）：
+- T1: mx_data_*近{N}日每日*.json
+- 数据范围：主板 30+ 日，创业板/科创板 20+ 日
+
+**Python 解析函数**（位于 `src/analysis/`）：
+```python
+from src.analysis import parse_kline_ohlcv
+from src.analysis.technical_indicators import (
+    calc_rsi, calc_macd, calc_kdj, calc_ma,
+    calc_atr, calc_bollinger_bands, calc_volume_ratio
+)
+```
+
+**执行步骤**：
+
+1. **解析 K 线数据** — 调用 `parse_kline_ohlcv()`，提取 OHLCV 列表
+2. **计算技术指标**（调用 `src/analysis/technical_indicators.py`）：
+   - `calc_rsi(closes, 14)` — RSI(14)
+   - `calc_macd(closes)` — MACD(12,26,9)
+   - `calc_kdj(highs, lows, closes)` — KDJ(9,3,3)
+   - `calc_ma(closes)` — MA(5/10/20/60)
+   - `calc_volume_ratio(volumes)` — 成交量分析
+   - `calc_atr(highs, lows, closes, 14)` — ATR（用于止损）
+   - `calc_bollinger_bands(closes, 20)` — 布林带（用于支撑位）
+3. **综合信号评分**（5 指标计分）：
+   ```
+   指标: [RSI方向, MACD方向, KDJ方向, MA排列, 成交量方向]
+   得分: 看多=+1, 看空=-1, 中性=0
+   总分 = sum(各指标得分)
+   if 总分 >= 3: synthesis_signal = "BULLISH"
+   elif 总分 <= -3: synthesis_signal = "BEARISH"
+   else: synthesis_signal = "NEUTRAL"
+   ```
+4. **计算入场价位**：
+   ```
+   支撑位 = min(MA20, 近期低点, 布林下轨)
+   阻力位 = max(MA60, 近期高点)
+   技术止损 = 支撑位 - 2% × ATR
+   目标位 = max(MA60, 近期高点, 阻力位)
+   ```
+5. **冲突检测**：若 `technical_signal.synthesis_signal == "BEARISH"` 且基本面方向为 BUY，则 `conflicts_with_fundamentals = True`
+6. **写入 valuation_result.json** — technical_signal + fundamental_signal 字段
+7. **输出报告章节** — `## 3.5 短期技术信号参考`
+
+**信号有效期**：所有技术信号有效期为 5 个交易日（数据截止日 + 5）。
+
+**禁止**：技术信号不得抬高基本面止损位，不得覆盖基本面卖出信号。
+
+**⚠️ 硬性规则**：技术面服从基本面——Step 3.5 只提供入场时机参考，不改变 Step 3 的估值方向。
 
 ---
 
@@ -1032,8 +1167,9 @@ print(f"✅ catalog.json 已更新: {code} v{ver}")
 
 ---
 
-*Version: Unified v1.8*
+*Version: Unified v1.9*
 *Core: One entry, smart classification, right method for right stock*
+*Changelog v1.9: 新增股东结构分析(Step 2.5-F)和短期技术信号(Step 3.5)。(F1-F3)股东数据收集: 机构持股比例/股东户数/十大流通股东；(T1-T2)技术数据收集: 每日OHLCV K线/主力资金流向。(Step 2.5-F)调用parse_institutional_ratio()+assess_shareholder_risk()，A股/港股差异化阈值，非机构持股/HKSCC处理。(Step 3.5)调用calc_rsi()+calc_macd()+calc_kdj()+calc_ma()+calc_atr()+calc_bollinger_bands()+calc_volume_ratio()，5指标计分综合信号，入场价位计算，技术止损 ATR×2%，技术服从基本面硬规则。src/analysis/新增mx_parser.py/technical_indicators.py/shareholder_analyzer.py，34个单元测试全通过。
 *Changelog v1.8: 基于明略科技(02718.HK)分析报告审查发现的11项缺陷系统性修复。结构改进: (S1) Step 1数据收集表新增#12前瞻盈利预测+#13货币单位确认+双源优先级链；(S2) 新增"估值方法→数据需求逆向映射"表（Step 3反推Step 1必须收集什么）；(S3) 新增"分类后数据充分性门控"(Step 2→2.5之间HARD GATE，含降级规则和data_gate JSON记录)。缺陷修复: (M1) 前瞻盈利预测双源(mx-data预测table+mx-search研报)及覆盖度检查；(M2) mx-search正则扩展覆盖负数/方向变化/经调整口径/forward_earnings提取函数；(M3) Step 1.5叙事矛盾检查(口径对齐规则)；(M4) mx-data detect_currency()函数+currency_source标注规则；(M6) Step 2.5可比公司PS锚定表+PS可比校准；(M7) 成长+转型hybrid权重条件化(SOTP vs Forward差异驱动)；(M8) 利润质量桥接分级触发(差异>20%年份才完整桥接)。report-template-reference.md: financials扩展(currency_source/forward_earnings/profit_bridge)、新增classification.data_gate字段、前瞻预测+货币单位数据来源行。docs更新: mx-search-institutional-schema.md正则扩展、mx-data-field-mapping.md货币检测、method-transformation.md PS锚定表、method-lossmaking.md PS可比校准*
 *Changelog v1.7: 新增Step 6最终校验门（含文件存在性/JSON有效性/mx文件散落检查/Python一键校验脚本/修复指南/完成后更新catalog.json）；Changelog v1.6:* 修复Phase 1→2桥接缺失（Step 1.5增强验证门含内容非零检查+全零检测；新增Step 1.6字段提取规范含col_id映射表+提取函数+操作清单）；新增docs/mx-data-field-mapping.md（含已验证col_id/提取函数/多entity处理/已知限制）；新增docs/mx-search-institutional-schema.md（含rating字段/文本正则/权威度规则）；defense-check-reference.md新增A-E数据来源附录；method-growth.md新增输入溯源表；修正"近五年→近三年"表述；修正"净利率"标注需计算*
 *Changelog v1.5: v1.4骨架 + v1.3精肉合并（成长四维权重、利润率趋势评分细则、现金流质量评分、利润增速特殊处理(扭亏/亏损/由盈转亏)、扭亏为盈估值规则、恢复性增长PEG修正、竞争折价规则、稀释披露+质量评估、部分数据失败处理、方法6困境股、数据收集表细化）；附录拆分（Step2.5/6种方法/报告模板/示例解析出为独立参考文档），SKILL.md减少~600行，ghost ref全部修复；自包含迁移（所有参考文档移入 .claude/skills/stock-analysis-unified/docs/）；目录管理v2.2*
