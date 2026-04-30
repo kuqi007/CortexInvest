@@ -533,11 +533,8 @@ function Home() {
         <div style={{ color: D.comment, marginBottom: 6 }}>
           <span>每 {pollMs / 1000} 秒轮询一次</span>
           <span style={{ float: "right", display: "flex", alignItems: "center", gap: 10 }}>
-            {tradingStatus?.trading ? (
-              <span style={{ color: D.green, fontSize: 11, fontWeight: 600 }}>● 交易中</span>
-            ) : (
-              <span style={{ color: D.comment, fontSize: 11 }}>○ 休市</span>
-            )}
+            <span style={{ color: tradingStatus?.markets?.cn ? D.green : D.comment, fontSize: 11, fontWeight: 600 }}>● A股 {tradingStatus?.markets?.cn ? "交易中" : "休市"}</span>
+            <span style={{ color: tradingStatus?.markets?.hk ? D.green : D.comment, fontSize: 11, fontWeight: 600 }}>● 港股 {tradingStatus?.markets?.hk ? "交易中" : "休市"}</span>
             <span style={{ color: D.comment }}>|</span>
             {/* Freshness chip */}
             {isStale && Date.now() - ts > pollMs * 10 ? (
@@ -590,9 +587,9 @@ function Home() {
           </span>
         </div>
 
-        {/* stale warning banner — only show when data is stale for > 3 minutes and market is open */}
+        {/* stale warning banner — only show when data is stale for > 3 min and A股 is open */}
         {isStale && (Date.now() - ts > pollMs * 6) && (
-          tradingStatus?.trading ? (
+          tradingStatus?.markets?.cn ? (
           <div style={{
             border: `1px solid ${D.orange}`,
             borderLeft: `3px solid ${D.orange}`,
