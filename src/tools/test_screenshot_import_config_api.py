@@ -89,6 +89,15 @@ def test_apply_posts_add_with_audit_context():
     assert url == DEFAULT_API_URL
     assert body["action"] == "add"
     assert body["code"] == "HK00700"
+    assert "cost" not in body
+    assert "shares" not in body
+    data = body["data"]
+    assert isinstance(data, dict)
+    assert data["type"] == "holding"
+    assert data["name"] == "腾讯控股"
+    assert data["cost"] == 320.5
+    assert data["shares"] == 100
+    assert "code" not in data
     assert body["audit_context"] == {
         "source": "screenshot_stock_import",
         "import_run_id": run_id,
@@ -146,7 +155,15 @@ def test_update_when_code_in_watchlist():
     result = client.apply_actions([act], import_run_id="run-u")
     assert result.failed == []
     post = next(c for c in sess.calls if c[0] == "POST")
-    assert post[2]["action"] == "update"
+    body = post[2]
+    assert body["action"] == "update"
+    assert body["code"] == code
+    assert "cost" not in body
+    ud = body["data"]
+    assert ud["name"] == "腾讯控股"
+    assert ud["type"] == "holding"
+    assert ud["cost"] == 330.0
+    assert ud["shares"] == 100
 
 
 def test_actions_sorted_by_plan_sequence():
@@ -177,3 +194,5 @@ def test_actions_sorted_by_plan_sequence():
     client.apply_actions([second, first], import_run_id="run-order")
     post_bodies = [c[2] for c in sess.calls if c[0] == "POST"]
     assert [b["code"] for b in post_bodies] == ["A", "B"]
+    assert post_bodies[0]["data"]["type"] == "watching"
+    assert post_bodies[1]["data"]["type"] == "watching"

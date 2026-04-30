@@ -11,6 +11,13 @@ DEFAULT_API_URL = "http://127.0.0.1:3120/api/config"
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost"})
 
+# POST /api/config expects top-level `code` and nested `data` for add/update.
+_EXCLUDED_FROM_DATA = frozenset({"code", "action", "audit_context"})
+
+
+def _payload_to_api_data(payload: dict[str, object]) -> dict[str, object]:
+    return {k: v for k, v in payload.items() if k not in _EXCLUDED_FROM_DATA}
+
 
 class ConfigApiError(RuntimeError):
     """Raised when the config API client cannot complete a request safely."""
@@ -100,7 +107,8 @@ class ConfigApiClient:
 
             body: dict[str, object] = {
                 "action": api_action,
-                **action.payload,
+                "code": action.code,
+                "data": _payload_to_api_data(action.payload),
                 "audit_context": {
                     "source": "screenshot_stock_import",
                     "import_run_id": import_run_id,

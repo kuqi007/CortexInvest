@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 
 TIER_A_IMAGE_FINGERPRINT = "image_fingerprint_redacted.json"
@@ -40,7 +41,11 @@ def write_tier_a_bundle(
     import_plan_summary_redacted: dict[str, object],
 ) -> None:
     """Write Tier A filenames from the vision design spec (no raw paths or portfolio fields)."""
-    debug_dir.mkdir(parents=True, exist_ok=True)
+    debug_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
+    try:
+        os.chmod(debug_dir, 0o700)
+    except OSError:
+        pass
     (debug_dir / TIER_A_IMAGE_FINGERPRINT).write_text(
         json.dumps(image_fingerprint_redacted, ensure_ascii=False, indent=2, default=str) + "\n",
         encoding="utf-8",
