@@ -175,6 +175,87 @@ def test_cli_schema_parse_failure_writes_raw_response_sidecar(tmp_path, monkeypa
     assert raw_path.read_text(encoding="utf-8") == '{"platform":"ths","stocks":[bad]}'
 
 
+def test_cli_ignores_provider_code_when_classified_as_eastmoney(tmp_path, monkeypatch):
+    image = tmp_path / "shot.png"
+    Image.new("RGB", (200, 300), "white").save(image)
+    out = tmp_path / "plan.json"
+
+    monkeypatch.setattr(
+        cli,
+        "classify_fingerprint",
+        lambda *args, **kwargs: ClassificationResult(
+            platform="eastmoney",
+            screenshot_type="holding",
+            confidence=0.95,
+            signals=[],
+            candidate_platforms=[PlatformCandidate(platform="eastmoney", confidence=0.95)],
+        ),
+    )
+    class _StubConfigApiTencent:
+        def fetch_watchlist(self):
+            return {"HK00700": {"name": "腾讯控股"}}
+
+    monkeypatch.setattr(cli, "ConfigApiClient", lambda: _StubConfigApiTencent())
+
+    class FakeProvider:
+        name = "stub"
+        model = "stub-model"
+
+        def complete(self, request):
+            from src.tools.screenshot_import.models import VisionResponse
+            from src.tools.screenshot_import.providers import VisionResult
+
+            response = VisionResponse.model_validate(
+                {
+                    "schema_version": 1,
+                    "platform": "unknown",
+                    "screenshot_type": "holding",
+                    "confidence": 0.95,
+                    "stocks": [
+                        {
+                            "code": "HK00700",
+                            "name": "腾讯控股",
+                            "is_holding": True,
+                            "cost": 629.61,
+                            "shares": 100,
+                            "field_confidence": {
+                                "code": 0.99,
+                                "name": 0.99,
+                                "cost": 0.99,
+                                "shares": 0.99,
+                            },
+                        }
+                    ],
+                    "warnings": [],
+                }
+            )
+            return VisionResult(
+                ok=True, provider="stub", model="stub-model", response=response
+            )
+
+    monkeypatch.setattr(cli, "create_provider", lambda provider: FakeProvider())
+
+    exit_code = cli.main(
+        [
+            str(image),
+            "--provider",
+            "kimi",
+            "--dry-run",
+            "--output-json",
+            str(out),
+            "--allow-path",
+            str(tmp_path),
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["auto_apply"] == []
+    action = payload["needs_confirmation"][0]
+    assert action["code"] == "HK00700"
+    assert "name_only_match" in action["reason_codes"]
+
+
 def test_cli_apply_plan_hash_mismatch_exits_5_without_client(tmp_path, monkeypatch):
     from src.tools.screenshot_import.models import FieldConfidence, NormalizedRow
     from src.tools.screenshot_import.planner import build_import_plan

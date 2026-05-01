@@ -43,8 +43,15 @@ def test_prompt_mentions_eastmoney_two_line_layout():
     )
     assert "东方财富持仓版式提示" in prompt
     assert "名称/市值" in prompt
+    assert "持仓/可用" in prompt
     assert "现价/成本" in prompt
     assert "第一行是现价、第二行是成本价" in prompt
+    assert "东方财富持仓截图通常不显示股票代码" in prompt
+    assert "名称旁边的「沪」「深」「港」只是市场标签" in prompt
+    assert "不要把市值当作成本" in prompt
+    assert "普通/信用" in prompt
+    assert "证券市值" in prompt
+    assert "港股通 HKD" in prompt
 
 
 def test_prompt_mentions_hk_panda_code_and_value_layout():
@@ -541,6 +548,40 @@ def test_stub_provider_lowers_confidence_for_market_value_as_cost():
     assert result.ok is True
     assert result.response is not None
     assert result.response.stocks[0].field_confidence.cost == 0.5
+
+
+def test_stub_provider_ignores_eastmoney_model_codes():
+    body = {
+        "schema_version": 1,
+        "platform": "eastmoney",
+        "screenshot_type": "holding",
+        "confidence": 0.9,
+        "stocks": [
+            {
+                "code": "HK00700",
+                "name": "腾讯控股",
+                "cost": "629.61",
+                "shares": "100",
+                "field_confidence": 1.0,
+            }
+        ],
+    }
+    stub = StubVisionProvider("stub", "stub-m", body)
+    req = VisionRequest(
+        image_path="/dev/null",
+        mime_type="image/png",
+        prompt="p",
+        json_schema={},
+    )
+
+    result = stub.complete(req)
+
+    assert result.ok is True
+    assert result.response is not None
+    row = result.response.stocks[0]
+    assert row.code is None
+    assert row.field_confidence.code is None
+    assert row.name == "腾讯控股"
 
 
 def test_stub_provider_reports_schema_error():

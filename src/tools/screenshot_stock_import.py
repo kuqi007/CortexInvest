@@ -385,6 +385,15 @@ def _collect_plan_codes(plan: ImportPlan) -> list[str]:
     return codes
 
 
+def _stock_for_normalize(stock: Any, platform: str) -> Any:
+    if platform != "eastmoney" or not getattr(stock, "name", "").strip():
+        return stock
+    field_confidence = getattr(stock, "field_confidence", None)
+    if field_confidence is not None and hasattr(field_confidence, "model_copy"):
+        field_confidence = field_confidence.model_copy(update={"code": None})
+    return stock.model_copy(update={"code": None, "field_confidence": field_confidence})
+
+
 def _print_classification_debug(*, fingerprint: Any, classification: Any, threshold: float, reason: str) -> None:
     debug_payload = {
         "reason": reason,
@@ -647,6 +656,7 @@ def main(argv: list[str] | None = None) -> int:
     norm_rows: list[Any] = []
     for i, stock in enumerate(outcome.response.stocks):
         try:
+            stock = _stock_for_normalize(stock, classification.platform)
             norm_rows.append(
                 normalize_row(
                     stock,

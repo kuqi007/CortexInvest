@@ -228,6 +228,7 @@ def _repair_provider_payload(data: dict[str, Any]) -> dict[str, Any]:
                     item[field_name] = _coerce_optional_number(item[field_name])
             _maybe_swap_cost_and_current_price(item, data.get("platform"))
             _lower_confidence_for_suspicious_cost(item)
+            _ignore_provider_code_for_eastmoney(item, data.get("platform"))
             if item.get("is_holding") is True and (
                 item.get("cost") is None or item.get("shares") is None
             ):
@@ -312,6 +313,15 @@ def _lower_confidence_for_suspicious_cost(item: dict[str, Any]) -> None:
         fc["cost"] = min(float(current_cost_confidence), 0.5)
     else:
         fc["cost"] = 0.5
+
+
+def _ignore_provider_code_for_eastmoney(item: dict[str, Any], platform: str | None) -> None:
+    if platform != "eastmoney" or not str(item.get("name") or "").strip():
+        return
+    item["code"] = None
+    fc = item.get("field_confidence")
+    if isinstance(fc, dict):
+        fc["code"] = None
 
 
 def _parse_vision_payload(raw: str | dict[str, Any], provider: str, model: str) -> VisionResult:
