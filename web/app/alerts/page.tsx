@@ -46,6 +46,23 @@ const LEVEL_COLORS: Record<number, string> = {
   3: D.comment,
 };
 
+/** Rows from GET /api/ai-investment-events (subset used by alerts page). */
+type AiInvestmentEventApiRow = {
+  id: string;
+  event_date: string;
+  symbol: string | null;
+  name: string | null;
+  source: string;
+  event_type: string;
+  severity: string;
+  delivery_scope: string;
+  verdict: string;
+  title: string;
+  summary: string;
+  notify_status: string;
+  created_at: string;
+};
+
 const KIND_LABELS: Record<string, { label: string; color: string }> = {
   big_move: { label: "大幅异动", color: D.orange },
   threshold: { label: "触价告警", color: D.red },
@@ -192,6 +209,27 @@ function parsePortfolio(_e: AlertEvent, d: string, _sym: string, _shortCode: str
   return { stockName: "组合", stockCode: "", signal: "组合P&L", signalColor: D.purple, price: "", detail: d };
 }
 
+function parseAiInvestment(
+  _e: AlertEvent,
+  d: string,
+  sym: string,
+  shortCode: string,
+  services?: { id: string; name?: string }[],
+): ParsedAlert | null {
+  const svc = services?.find((s) => s.id === sym);
+  const stockName =
+    svc?.name?.trim() ||
+    (sym.replace(/^(?:HK|KR)/i, "").trim() || "—");
+  return {
+    stockName,
+    stockCode: shortCode,
+    signal: "AI财报",
+    signalColor: D.yellow,
+    price: "",
+    detail: d,
+  };
+}
+
 function parseTradePlan(e: AlertEvent, d: string, _sym: string, shortCode: string, services?: { id: string; name?: string }[]): ParsedAlert | null {
   // 两种格式:
   // 1. "📋 澜起科技持有策略 | 卖出 100股: 止盈1——200卖100股(1/3) | 卖出 100 股 @ 200.00" (plan name only)
@@ -253,6 +291,7 @@ const KIND_PARSERS: Record<string, AlertParser> = {
   MAINLINE:    parseMainline,
   STALE:       parseStale,
   portfolio:   parsePortfolio,
+  ai_investment: parseAiInvestment,
   trade_plan:  parseTradePlan,
 };
 
@@ -656,6 +695,35 @@ export default function AlertsPage() {
   const { status: tradingStatus } = useTradingStatus();
   const [showL3, setShowL3] = useState(false);
   const [viewMode, setViewMode] = useState<"grouped" | "detail">("grouped");
+  const [earningsAiRows, setEarningsAiRows] = useState<AiInvestmentEventApiRow[]>([]);
+  const [earningsAiErr, setEarningsAiErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/ai-investment-events?limit=40")
+      .then((r) => {
+        if (!r.ok) {
+          throw new Error(`HTTP ${r.status}`);
+        }
+        return r.json() as Promise<{ data?: AiInvestmentEventApiRow[] }>;
+      })
+      .then((body) => {
+        if (cancelled) {
+          return;
+        }
+        const rows = body.data ?? [];
+        setEarningsAiRows(rows.filter((x) => (x.event_type ?? "").startsWith("earnings")));
+        setEarningsAiErr(null);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setEarningsAiErr("ai-investment-events unavailable");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Level counts (memoized to avoid re-filtering on every render)
   const { l1Count, l2Count, l3Count } = useMemo(() => {
@@ -670,7 +738,15 @@ export default function AlertsPage() {
   }, [events]);
 
   // 高价值信号 kinds — 始终显示（不受 L3 过滤影响）
-  const HIGH_VALUE_KINDS = new Set(["trade_plan", "MAINLINE", "big_move", "threshold", "gap_fade", "gap_recover"]);
+  const HIGH_VALUE_KINDS = new Set([
+    "trade_plan",
+    "MAINLINE",
+    "big_move",
+    "threshold",
+    "gap_fade",
+    "gap_recover",
+    "ai_investment",
+  ]);
   // 按时间倒序（最新在前），默认隐藏 L3 + 低价值 kinds
   const filtered = useMemo(() => {
     return events.filter((e) => {
@@ -727,6 +803,46 @@ export default function AlertsPage() {
         {fetchError && (
           <div style={{ color: D.red, marginBottom: 8, fontWeight: 500 }}>
             [ERROR] alert events fetch failed: {fetchError}
+          </div>
+        )}
+
+        {(earningsAiRows.length > 0 || earningsAiErr) && (
+          <div
+            style={{
+              marginBottom: 12,
+              padding: "8px 10px",
+              border: `1px solid ${D.comment}44`,
+              borderRadius: 4,
+              background: "#1e1f29",
+            }}
+          >
+            <div style={{ color: D.yellow, fontWeight: 700, marginBottom: 6, fontSize: 12 }}>
+              财报 AI 事件流
+              <span style={{ color: D.comment, fontWeight: 400, marginLeft: 8 }}>
+                ai_investment_events（持仓/star）
+              </span>
+            </div>
+            {earningsAiErr && (
+              <div style={{ color: D.comment, fontSize: 11 }}>{earningsAiErr}</div>
+            )}
+            {earningsAiRows.map((row, idx) => (
+              <div
+                key={row.id}
+                style={{
+                  fontSize: 11,
+                  color: D.fg,
+                  padding: "4px 0",
+                  borderTop: idx === 0 ? "none" : `1px solid ${D.comment}22`,
+                }}
+              >
+                <span style={{ color: D.cyan }}>{row.symbol ?? "—"}</span>
+                <span style={{ color: D.comment, margin: "0 6px" }}>{row.event_type}</span>
+                <span style={{ color: D.comment }}>{row.notify_status}</span>
+                <span style={{ color: D.comment, marginLeft: 8 }}>{row.created_at?.slice(0, 16)}</span>
+                <div style={{ color: D.fg, marginTop: 2 }}>{row.title}</div>
+                <div style={{ color: D.comment, marginTop: 2 }}>{row.summary}</div>
+              </div>
+            ))}
           </div>
         )}
 

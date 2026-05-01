@@ -761,6 +761,17 @@ class EarningsCalendar:
 
         # 刷新日历（未来30天）
         upcoming = self.refresh_calendar(days_ahead=30)
+
+        # Phase 2: 持仓 + star × earnings_calendar → ai_investment_events（倒计时 + 披露后 7 日内跟进）
+        try:
+            from src.tools.earnings_ai_events import emit_holdings_star_earnings_ai_events
+
+            n_ai = emit_holdings_star_earnings_ai_events()
+            if n_ai:
+                logger.info("财报 AI 事件（持仓/star）写入: %s 条", n_ai)
+        except Exception as e:
+            logger.warning("emit_holdings_star_earnings_ai_events failed: %s", e)
+
         if not upcoming:
             logger.info("近期无待发布财报")
             return
