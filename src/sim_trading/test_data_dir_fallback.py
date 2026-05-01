@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
 
 class TestDataDirFallbackSubprocess:
     """Test DATA_DIR fallback using subprocess for clean process isolation."""
@@ -36,7 +38,7 @@ class TestDataDirFallbackSubprocess:
             capture_output=True,
             text=True,
             env=env,
-            cwd="/Users/zhul1/Documents/dev/openWorkspace/ai-investor",
+            cwd=str(PROJECT_ROOT),
         )
         return {
             "stdout": result.stdout,
@@ -53,7 +55,7 @@ class TestDataDirFallbackSubprocess:
 
         script = f"""
 import sys
-sys.path.insert(0, '/Users/zhul1/Documents/dev/openWorkspace/ai-investor')
+sys.path.insert(0, '{PROJECT_ROOT}')
 from src.sim_trading.db import DATA_DIR, CONFIG_DB_PATH, TRADING_DB_PATH
 print('DATA_DIR=' + str(DATA_DIR))
 print('CONFIG_IN_DATA=' + str(CONFIG_DB_PATH.parent == DATA_DIR))
@@ -134,7 +136,7 @@ print('SYMLINK_EXISTS=' + str(symlink_data_dir.exists()))
 
         script = f"""
 import sys
-sys.path.insert(0, '/Users/zhul1/Documents/dev/openWorkspace/ai-investor')
+sys.path.insert(0, '{PROJECT_ROOT}')
 from src.sim_trading.db import DATA_DIR, CONFIG_DB_PATH
 print('CONFIG_DB_PATH=' + str(CONFIG_DB_PATH))
 print('EQUALS=' + str(CONFIG_DB_PATH == DATA_DIR / 'config.db'))
@@ -154,7 +156,7 @@ print('EQUALS=' + str(CONFIG_DB_PATH == DATA_DIR / 'config.db'))
 
         script = f"""
 import sys
-sys.path.insert(0, '/Users/zhul1/Documents/dev/openWorkspace/ai-investor')
+sys.path.insert(0, '{PROJECT_ROOT}')
 from src.sim_trading.db import DATA_DIR, TRADING_DB_PATH
 print('TRADING_DB_PATH=' + str(TRADING_DB_PATH))
 print('EQUALS=' + str(TRADING_DB_PATH == DATA_DIR / 'trading.db'))
@@ -181,9 +183,9 @@ class TestDataDirFallbackModuleLevel:
         else:
             env.pop("AI_INVESTOR_DATA_DIR", None)
 
-        script = """
+        script = f"""
 import sys
-sys.path.insert(0, '/Users/zhul1/Documents/dev/openWorkspace/ai-investor')
+sys.path.insert(0, '{PROJECT_ROOT}')
 from src.sim_trading import db
 print('DATA_DIR=' + str(db.DATA_DIR))
 print('CONFIG_DB_PATH=' + str(db.CONFIG_DB_PATH))
@@ -195,7 +197,7 @@ print('TRADING_DB_PATH=' + str(db.TRADING_DB_PATH))
             capture_output=True,
             text=True,
             env=env,
-            cwd="/Users/zhul1/Documents/dev/openWorkspace/ai-investor",
+            cwd=str(PROJECT_ROOT),
         )
         if result.returncode != 0:
             return {"error": result.stderr}
@@ -228,7 +230,6 @@ print('TRADING_DB_PATH=' + str(db.TRADING_DB_PATH))
         data_dir = Path(result["DATA_DIR"])
 
         # DATA_DIR should be either PROJECT_ROOT/src/data or PROJECT_ROOT/data
-        project_root = Path("/Users/zhul1/Documents/dev/openWorkspace/ai-investor")
-        expected_paths = [project_root / "src" / "data", project_root / "data"]
+        expected_paths = [PROJECT_ROOT / "src" / "data", PROJECT_ROOT / "data"]
 
         assert data_dir in expected_paths, f"DATA_DIR {data_dir} should be one of {expected_paths}"
