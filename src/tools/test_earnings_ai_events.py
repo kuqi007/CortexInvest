@@ -186,6 +186,72 @@ def test_countdown_enriches_trading_sessions_and_history(tmp_path, monkeypatch):
     assert any("营收" in r for r in reasons)
 
 
+def test_session_milestone_when_calendar_does_not_match(tmp_path, monkeypatch):
+    """自然日未命中 T5，但交易日口径视为 T5 → earnings_countdown_session。"""
+    monkeypatch.setattr(db, "_config_db_path_override", str(tmp_path / "config.db"))
+    monkeypatch.setattr(db, "_db_path_override", str(tmp_path / "trading.db"))
+    db.init_config_db()
+    db.init_trading_db()
+
+    monkeypatch.setattr(
+        "src.tools.earnings_ai_events.trading_sessions_until_report",
+        lambda _ref, _rd, _m: 5,
+    )
+
+    conn = db.get_config_connection()
+    conn.execute(
+        """
+        INSERT INTO monitor_watchlist (
+            symbol, name, alias, list_type, cost, shares, lot, hidden, star,
+            dip_buy, tags, pin_order, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "600588",
+            "用友",
+            None,
+            "holding",
+            15.0,
+            100,
+            100,
+            0,
+            0,
+            0,
+            "[]",
+            0,
+            1777376520000,
+            1777376520000,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    conn = db.get_connection()
+    conn.execute(
+        """
+        INSERT INTO earnings_calendar (symbol, report_date, name, source, updated_at)
+        VALUES ('600588', '2026-07-15', '用友网络', 'test', '2026-06-01T00:00:00')
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    ref = date(2026, 6, 1)
+    assert emit_holdings_star_earnings_ai_events(ref_date=ref) == 1
+
+    conn = db.get_connection()
+    row = conn.execute(
+        "SELECT event_type, dedupe_key FROM ai_investment_events"
+    ).fetchone()
+    conn.close()
+
+    assert row["event_type"] == "earnings_countdown_session"
+    assert row["dedupe_key"] == "earnings:sessT5:600588:2026-07-15"
+
+    assert emit_holdings_star_earnings_ai_events(ref_date=ref) == 0
+
+
 def test_star_non_holding_included(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "_config_db_path_override", str(tmp_path / "config.db"))
     monkeypatch.setattr(db, "_db_path_override", str(tmp_path / "trading.db"))

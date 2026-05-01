@@ -7,7 +7,8 @@ Phase 2: 持仓 + star 股票 × earnings_calendar → ai_investment_events（�
 - 跟进：披露日已过、且在过后 N 个自然日内 → earnings_post_window（持仓 → feishu_normal）。
 - metrics 附带：对应市场 `earnings_market`、`trading_sessions_until_report`（(ref, report] 交易日数）；
   若 `earnings_history` 有可比 eps/营收，写入环比增幅字段。
-- 触发仍按自然日窗口（与 dedupe 一致）。
+- 自然日窗口 T5/T3/T1/T0（dedupe `earnings:{tag}:…`）。
+- 若自然日未命中且披露日在未来：按 **(今日, 披露日]** 交易日数命中 T5/T3/T1/T0 时追加 `earnings_countdown_session`（dedupe `earnings:sess{tag}:…`）。
 - dedupe_key 幂等。
 """
 
@@ -377,6 +378,38 @@ def emit_holdings_star_earnings_ai_events(
                 }
                 event_type = "earnings_post_window"
                 severity = "high" if is_holding else "normal"
+                _enrich_metrics_and_reasons(
+                    conn_ins, metrics, reasons, cal_sym, matched, ref, rd
+                )
+            elif days_until > 0:
+                market = infer_earnings_market(matched)
+                ts_left = trading_sessions_until_report(ref, rd, market)
+                sess = next((w for w in COUNTDOWN_DAYS if w[0] == ts_left), None)
+                if sess is None:
+                    continue
+                _days_s, tag_s, severity, label_cn = sess
+                delivery_scope = _delivery_scope_for_countdown(is_holding, tag_s)
+                dedupe_key = f"earnings:sess{tag_s}:{matched}:{report_date}"
+                title = f"财报窗口 {label_cn}（交易日）· {name} ({matched})"
+                summary = (
+                    f"预计披露日 {report_date}；今日至披露日区间内约 {ts_left} 个交易日"
+                    f"（对齐 {label_cn}）。请关注仓位与波动。"
+                )
+                reasons = [
+                    f"交易日窗口: {label_cn}",
+                    f"(今日,披露日] 交易日数: {ts_left}",
+                    f"预计发布日: {report_date}",
+                    f"日历来源: {row['source'] or 'unknown'}",
+                ]
+                metrics = {
+                    "phase": "countdown_session",
+                    "days_until_calendar": days_until,
+                    "report_date": report_date,
+                    "window": tag_s,
+                    "calendar_symbol": cal_sym,
+                    "is_holding": is_holding,
+                }
+                event_type = "earnings_countdown_session"
                 _enrich_metrics_and_reasons(
                     conn_ins, metrics, reasons, cal_sym, matched, ref, rd
                 )

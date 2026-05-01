@@ -158,4 +158,46 @@ describe("GET /api/ai-investment-events", () => {
     const res = await GET(new Request("http://local/api/ai-investment-events?event_type=a;b"));
     expect(res.status).toBe(400);
   });
+
+  it("filters by notify_status", async () => {
+    const res = await GET(
+      new Request("http://local/api/ai-investment-events?notify_status=pending&limit=10")
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { id: string }[] };
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0].id).toBe("e1");
+  });
+
+  it("filters by symbol", async () => {
+    const res = await GET(
+      new Request("http://local/api/ai-investment-events?symbol=000002&limit=10")
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { id: string }[] };
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0].id).toBe("e2");
+  });
+
+  it("combines event_type and notify_status", async () => {
+    const res = await GET(
+      new Request(
+        "http://local/api/ai-investment-events?event_type=earnings_countdown&notify_status=pending&limit=5"
+      )
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { id: string }[] };
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0].id).toBe("e1");
+  });
+
+  it("rejects bad notify_status", async () => {
+    const res = await GET(new Request("http://local/api/ai-investment-events?notify_status=nope"));
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects bad symbol", async () => {
+    const res = await GET(new Request("http://local/api/ai-investment-events?symbol=x';--"));
+    expect(res.status).toBe(400);
+  });
 });
