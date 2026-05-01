@@ -1,6 +1,7 @@
 import { chromium } from 'playwright';
-const BASE = 'http://localhost:3120';
+const BASE = process.env.AI_INVESTOR_E2E_BASE_URL || 'http://localhost:3120';
 const DIR = new URL('.', import.meta.url).pathname;
+const ALLOW_CONFIG_MUTATION = process.env.AI_INVESTOR_ALLOW_CONFIG_MUTATION_E2E === '1';
 
 const results = [];
 function record(name, ok, detail = '') {
@@ -8,13 +9,63 @@ function record(name, ok, detail = '') {
   console.log(`  [${ok ? 'PASS' : 'FAIL'}] ${name}${detail ? ' -- ' + detail : ''}`);
 }
 
+function isBenignNetworkUrl(url) {
+  return url.includes('favicon')
+    || url.includes('/nonexistent')
+    || url.includes('fonts.googleapis.com')
+    || url.includes('fonts.gstatic.com')
+    || url.includes('googleapis.com')
+    || url.includes('gstatic.com');
+}
+
+function isBenignConsoleError(text) {
+  return text.includes('/api/summary')
+    || isBenignNetworkUrl(text);
+}
+
 async function main() {
   const browser = await chromium.launch({ headless: true });
   const page = await (await browser.newContext({ viewport: { width: 1600, height: 1000 } })).newPage();
 
   const consoleErrors = [];
+  const httpErrors = [];
+  const failedRequests = [];
   page.on('console', msg => { if (msg.type() === 'error') consoleErrors.push(msg.text()); });
   page.on('pageerror', err => consoleErrors.push('PAGE_ERROR: ' + err.message));
+  page.on('response', resp => {
+    if (resp.status() >= 400 && !isBenignNetworkUrl(resp.url())) {
+      httpErrors.push(`${resp.status()} ${resp.request().method()} ${resp.url()}`);
+    }
+  });
+  page.on('requestfailed', req => {
+    const errorText = req.failure()?.errorText || 'request failed';
+    if (errorText !== 'net::ERR_ABORTED' && !isBenignNetworkUrl(req.url())) {
+      failedRequests.push(`${errorText} ${req.method()} ${req.url()}`);
+    }
+  });
+  await page.addInitScript(() => {
+    window.__aiInvestorFetchJson = async (url, options = {}) => {
+      let lastError = '';
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const res = await fetch(url, {
+          ...options,
+          headers: { Accept: 'application/json', ...(options.headers || {}) },
+        });
+        const text = await res.text();
+        const contentType = res.headers.get('content-type') || '';
+        try {
+          const data = JSON.parse(text);
+          const objectLike = data !== null && (typeof data === 'object' || Array.isArray(data));
+          if (res.ok && objectLike) return data;
+          lastError = `status=${res.status} content-type=${contentType} jsonType=${data === null ? 'null' : typeof data}`;
+        } catch (e) {
+          lastError = `${e.message}; status=${res.status} content-type=${contentType}`;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+      }
+      throw new Error(`Non-JSON response from ${url}: ${lastError}`);
+    };
+  });
 
   await page.route('**/*.googleapis.com/**', route => route.abort());
   await page.route('**/*.gstatic.com/**', route => route.abort());
@@ -54,8 +105,7 @@ async function main() {
       if (!m) return { ok: false, detail: 'summary parse failed' };
       const uiNodes = Number(m[1]);
       const uiVisible = Number(m[2]);
-      const res = await fetch('/api/metrics');
-      const data = await res.json();
+      const data = await window.__aiInvestorFetchJson('/api/metrics');
       const holdings = (data.services || []).filter(s => !String(s.id).startsWith('HK') && s.type === 'holding');
       const apiNodes = holdings.length;
       const apiVisible = holdings.filter(s => !s.hidden).length;
@@ -134,8 +184,7 @@ async function main() {
       if (!m) return { ok: false, detail: 'summary parse failed' };
       const uiNodes = Number(m[1]);
       const uiVisible = Number(m[2]);
-      const res = await fetch('/api/metrics');
-      const data = await res.json();
+      const data = await window.__aiInvestorFetchJson('/api/metrics');
       const holdings = (data.services || []).filter(s => String(s.id).startsWith('HK') && s.type === 'holding');
       const apiNodes = holdings.length;
       const apiVisible = holdings.filter(s => !s.hidden).length;
@@ -186,17 +235,16 @@ async function main() {
     // Click market switch button: HK
     let clickedHK = false;
     try {
-      await page.locator('button').filter({ hasText: 'HK' }).first().click({ timeout: 10000 });
-      await page.waitForTimeout(1500);
+      await page.getByRole('button', { name: 'HK', exact: true }).click({ timeout: 10000 });
+      await page.waitForURL('**/?tab=HK', { timeout: 10000 });
       clickedHK = page.url().includes('tab=HK');
-    } catch { /* fallback: try evaluate */ }
-    if (!clickedHK) {
+    } catch {
       clickedHK = await page.evaluate(() => {
         const b = Array.from(document.querySelectorAll('button')).find(x => (x.textContent || '').trim() === 'HK');
         if (b) { b.click(); return true; }
         return false;
       });
-      await page.waitForTimeout(1500);
+      await page.waitForURL('**/?tab=HK', { timeout: 10000 }).catch(() => {});
       clickedHK = clickedHK && page.url().includes('tab=HK');
     }
     record('Tab switch: A → HK', clickedHK, `url=${page.url()}`);
@@ -204,17 +252,16 @@ async function main() {
     // Click back to A-share
     let clickedA = false;
     try {
-      await page.locator('button').filter({ hasText: 'A-share' }).first().click({ timeout: 10000 });
-      await page.waitForTimeout(1500);
+      await page.getByRole('button', { name: 'A-share', exact: true }).click({ timeout: 10000 });
+      await page.waitForURL('**/?tab=A', { timeout: 10000 });
       clickedA = page.url().includes('tab=A');
-    } catch { /* fallback: try evaluate */ }
-    if (!clickedA) {
+    } catch {
       clickedA = await page.evaluate(() => {
         const b = Array.from(document.querySelectorAll('button')).find(x => (x.textContent || '').trim() === 'A-share');
         if (b) { b.click(); return true; }
         return false;
       });
-      await page.waitForTimeout(1500);
+      await page.waitForURL('**/?tab=A', { timeout: 10000 }).catch(() => {});
       clickedA = clickedA && page.url().includes('tab=A');
     }
     record('Tab switch: HK → A', clickedA, `url=${page.url()}`);
@@ -302,8 +349,7 @@ async function main() {
     });
     const simApiForSections = await page.evaluate(async () => {
       try {
-        const res = await fetch('/api/sim');
-        const data = await res.json();
+        const data = await window.__aiInvestorFetchJson('/api/sim');
         return {
           ok: !data.error,
           livePositions: data.live?.positions?.length || 0,
@@ -544,8 +590,7 @@ async function main() {
 
     // /api/metrics
     const metrics = await page.evaluate(async () => {
-      const res = await fetch('/api/metrics');
-      const data = await res.json();
+      const data = await window.__aiInvestorFetchJson('/api/metrics');
       return {
         ok: !data.error,
         serviceCount: (data.services || []).length,
@@ -560,12 +605,7 @@ async function main() {
     // /api/sim
     const sim = await page.evaluate(async () => {
       try {
-        const res = await fetch('/api/sim');
-        const text = await res.text();
-        if (!text.startsWith('{') && !text.startsWith('[')) {
-          return { ok: false, error: `Non-JSON response (status ${res.status})` };
-        }
-        const data = JSON.parse(text);
+        const data = await window.__aiInvestorFetchJson('/api/sim');
         return {
           ok: !data.error,
           hasSummary: !!data.summary,
@@ -594,8 +634,7 @@ async function main() {
     await page.waitForTimeout(1000);
 
     const consistency = await page.evaluate(async () => {
-      const res = await fetch('/api/metrics');
-      const data = await res.json();
+      const data = await window.__aiInvestorFetchJson('/api/metrics');
       const services = data.services || [];
       const issues = [];
 
@@ -633,24 +672,55 @@ async function main() {
     record('Data: no consistency issues', consistency.issues.length === 0,
       consistency.issues.length > 0 ? consistency.issues.join('; ') : `${consistency.total} services checked`);
 
-    // sold stocks verified as watching with no cost/shares
+    // Verify the sell/demote invariant with an isolated test row instead of
+    // hard-coding real account symbols whose holding status changes over time.
+    if (ALLOW_CONFIG_MUTATION) {
+      const demoteCheck = await page.evaluate(async () => {
+        const code = `E2ESOLD${Date.now().toString(36).toUpperCase()}`;
+        const headers = { 'Content-Type': 'application/json' };
+        try {
+          const addRes = await fetch('/api/config', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              action: 'add',
+              code,
+              data: { name: 'E2E demote fixture', type: 'holding', cost: 12.34, shares: 100 },
+            }),
+          });
+          if (!addRes.ok) return { ok: false, detail: `add status=${addRes.status}` };
 
-    // Check sold stocks are watching (no cost/shares)
-    const soldStocks = await page.evaluate(async () => {
-      const res = await fetch('/api/metrics');
-      const data = await res.json();
-      const services = data.services || [];
-      const check = ['601088', '601318', 'HK03896', '159326', '159691'];
-      return check.map(code => {
-        const s = services.find(x => x.id === code);
-        return { code, found: !!s, type: s?.type, cost: s?.cost, shares: s?.shares, name: s?.name };
+          const updateRes = await fetch('/api/config', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              action: 'update',
+              code,
+              data: { type: 'watching', cost: null, shares: null },
+            }),
+          });
+          if (!updateRes.ok) return { ok: false, detail: `update status=${updateRes.status}` };
+
+          const config = await window.__aiInvestorFetchJson('/api/config');
+          const entry = config.watchlist?.[code];
+          const isWatching = entry && (entry.type == null || entry.type === 'watching');
+          const ok = isWatching && entry.cost == null && entry.shares == null;
+          return { ok, detail: entry ? `type=${entry.type} cost=${entry.cost} shares=${entry.shares}` : 'missing entry' };
+        } finally {
+          await fetch('/api/config', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ action: 'remove', code }),
+          }).catch(() => {});
+        }
       });
-    });
-    for (const s of soldStocks) {
-      const isWatching = !s.found || s.type !== 'holding' || (s.cost == null && s.shares == null);
-      record(`Sold ${s.code} ${s.name || '?'}: not holding`,
-        isWatching,
-        s.found ? `type=${s.type} cost=${s.cost} shares=${s.shares}` : 'not in services');
+      record('Demote holding→watching clears cost/shares', demoteCheck.ok, demoteCheck.detail);
+    } else {
+      record(
+        'Demote holding→watching clears cost/shares',
+        true,
+        'skipped config mutation; set AI_INVESTOR_ALLOW_CONFIG_MUTATION_E2E=1 to run'
+      );
     }
 
     // ════════════════════════════════════════════════
@@ -681,16 +751,14 @@ async function main() {
     // 10. Console errors summary
     // ════════════════════════════════════════════════
     console.log('\n═══ 10. Console errors ═══');
-    const realErrors = consoleErrors.filter(e =>
-      !e.includes('favicon') && !e.includes('404') && !e.includes('ERR_CONNECTION')
-      && !e.includes('/api/summary')  // summary endpoint may not exist
-      && !e.includes('Unexpected end of JSON')  // transient API response
-      && !e.includes('net::ERR_FAILED') // font/network flakiness in headless
-      && !e.includes('fonts.googleapis.com')
-      && !e.includes('fonts.gstatic.com')
-    );
-    record('No JS console errors', realErrors.length === 0,
-      realErrors.length > 0 ? realErrors.slice(0, 3).join(' | ').slice(0, 200) : 'clean');
+    const networkErrorDetails = [...httpErrors, ...failedRequests];
+    const realErrors = consoleErrors.filter(e => {
+      if (isBenignConsoleError(e)) return false;
+      return !(networkErrorDetails.length === 0 && e === 'Failed to load resource: net::ERR_FAILED');
+    });
+    const errorDetails = [...networkErrorDetails, ...realErrors];
+    record('No browser/network errors', errorDetails.length === 0,
+      errorDetails.length > 0 ? errorDetails.slice(0, 3).join(' | ').slice(0, 200) : 'clean');
 
   } finally {
     await browser.close();
