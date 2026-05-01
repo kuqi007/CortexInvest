@@ -9,11 +9,14 @@ import Database from "better-sqlite3";
 import { join } from "path";
 import { tmpdir } from "os";
 import { unlinkSync } from "fs";
-import { NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 
 const TEST_DB_PATH = join(tmpdir(), "test_earnings.db");
+let getEarnings: typeof import("./route").GET;
+let postEarnings: typeof import("./route").POST;
 
 function setupTestDb() {
+  cleanupTestDb();
   const db = new Database(TEST_DB_PATH);
   db.pragma("journal_mode = WAL");
   db.exec(`
@@ -26,10 +29,17 @@ function setupTestDb() {
       updated_at TEXT NOT NULL,
       PRIMARY KEY (symbol, report_date)
     );
-    CREATE TABLE IF NOT EXISTS portfolio_config (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+    CREATE TABLE IF NOT EXISTS job_requests (
+      id TEXT PRIMARY KEY,
+      job_type TEXT NOT NULL,
+      requested_by TEXT NOT NULL,
+      request_payload_json TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      correlation_id TEXT NOT NULL,
+      created_at_ms INTEGER NOT NULL,
+      claimed_at_ms INTEGER,
+      completed_at_ms INTEGER,
+      UNIQUE(job_type, correlation_id)
     );
   `);
   db.close();
@@ -41,96 +51,22 @@ function cleanupTestDb() {
   try { unlinkSync(TEST_DB_PATH + "-shm"); } catch { /* ignore */ }
 }
 
-async function getHandler(request: Request) {
-  const db = new Database(TEST_DB_PATH, { readonly: true });
-  try {
-    const url = new URL(request.url);
-    const days = parseInt(url.searchParams.get("days") || "7", 10);
+beforeAll(async () => {
+  process.env.AI_INVESTOR_ALLOW_TEST_DB_OVERRIDE = "1";
+  process.env.AI_INVESTOR_TRADING_DB_PATH = TEST_DB_PATH;
+  setupTestDb();
+  const route = await import("./route");
+  getEarnings = route.GET;
+  postEarnings = route.POST;
+});
 
-    const now = new Date();
-    const cutoff = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
-    const today = now.toISOString().slice(0, 10);
-    const cutoffStr = cutoff.toISOString().slice(0, 10);
-
-    const rows = db
-      .prepare(
-        `SELECT symbol, report_date, name, source, created_at, updated_at
-         FROM earnings_calendar
-         WHERE report_date >= ? AND report_date <= ?
-         ORDER BY report_date, symbol`
-      )
-      .all(today, cutoffStr) as Array<{
-      symbol: string;
-      report_date: string;
-      name: string | null;
-      source: string | null;
-      created_at: string;
-      updated_at: string;
-    }>;
-
-    const upcoming = rows.map((r) => ({
-      symbol: r.symbol,
-      report_date: r.report_date,
-      name: r.name,
-      source: r.source,
-      created_at: r.created_at,
-      updated_at: r.updated_at,
-    }));
-
-    const lastUpdatedRow = db
-      .prepare("SELECT MAX(updated_at) as last_updated FROM earnings_calendar")
-      .get() as { last_updated: string | null } | undefined;
-
-    return NextResponse.json({
-      success: true,
-      count: upcoming.length,
-      upcoming,
-      last_updated: lastUpdatedRow?.last_updated || null,
-    });
-  } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
-  } finally {
-    db.close();
-  }
-}
-
-async function postHandler(request: Request) {
-  const db = new Database(TEST_DB_PATH);
-  try {
-    const body = await request.json();
-    const { action } = body;
-
-    if (action === "trigger_check") {
-      db.prepare(
-        `INSERT INTO portfolio_config (key, value, updated_at)
-         VALUES ('earnings_check_trigger', ?, datetime('now'))
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
-      ).run(new Date().toISOString());
-
-      return NextResponse.json({ success: true, message: "检查已触发" });
-    }
-
-    return NextResponse.json(
-      { success: false, error: "Unknown action" },
-      { status: 400 }
-    );
-  } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
-  } finally {
-    db.close();
-  }
-}
+afterAll(() => {
+  delete process.env.AI_INVESTOR_TRADING_DB_PATH;
+  delete process.env.AI_INVESTOR_ALLOW_TEST_DB_OVERRIDE;
+  cleanupTestDb();
+});
 
 describe("GET /api/earnings", () => {
-  beforeAll(setupTestDb);
-  afterAll(cleanupTestDb);
-
   it("returns upcoming earnings for default 7 days", async () => {
     const today = new Date().toISOString().slice(0, 10);
     const db = new Database(TEST_DB_PATH);
@@ -151,8 +87,8 @@ describe("GET /api/earnings", () => {
     `);
     db.close();
 
-    const request = new Request("http://localhost/api/earnings", { method: "GET" });
-    const response = await getHandler(request);
+    const request = new NextRequest("http://localhost/api/earnings", { method: "GET" });
+    const response = await getEarnings(request);
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.success).toBe(true);
@@ -163,8 +99,8 @@ describe("GET /api/earnings", () => {
   });
 
   it("respects days parameter", async () => {
-    const request = new Request("http://localhost/api/earnings?days=3", { method: "GET" });
-    const response = await getHandler(request);
+    const request = new NextRequest("http://localhost/api/earnings?days=3", { method: "GET" });
+    const response = await getEarnings(request);
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.count).toBe(1);
@@ -172,8 +108,8 @@ describe("GET /api/earnings", () => {
   });
 
   it("returns last_updated", async () => {
-    const request = new Request("http://localhost/api/earnings", { method: "GET" });
-    const response = await getHandler(request);
+    const request = new NextRequest("http://localhost/api/earnings", { method: "GET" });
+    const response = await getEarnings(request);
     const body = await response.json();
     expect(body.last_updated).not.toBeNull();
     expect(typeof body.last_updated).toBe("string");
@@ -184,8 +120,8 @@ describe("GET /api/earnings", () => {
     db.exec(`DELETE FROM earnings_calendar;`);
     db.close();
 
-    const request = new Request("http://localhost/api/earnings", { method: "GET" });
-    const response = await getHandler(request);
+    const request = new NextRequest("http://localhost/api/earnings", { method: "GET" });
+    const response = await getEarnings(request);
     const body = await response.json();
     expect(body.count).toBe(0);
     expect(body.upcoming).toEqual([]);
@@ -203,8 +139,8 @@ describe("GET /api/earnings", () => {
     `);
     db.close();
 
-    const request = new Request("http://localhost/api/earnings", { method: "GET" });
-    const response = await getHandler(request);
+    const request = new NextRequest("http://localhost/api/earnings", { method: "GET" });
+    const response = await getEarnings(request);
     const body = await response.json();
     const entry = body.upcoming.find((e: any) => e.symbol === "999999");
     expect(entry).toBeDefined();
@@ -214,31 +150,63 @@ describe("GET /api/earnings", () => {
 });
 
 describe("POST /api/earnings", () => {
-  beforeAll(setupTestDb);
-  afterAll(cleanupTestDb);
-
-  it("trigger_check action succeeds", async () => {
+  it("trigger_check creates a pending earnings_check job request", async () => {
     const request = new Request("http://localhost/api/earnings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "trigger_check" }),
     });
-    const response = await postHandler(request);
+    const response = await postEarnings(request as any);
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.success).toBe(true);
     expect(body.message).toBe("检查已触发");
+    expect(body.request_id).toBeTruthy();
 
     // Verify DB write
     const db = new Database(TEST_DB_PATH, { readonly: true });
-    const row = db.prepare("SELECT key, value FROM portfolio_config WHERE key = 'earnings_check_trigger'").get() as {
-      key: string;
-      value: string;
+    const row = db.prepare(
+      "SELECT id, job_type, requested_by, status, correlation_id, created_at_ms FROM job_requests WHERE id = ?"
+    ).get(body.request_id) as {
+      id: string;
+      job_type: string;
+      requested_by: string;
+      status: string;
+      correlation_id: string;
+      created_at_ms: number;
     } | undefined;
     db.close();
     expect(row).toBeDefined();
-    expect(row!.key).toBe("earnings_check_trigger");
-    expect(new Date(row!.value).getTime()).toBeGreaterThan(0);
+    expect(row!.job_type).toBe("earnings_check");
+    expect(row!.requested_by).toBe("api");
+    expect(row!.status).toBe("pending");
+    expect(row!.correlation_id).toBeTruthy();
+    expect(row!.created_at_ms).toBeGreaterThan(0);
+  });
+
+  it("trigger_check is idempotent for the same idempotency key", async () => {
+    const key = "earnings-check-idempotent-test";
+    const makeRequest = () =>
+      new Request("http://localhost/api/earnings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Idempotency-Key": key },
+        body: JSON.stringify({ action: "trigger_check" }),
+      });
+
+    const first = await postEarnings(makeRequest() as any);
+    const second = await postEarnings(makeRequest() as any);
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    const firstBody = await first.json();
+    const secondBody = await second.json();
+    expect(secondBody.request_id).toBe(firstBody.request_id);
+
+    const db = new Database(TEST_DB_PATH, { readonly: true });
+    const row = db.prepare(
+      "SELECT COUNT(*) AS count FROM job_requests WHERE job_type = 'earnings_check' AND correlation_id = ?"
+    ).get(key) as { count: number };
+    db.close();
+    expect(row.count).toBe(1);
   });
 
   it("unknown action returns 400", async () => {
@@ -247,7 +215,7 @@ describe("POST /api/earnings", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "unknown_action" }),
     });
-    const response = await postHandler(request);
+    const response = await postEarnings(request as any);
     expect(response.status).toBe(400);
     const body = await response.json();
     expect(body.success).toBe(false);
@@ -260,7 +228,7 @@ describe("POST /api/earnings", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
-    const response = await postHandler(request);
+    const response = await postEarnings(request as any);
     expect(response.status).toBe(400);
     const body = await response.json();
     expect(body.success).toBe(false);

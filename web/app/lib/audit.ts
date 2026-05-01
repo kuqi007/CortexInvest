@@ -27,6 +27,8 @@ const EXCLUDED_AUDIT_TABLES: Record<AuditDbName, Set<string>> = {
     "morning_briefings",
     "daily_l2_digest",
     "daily_summaries",
+    "job_requests",
+    "job_runs",
   ]),
 };
 const SENSITIVE_FIELD_FRAGMENTS = [

@@ -41,6 +41,8 @@ EXCLUDED_AUDIT_TABLES: dict[str, set[str]] = {
         "morning_briefings",
         "daily_l2_digest",
         "daily_summaries",
+        "job_requests",
+        "job_runs",
     },
     "config.db": set(),
 }

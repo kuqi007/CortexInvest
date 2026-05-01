@@ -23,7 +23,10 @@ from .trade_analyzer import TradeAnalyzer
 # Fixtures
 # ---------------------------------------------------------------------------
 
-RULES_PATH = Path(__file__).resolve().parent.parent / "data" / "signal_rules.json"
+# Contract snapshot for sim_trading unit tests only; production uses config.db:signal_rules.
+RULES_PATH = (
+    Path(__file__).resolve().parent.parent.parent / "tests" / "fixtures" / "signal_rules.json"
+)
 
 
 @pytest.fixture

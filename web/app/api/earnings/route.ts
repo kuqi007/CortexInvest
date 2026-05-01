@@ -69,36 +69,82 @@ export async function POST(request: NextRequest) {
     const { action } = body;
 
     if (action === "trigger_check") {
-      const before = db
-        .prepare("SELECT value FROM portfolio_config WHERE key = ?")
-        .get("earnings_check_trigger") as { value: string } | undefined;
-      const triggerAt = new Date().toISOString();
-      // Store trigger flag in portfolio_config table
+      const requestPayloadJson = JSON.stringify({ action: "trigger_check" });
+      const idempotencyKey =
+        request.headers.get("Idempotency-Key") ||
+        request.headers.get("X-Idempotency-Key");
+      const correlationId = idempotencyKey || randomUUID();
+      const requestId = randomUUID();
+      const createdAtMs = Date.now();
+      const jobRequest = {
+        id: requestId,
+        job_type: "earnings_check",
+        requested_by: "api",
+        request_payload_json: requestPayloadJson,
+        status: "pending",
+        correlation_id: correlationId,
+        created_at_ms: createdAtMs,
+        claimed_at_ms: null,
+        completed_at_ms: null,
+      };
+      let inserted = false;
       db.transaction(() => {
-        db.prepare(
-          `INSERT INTO portfolio_config (key, value, updated_at)
-           VALUES ('earnings_check_trigger', ?, datetime('now'))
-           ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
-        ).run(triggerAt);
+        const result = db.prepare(
+          `INSERT OR IGNORE INTO job_requests (
+             id, job_type, requested_by, request_payload_json, status,
+             correlation_id, created_at_ms, claimed_at_ms, completed_at_ms
+           )
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).run(
+          jobRequest.id,
+          jobRequest.job_type,
+          jobRequest.requested_by,
+          jobRequest.request_payload_json,
+          jobRequest.status,
+          jobRequest.correlation_id,
+          jobRequest.created_at_ms,
+          jobRequest.claimed_at_ms,
+          jobRequest.completed_at_ms,
+        );
+        inserted = result.changes === 1;
+        if (!inserted) return;
+
         insertTradingAuditOutbox(
           db,
           buildAuditEventV2({
             eventId: randomUUID(),
-            tsMs: Date.now(),
-            correlationId: randomUUID(),
+            tsMs: createdAtMs,
+            correlationId,
             source: "api_earnings",
             actor: makeActor({ type: "user", id: "local-ui" }),
             action: "trigger_check",
-            entity: "portfolio_config",
-            key: "earnings_check_trigger",
+            entity: "job_requests",
+            key: requestId,
             dbName: "trading.db",
-            before: before ? { value: before.value } : null,
-            after: { value: triggerAt },
+            before: null,
+            after: jobRequest,
           }),
         );
       })();
+      const row = db
+        .prepare(
+          "SELECT id, correlation_id FROM job_requests WHERE job_type = ? AND correlation_id = ?"
+        )
+        .get("earnings_check", correlationId) as
+        | { id: string; correlation_id: string }
+        | undefined;
 
-      return NextResponse.json({ success: true, message: "检查已触发" });
+      if (!row) {
+        throw new Error("Failed to create earnings_check job request");
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: "检查已触发",
+        request_id: row.id,
+        correlation_id: row.correlation_id,
+        existing: !inserted,
+      });
     }
 
     return NextResponse.json(

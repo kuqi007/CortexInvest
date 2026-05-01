@@ -38,6 +38,18 @@ function setupTradingDb() {
       value TEXT NOT NULL,
       updated_at TEXT DEFAULT (datetime('now'))
     );
+    CREATE TABLE IF NOT EXISTS job_requests (
+      id TEXT PRIMARY KEY,
+      job_type TEXT NOT NULL,
+      requested_by TEXT NOT NULL,
+      request_payload_json TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      correlation_id TEXT NOT NULL,
+      created_at_ms INTEGER NOT NULL,
+      claimed_at_ms INTEGER,
+      completed_at_ms INTEGER,
+      UNIQUE(job_type, correlation_id)
+    );
   `);
   db.close();
 }
@@ -370,7 +382,7 @@ describe("audit route integration", () => {
     expect(auditCount.count).toBe(0);
   });
 
-  it("/api/earnings trigger_check writes portfolio_config and trading audit", async () => {
+  it("/api/earnings trigger_check writes job request and trading audit", async () => {
     const { POST } = await import("./earnings/route");
     const response = await POST(
       new Request("http://localhost/api/earnings", {
@@ -381,24 +393,31 @@ describe("audit route integration", () => {
     );
 
     expect(response.status).toBe(200);
+    const body = await response.json();
     const db = openDb(tradingDbPath);
-    const configRow = db
-      .prepare("SELECT value FROM portfolio_config WHERE key = ?")
-      .get("earnings_check_trigger") as { value: string };
+    const requestRow = db
+      .prepare("SELECT id, job_type, requested_by, status FROM job_requests WHERE id = ?")
+      .get(body.request_id) as { id: string; job_type: string; requested_by: string; status: string };
     const auditRow = db
       .prepare("SELECT payload_json FROM trading_audit_outbox ORDER BY ts_ms DESC LIMIT 1")
       .get() as { payload_json: string };
     db.close();
 
-    expect(configRow.value).toMatch(/T/);
+    expect(requestRow).toMatchObject({
+      id: body.request_id,
+      job_type: "earnings_check",
+      requested_by: "api",
+      status: "pending",
+    });
     const payload = JSON.parse(auditRow.payload_json);
     expect(payload).toMatchObject({
       schema_version: 2,
       source: "api_earnings",
       action: "trigger_check",
-      entity: "portfolio_config",
-      key: "earnings_check_trigger",
+      entity: "job_requests",
+      key: body.request_id,
       db: "trading.db",
     });
+    expect(payload.after.job_type).toBe("earnings_check");
   });
 });
