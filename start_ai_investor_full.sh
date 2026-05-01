@@ -8,11 +8,13 @@ NOTIFIER_PID="$DIR/.notifier.pid"
 L2_DAEMON_PID="$DIR/.l2_daemon.pid"
 L2_DAEMON_WATCHDOG_PID="$DIR/.l2_daemon_watchdog.pid"
 TICK_MONITOR_PID="$DIR/.tick_monitor.pid"
+EARNINGS_DAEMON_PID="$DIR/.earnings_calendar_daemon.pid"
 WEB_PID="$DIR/.web.pid"
 POLLER_LOG="$DIR/logs/poller.log"
 NOTIFIER_LOG="$DIR/logs/notifier.log"
 L2_DAEMON_LOG="$DIR/logs/l2_daemon_out.log"
 TICK_MONITOR_LOG="$DIR/logs/tick_monitor.log"
+EARNINGS_DAEMON_LOG="$DIR/logs/earnings_daemon.log"
 WEB_LOG="$DIR/logs/web.log"
 
 mkdir -p "$DIR/logs"
@@ -23,6 +25,7 @@ POLLER_LOG="$DIR/logs/poller-$TODAY.log"
 NOTIFIER_LOG="$DIR/logs/notifier-$TODAY.log"
 L2_DAEMON_LOG="$DIR/logs/l2_daemon-$TODAY.log"
 TICK_MONITOR_LOG="$DIR/logs/tick_monitor-$TODAY.log"
+EARNINGS_DAEMON_LOG="$DIR/logs/earnings_daemon-$TODAY.log"
 WEB_LOG="$DIR/logs/web-$TODAY.log"
 
 _check_terminal_notifier() {
@@ -153,6 +156,17 @@ do_start() {
     echo "Notifier 启动  pid=$!  日志=logs/notifier-$TODAY.log"
   fi
 
+  # Earnings Calendar Daemon (财报日历 + job_requests / job_runs)
+  _ensure_no_orphan "$EARNINGS_DAEMON_PID" "earnings_calendar_daemon.py"
+  if _is_running "$EARNINGS_DAEMON_PID"; then
+    echo "Earnings Daemon 已在运行 (pid=$(_read_pid "$EARNINGS_DAEMON_PID"))，跳过"
+  else
+    cd "$DIR"
+    nohup uv run python src/tools/earnings_calendar_daemon.py >> "$EARNINGS_DAEMON_LOG" 2>&1 &
+    echo $! > "$EARNINGS_DAEMON_PID"
+    echo "Earnings Daemon 启动  pid=$!  日志=logs/earnings_daemon-$TODAY.log"
+  fi
+
   # L2 Strategy Daemon (optional, needs Futu OpenD)
   _ensure_no_orphan "$L2_DAEMON_PID" "l2_strategy_daemon.py"
   if _is_running "$L2_DAEMON_PID"; then
@@ -239,7 +253,7 @@ do_start() {
   echo ""
   echo "全部后台运行中，可关闭终端。"
   echo "  查看状态: ./start_ai_investor_full.sh status"
-  echo "  查看日志: tail -f logs/poller-$TODAY.log logs/notifier-$TODAY.log logs/l2_daemon-$TODAY.log logs/tick_monitor-$TODAY.log logs/web-$TODAY.log"
+  echo "  查看日志: tail -f logs/poller-$TODAY.log logs/notifier-$TODAY.log logs/earnings_daemon-$TODAY.log logs/l2_daemon-$TODAY.log logs/tick_monitor-$TODAY.log logs/web-$TODAY.log"
   echo "  停止服务: ./start_ai_investor_full.sh stop"
 }
 
@@ -247,6 +261,7 @@ do_stop() {
   # 先杀 watchdog，防止它在 daemon 被杀后自动重启
   _stop_one "$L2_DAEMON_WATCHDOG_PID" "L2 Daemon Watchdog" ""
   _stop_one "$NOTIFIER_PID" "Notifier" "stock_notifier.py"
+  _stop_one "$EARNINGS_DAEMON_PID" "Earnings Daemon" "earnings_calendar_daemon.py"
   _stop_one "$L2_DAEMON_PID" "L2 Daemon" "l2_strategy_daemon.py"
   _stop_one "$TICK_MONITOR_PID" "Tick Monitor" "tick_monitor.py"
   _stop_one "$POLLER_PID" "Poller" "market_data_poller.py"
@@ -274,6 +289,16 @@ do_status() {
   else
     echo "Notifier 未运行"
     rm -f "$NOTIFIER_PID"
+  fi
+
+  # Earnings Daemon
+  wrapper_pid=$(_read_pid "$EARNINGS_DAEMON_PID")
+  if _is_python_running "$EARNINGS_DAEMON_PID" "earnings_calendar_daemon.py"; then
+    python_pid=$(_get_python_pid "$wrapper_pid")
+    echo "Earnings Daemon 运行中  pid=$python_pid (wrapper=$wrapper_pid)"
+  else
+    echo "Earnings Daemon 未运行"
+    rm -f "$EARNINGS_DAEMON_PID"
   fi
 
   # L2 Daemon
