@@ -2,22 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { openTradingDb } from "../../lib/db";
 import { buildAuditEventV2, insertTradingAuditOutbox, makeActor } from "../../lib/audit";
-
-const DAYS_DEFAULT = 7;
-const DAYS_MIN = 1;
-const DAYS_MAX = 366;
+import { parseDaysAhead } from "./utils";
 
 /** Max length for Idempotency-Key / X-Idempotency-Key (storage + audit safety). */
 const MAX_IDEMPOTENCY_KEY_LEN = 128;
-
-/** Safe window for ?days= — avoids NaN/negative/huge cutoffs from bad query strings. */
-export function parseDaysAhead(raw: string | null): number {
-  const n = parseInt(raw ?? String(DAYS_DEFAULT), 10);
-  if (!Number.isFinite(n)) {
-    return DAYS_DEFAULT;
-  }
-  return Math.min(DAYS_MAX, Math.max(DAYS_MIN, n));
-}
 
 // GET /api/earnings — 获取财报日历列表
 export async function GET(request: NextRequest) {

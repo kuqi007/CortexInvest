@@ -6,7 +6,7 @@
 import { useState, useEffect } from "react";
 
 /** Trading status from API */
-interface TradingStatus {
+export interface TradingStatus {
   trading: boolean;
   markets: {
     cn: boolean;

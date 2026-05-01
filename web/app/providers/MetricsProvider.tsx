@@ -15,6 +15,7 @@ interface MetricsContextValue {
   fetchError: string | null;
   alertEvents: AlertEvent[];
   marketTurnover: MarketTurnover | null;
+  dataRuntimeHint: string | null;
   refresh: () => void;
 }
 
@@ -36,6 +37,7 @@ export function MetricsProvider({ children }: { children: React.ReactNode }) {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [alertEvents, setAlertEvents] = useState<AlertEvent[]>([]);
   const [marketTurnover, setMarketTurnover] = useState<MarketTurnover | null>(null);
+  const [dataRuntimeHint, setDataRuntimeHint] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -52,6 +54,9 @@ export function MetricsProvider({ children }: { children: React.ReactNode }) {
         if (data.hkdCnyRate != null) setHkdCnyRate(data.hkdCnyRate);
         if (data.alertEvents) setAlertEvents(data.alertEvents);
         if (data.marketTurnover) setMarketTurnover(data.marketTurnover);
+        setDataRuntimeHint(
+          typeof data.dataRuntimeHint === "string" ? data.dataRuntimeHint : null,
+        );
       }
       setTick((t) => t + 1);
     } catch (e) {
@@ -74,7 +79,19 @@ export function MetricsProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <MetricsContext.Provider
-      value={{ services, ts, tick, loading, settings, hkdCnyRate, fetchError, alertEvents, marketTurnover, refresh: fetchData }}
+      value={{
+        services,
+        ts,
+        tick,
+        loading,
+        settings,
+        hkdCnyRate,
+        fetchError,
+        alertEvents,
+        marketTurnover,
+        dataRuntimeHint,
+        refresh: fetchData,
+      }}
     >
       {children}
     </MetricsContext.Provider>

@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { D } from "../theme";
-import { tagColor } from "../lib/tag-utils";
+import { layeredTagChipStyle, sortTagsForDisplay } from "../lib/tag-utils";
 
 /* ── TagEditor: combobox style ──────────────────────────────
    - Single input: search existing OR create new
@@ -76,10 +76,11 @@ function TagEditor({
     }
   }
 
-  // Sort: selected first, then alphabetical
+  // Sort: selected first, then layered priority + locale
+  const priority = sortTagsForDisplay(filtered);
   const sorted = [
-    ...filtered.filter((t) => selected.has(t)),
-    ...filtered.filter((t) => !selected.has(t)),
+    ...priority.filter((t) => selected.has(t)),
+    ...priority.filter((t) => !selected.has(t)),
   ];
 
   return (
@@ -129,20 +130,17 @@ function TagEditor({
       <div style={{ maxHeight: 200, overflowY: "auto", display: "flex", flexWrap: "wrap", gap: 4 }}>
         {sorted.map((t) => {
           const on = selected.has(t);
+          const base = layeredTagChipStyle(t);
           return (
             <span
               key={t}
               onClick={() => { toggle(t); inputRef.current?.focus(); }}
               style={{
+                ...base,
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 3,
-                background: tagColor(t),
-                color: "#282a36",
                 padding: "2px 7px",
-                borderRadius: 3,
-                fontSize: 10,
-                fontWeight: 700,
                 cursor: "pointer",
                 opacity: on ? 1 : 0.35,
                 outline: on ? `2px solid ${D.green}` : "none",
@@ -218,20 +216,16 @@ export function TagArea({
       title="Click to edit tags"
     >
       {tags.length > 0
-        ? tags.map((t) => (
+        ? sortTagsForDisplay(tags).map((t) => (
             <span
               key={t}
               onMouseEnter={() => setHoveredTag(t)}
               onMouseLeave={() => setHoveredTag(null)}
               style={{
+                ...layeredTagChipStyle(t),
                 display: "inline-flex",
                 alignItems: "center",
-                background: tagColor(t),
-                color: "#282a36",
                 padding: hoveredTag === t ? "0 2px 0 5px" : "0 5px",
-                borderRadius: 3,
-                fontSize: 10,
-                fontWeight: 700,
                 whiteSpace: "nowrap",
                 cursor: "default",
               }}
@@ -243,7 +237,14 @@ export function TagArea({
                     e.stopPropagation();
                     onSaveTags(code, tags.filter((x) => x !== t));
                   }}
-                  style={{ marginLeft: 3, cursor: "pointer", fontWeight: 900, fontSize: 11, lineHeight: 1, color: "#282a36", opacity: 0.8 }}
+                  style={{
+                    marginLeft: 3,
+                    cursor: "pointer",
+                    fontWeight: 900,
+                    fontSize: 11,
+                    lineHeight: 1,
+                    opacity: 0.85,
+                  }}
                 >×</span>
               )}
             </span>

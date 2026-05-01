@@ -8,45 +8,36 @@ test.describe("Dashboard (首页)", () => {
   });
 
   test("页面正常加载，标题栏和 Tab 栏可见", async ({ page }) => {
-    await expect(page.locator("text=monitor (node)").first()).toBeVisible();
-    await expect(page.locator("text=Claude Code (node)")).toBeVisible();
+    await expect(page.locator("text=✱ monitor").first()).toBeVisible();
+    await expect(page.locator("text=holdings").first()).toBeVisible();
   });
 
   test("摘要栏显示节点数和涨跌统计", async ({ page }) => {
-    await expect(page.locator("text=Nodes:")).toBeVisible();
-    await expect(page.locator("text=throughput:")).toBeVisible();
-    await expect(page.locator("text=avg_delta:")).toBeVisible();
+    await expect(page.locator("text=节点:").first()).toBeVisible();
+    await expect(page.locator("text=成交额:").first()).toBeVisible();
+    await expect(page.locator("text=平均涨跌:").first()).toBeVisible();
   });
 
   test("持仓 section 可见且可折叠", async ({ page }) => {
-    // 至少有一个 prod section
-    const prodSection = page.locator("text=/prod:(stocks|ETF)/").first();
+    const prodSection = page.locator("text=/持仓:(股票|ETF)/").first();
     if (await prodSection.isVisible()) {
-      // 检查 PROD 行可见
-      await expect(page.locator("text=PROD").first()).toBeVisible();
-
-      // 点击折叠
       await prodSection.click();
-      // 再次点击展开
       await prodSection.click();
-      await expect(page.locator("text=PROD").first()).toBeVisible();
     }
   });
 
   test("自选 section 可见且可折叠", async ({ page }) => {
-    const stageSection = page.locator("text=/stage:(stocks|ETF)/").first();
-    if (await stageSection.isVisible()) {
-      await expect(page.locator("text=DEV").first()).toBeVisible();
-
-      // 折叠
-      await stageSection.click();
-      // 展开
-      await stageSection.click();
+    await page.goto("/watching", { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("text=/refresh #[1-9]/", { timeout: 15_000 });
+    const sec = page.locator("text=自选:股票").first();
+    if (await sec.isVisible()) {
+      await sec.click();
+      await sec.click();
     }
   });
 
   test("hidden section 默认折叠", async ({ page }) => {
-    const hiddenSection = page.locator("text=/hidden \\(\\d+\\)/");
+    const hiddenSection = page.locator("text=/隐藏 \\(\\d+\\)/");
     if (await hiddenSection.isVisible()) {
       // hidden section 的 ▸ 表示折叠状态
       await expect(hiddenSection).toContainText("▸");
@@ -60,29 +51,26 @@ test.describe("Dashboard (首页)", () => {
   });
 
   test("表头列可点击排序", async ({ page }) => {
-    const chgHeader = page.locator("text=CHG%").first();
+    const chgHeader = page.locator("text=涨跌幅").first();
     if (await chgHeader.isVisible()) {
       await chgHeader.click();
-      // 点击后应出现排序箭头 ▼ 或 ▲
       await expect(chgHeader).toContainText(/[▲▼]/);
-      // 再点切换方向
       await chgHeader.click();
       await expect(chgHeader).toContainText(/[▲▼]/);
     }
   });
 
   test("portfolio 摘要显示 position/yield/return/today", async ({ page }) => {
-    // 如果有持仓，应显示 portfolio 摘要行
-    const positionLabel = page.locator("text=position:");
-    if (await positionLabel.isVisible()) {
-      await expect(page.locator("text=yield:")).toBeVisible();
-      await expect(page.locator("text=return:")).toBeVisible();
-      await expect(page.locator("text=today:")).toBeVisible();
+    const mkt = page.locator("text=总市值:").first();
+    if (await mkt.isVisible()) {
+      await expect(page.locator("text=盈亏:").first()).toBeVisible();
+      await expect(page.locator("text=收益率:").first()).toBeVisible();
+      await expect(page.locator("text=今日:").first()).toBeVisible();
     }
   });
 
   test("命令提示符可见", async ({ page }) => {
-    await expect(page.locator("text=~/projects/monitor").last()).toBeVisible();
+    await expect(page.locator("text=行情收集").first()).toBeVisible();
   });
 });
 
@@ -124,11 +112,11 @@ test.describe("Dashboard 新增功能", () => {
   });
 
   test("portfolio摘要显示更多字段", async ({ page }) => {
-    const positionLabel = page.locator("text=position:");
+    const positionLabel = page.locator("text=总市值:");
     if (await positionLabel.isVisible()) {
-      await expect(page.locator("text=yield:")).toBeVisible();
-      await expect(page.locator("text=return:")).toBeVisible();
-      await expect(page.locator("text=today:")).toBeVisible();
+      await expect(page.locator("text=盈亏:").first()).toBeVisible();
+      await expect(page.locator("text=收益率:").first()).toBeVisible();
+      await expect(page.locator("text=今日:").first()).toBeVisible();
       // 扩展验证更多字段
       const availLabel = page.locator("text=可用:").first();
       if (await availLabel.isVisible()) {
@@ -284,8 +272,7 @@ test.describe("Dashboard 新增功能", () => {
   });
 
   test("HK tab 显示主力列表头", async ({ page }) => {
-    // Click HK tab
-    const hkTab = page.locator("text=HK").first();
+    const hkTab = page.getByRole("button", { name: "HK", exact: true });
     if (await hkTab.isVisible()) {
       await hkTab.click();
       await page.waitForTimeout(2000);

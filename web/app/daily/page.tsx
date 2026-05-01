@@ -182,9 +182,12 @@ export default function DailyPage() {
 
   const morning = data?.morning;
   const utcToday = new Date().toISOString().slice(0, 10);
-  const hasReport = Boolean(
-    data?.report && (data.date === utcToday || data.summaryFallback === true),
-  );
+  const report =
+    data?.report && (data.date === utcToday || data.summaryFallback === true)
+      ? data.report
+      : null;
+  const reportDate = data?.date ?? "";
+  const summaryFallback = data?.summaryFallback === true;
 
   return (
     <div
@@ -208,7 +211,7 @@ export default function DailyPage() {
         ) : (
           <>
             {/* 1. Daily Summary Card - 信号日报 (最上面) */}
-            {hasReport && data.report && (
+            {report && (
               <div
                 style={{
                   border: `1px solid ${D.purple}44`,
@@ -233,8 +236,8 @@ export default function DailyPage() {
                     {summaryOpen ? "\u25be" : "\u25b8"}
                   </span>
                   <span style={{ color: D.purple, fontWeight: 700, fontSize: 13 }}>
-                    信号日报 — {data.date}
-                    {data.summaryFallback && (
+                    信号日报 — {reportDate}
+                    {summaryFallback && (
                       <span style={{ color: D.comment, fontWeight: 400, marginLeft: 8 }}>
                         （今日尚未生成，展示最近一期）
                       </span>
@@ -242,7 +245,7 @@ export default function DailyPage() {
                   </span>
                 </div>
 
-                {data.summaryFallback && summaryOpen && (
+                {summaryFallback && summaryOpen && (
                   <div
                     style={{
                       padding: "8px 16px 0",
@@ -251,13 +254,13 @@ export default function DailyPage() {
                       lineHeight: 1.5,
                     }}
                   >
-                    以下为截至 {data.date} 的收盘复盘；生成今日日报后将自动替换。
+                    以下为截至 {reportDate} 的收盘复盘；生成今日日报后将自动替换。
                   </div>
                 )}
 
                 {summaryOpen && (
                   <div style={{ padding: "16px 20px", lineHeight: 1.7 }}>
-                    <TerminalMarkdown text={data.report} />
+                    <TerminalMarkdown text={report} />
                   </div>
                 )}
               </div>
@@ -371,7 +374,7 @@ export default function DailyPage() {
               </div>
             )}
 
-            {!morning && !hasReport && !closeEvent && (
+            {!morning && !report && !closeEvent && (
               <div style={{ color: D.comment, padding: "20px 0" }}>
                 # 暂无数据
                 <br />

@@ -10,11 +10,11 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { unlinkSync } from "fs";
 import { NextRequest } from "next/server";
+import { parseDaysAhead } from "./utils";
 
 const TEST_DB_PATH = join(tmpdir(), "test_earnings.db");
 let getEarnings: typeof import("./route").GET;
 let postEarnings: typeof import("./route").POST;
-let parseDaysAhead: typeof import("./route").parseDaysAhead;
 
 function setupTestDb() {
   cleanupTestDb();
@@ -59,7 +59,6 @@ beforeAll(async () => {
   const route = await import("./route");
   getEarnings = route.GET;
   postEarnings = route.POST;
-  parseDaysAhead = route.parseDaysAhead;
 });
 
 afterAll(() => {
@@ -73,6 +72,9 @@ describe("parseDaysAhead", () => {
     expect(parseDaysAhead(null)).toBe(7);
     expect(parseDaysAhead("")).toBe(7);
     expect(parseDaysAhead("abc")).toBe(7);
+  });
+
+  it("truncates fractional day values", () => {
     expect(parseDaysAhead("12.5")).toBe(12);
   });
 
@@ -118,6 +120,22 @@ describe("GET /api/earnings", () => {
   });
 
   it("respects days parameter", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const d1 = new Date();
+    d1.setDate(d1.getDate() + 2);
+    const d2 = new Date();
+    d2.setDate(d2.getDate() + 5);
+
+    const db = new Database(TEST_DB_PATH);
+    db.exec(`DELETE FROM earnings_calendar;`);
+    db.exec(`
+      INSERT INTO earnings_calendar (symbol, report_date, name, source, created_at, updated_at)
+      VALUES ('000001', '${d1.toISOString().slice(0, 10)}', '平安银行', 'sse', '${today}', '${today}');
+      INSERT INTO earnings_calendar (symbol, report_date, name, source, created_at, updated_at)
+      VALUES ('HK00700', '${d2.toISOString().slice(0, 10)}', '腾讯控股', 'hkex', '${today}', '${today}');
+    `);
+    db.close();
+
     const request = new NextRequest("http://localhost/api/earnings?days=3", { method: "GET" });
     const response = await getEarnings(request);
     expect(response.status).toBe(200);

@@ -19,7 +19,7 @@ const FAILURE_ERROR_MAX = 200;
 const FAILURE_CORRELATION_MAX = 64;
 
 /** Limit error/correlation length in JSON (paths/stack traces in job_runs.error). */
-export function redactFailureForApi(row: FailureRow): FailureRow {
+function redactFailureForApi(row: FailureRow): FailureRow {
   let err = row.error;
   if (err) {
     err = err.replace(/[\r\n]+/g, " ").trim();

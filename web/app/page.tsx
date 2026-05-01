@@ -8,6 +8,9 @@ import { AppTabs } from "./components/AppTabs";
 import { AppTitleBar } from "./components/AppTitleBar";
 import { MarketSwitch, type MarketTab } from "./components/MarketSwitch";
 import MarketSummaryBar from './components/MarketSummaryBar';
+import { DataTrustBar } from "./components/DataTrustBar";
+import { QuoteStaleBanner } from "./components/QuoteStaleBanner";
+import { StockTagChips } from "./components/StockTagChips";
 import { useMetrics } from "./providers/MetricsProvider";
 import { useTradePlans } from "./hooks/useTradePlans";
 import { StockDrawer } from "./components/StockDrawer";
@@ -53,8 +56,8 @@ export default function Page() {
 }
 
 function Home() {
-  const { services, ts, tick, loading, settings, fetchError, alertEvents, marketTurnover, hkdCnyRate, refresh } = useMetrics();
-  const { status: tradingStatus } = useTradingStatus();
+  const { services, ts, tick, loading, settings, fetchError, alertEvents, marketTurnover, hkdCnyRate, refresh, dataRuntimeHint } = useMetrics();
+  const { status: tradingStatus, loading: tradingStatusLoading } = useTradingStatus();
   // tab state: URL ?tab=A|HK, default by time (before 15:00 → A, after → HK)
   const searchParams = useSearchParams();
 
@@ -189,7 +192,6 @@ function Home() {
   const now = ts
     ? new Date(ts).toLocaleTimeString("zh-CN", { hour12: false })
     : "--:--:--";
-  const isStale = (ts > 0 && Date.now() - ts > pollMs * 3) || fetchError !== null;
 
 
   // ── 当前 Tab 统计 ──
@@ -223,19 +225,6 @@ function Home() {
     cursor: k ? "pointer" : "default",
     userSelect: "none",
     color: k && st.key === k ? D.yellow : D.pink,
-  });
-
-  /* ── Tag chip style ── */
-  const tagChipStyle = (tag: string): React.CSSProperties => ({
-    display: "inline-block",
-    padding: "1px 6px",
-    borderRadius: 3,
-    fontSize: 10,
-    marginRight: 3,
-    cursor: "pointer",
-    color: "#282a36",
-    background: tagColor(tag),
-    whiteSpace: "nowrap",
   });
 
   /* ── Holdings Row ── */
@@ -326,9 +315,11 @@ function Home() {
           {s.mainNetInflowPct != null ? `${s.mainNetInflowPct >= 0 ? "+" : ""}${s.mainNetInflowPct.toFixed(1)}%` : pad("-", 6, true)}
         </span>)}
         <span style={{ width: "12ch", overflow: "hidden", whiteSpace: "nowrap", marginLeft: 8 }}>
-          {(s.tags ?? []).map((t) => (
-            <span key={t} style={tagChipStyle(t)} onClick={(e) => { e.stopPropagation(); setFilterTag(t); }}>{t}</span>
-          ))}
+          <StockTagChips
+            tags={s.tags}
+            maxVisible={3}
+            onTagClick={(t, e) => { e.stopPropagation(); setFilterTag(t); }}
+          />
         </span>
       </div>
     );
@@ -379,9 +370,11 @@ function Home() {
           {s.mainNetInflowPct != null ? `${s.mainNetInflowPct >= 0 ? "+" : ""}${s.mainNetInflowPct.toFixed(1)}%` : pad("-", 6, true)}
         </span>)}
         <span style={{ width: "12ch", overflow: "hidden", whiteSpace: "nowrap", marginLeft: 8 }}>
-          {(s.tags ?? []).map((t) => (
-            <span key={t} style={tagChipStyle(t)} onClick={() => setFilterTag(t)}>{t}</span>
-          ))}
+          <StockTagChips
+            tags={s.tags}
+            maxVisible={3}
+            onTagClick={(t, e) => { e.stopPropagation(); setFilterTag(t); }}
+          />
         </span>
       </div>
     );
@@ -529,128 +522,23 @@ function Home() {
           </button>
         </div>
 
-        {/* watch header */}
-        <div style={{ color: D.comment, marginBottom: 6 }}>
-          <span>每 {pollMs / 1000} 秒轮询一次</span>
-          <span style={{ float: "right", display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ color: tradingStatus?.markets?.cn ? D.green : D.comment, fontSize: 11, fontWeight: 600 }}>● A股 {tradingStatus?.markets?.cn ? "交易中" : "休市"}</span>
-            <span style={{ color: tradingStatus?.markets?.hk ? D.green : D.comment, fontSize: 11, fontWeight: 600 }}>● 港股 {tradingStatus?.markets?.hk ? "交易中" : "休市"}</span>
-            <span style={{ color: D.comment }}>|</span>
-            {/* Freshness chip */}
-            {isStale && Date.now() - ts > pollMs * 10 ? (
-              // Very stale (>5 min) — show "已休市"
-              <span style={{
-                color: D.comment,
-                fontSize: 11,
-                fontWeight: 600,
-                background: "rgba(98, 114, 164, 0.15)",
-                border: `1px solid ${D.comment}`,
-                padding: "1px 8px",
-                borderRadius: 20,
-              }}>已休市</span>
-            ) : isStale ? (
-              // Stale (2–5 min) — show minutes in orange
-              <span style={{
-                color: D.orange,
-                fontSize: 11,
-                fontWeight: 600,
-                background: "rgba(255, 184, 108, 0.12)",
-                border: `1px solid ${D.orange}`,
-                padding: "1px 8px",
-                borderRadius: 20,
-              }}>数据 {Math.round((Date.now() - ts) / 60000)} 分钟前更新</span>
-            ) : (
-              // Fresh (<=2 min) — show seconds in green
-              <span style={{
-                color: D.green,
-                fontSize: 11,
-                fontWeight: 600,
-                background: "rgba(80, 250, 123, 0.10)",
-                border: `1px solid ${D.green}`,
-                padding: "1px 8px",
-                borderRadius: 20,
-              }}>数据 {Math.round((Date.now() - ts) / 1000)} 秒前更新</span>
-            )}
-            {/* Alert status pill */}
-            <span style={{
-              fontSize: 11,
-              fontWeight: 600,
-              color: isStale ? D.red : D.green,
-              background: isStale ? "rgba(255, 85, 85, 0.12)" : "rgba(80, 250, 123, 0.10)",
-              border: `1px solid ${isStale ? D.red : D.green}`,
-              padding: "1px 8px",
-              borderRadius: 20,
-            }}>告警 {isStale ? "过期" : "正常"}</span>
-            <span style={{ color: D.comment }}>|</span>
-            <span style={{ color: isStale ? D.red : D.comment }}>时间: {now}</span>
-            <span style={{ color: D.comment }}> #{tick}</span>
-          </span>
-        </div>
+        <DataTrustBar
+          pollMs={pollMs}
+          ts={ts}
+          tick={tick}
+          fetchError={fetchError}
+          tradingStatus={tradingStatus}
+          tradingLoading={tradingStatusLoading}
+          dataRuntimeHint={dataRuntimeHint}
+          pollHint={<span>每 {pollMs / 1000} 秒拉取 /api/metrics · 持仓</span>}
+        />
 
-        {/* stale warning/info banner — shows after > 3 min stale:
-            - A股交易中 → orange warning "行情已停止更新" (poller可能挂了)
-            - A股收盘 + 港股交易中 → gray "A股已收盘，港股仍在交易" (正常，无需警告)
-            - A股和港股都收盘 → gray "已休市" (正常休市)
-        */}
-        {isStale && (Date.now() - ts > pollMs * 6) && (
-          tradingStatus?.markets?.cn ? (
-          <div style={{
-            border: `1px solid ${D.orange}`,
-            borderLeft: `3px solid ${D.orange}`,
-            background: "rgba(255, 184, 108, 0.06)",
-            color: D.fg,
-            padding: "9px 16px",
-            borderRadius: 6,
-            marginBottom: 12,
-            fontSize: 12,
-            fontWeight: 500,
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-          }}>
-            <span style={{ color: D.orange, fontSize: 14 }}>⚠</span>
-            <span>
-              行情已停止更新 <span style={{ color: D.orange, fontWeight: 700 }}>{Math.round((Date.now() - ts) / 60000)}</span> 分钟 — 请检查 poller 进程是否在运行
-            </span>
-          </div>
-          ) : tradingStatus?.markets?.hk ? (
-          // A股收盘，港股仍在交易——数据陈旧是正常的，不警告
-          <div style={{
-            border: `1px solid ${D.comment}`,
-            borderLeft: `3px solid ${D.comment}`,
-            background: "rgba(98, 114, 164, 0.06)",
-            color: D.comment,
-            padding: "9px 16px",
-            borderRadius: 6,
-            marginBottom: 12,
-            fontSize: 12,
-            fontWeight: 500,
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-          }}>
-            <span>● A股已收盘，港股仍在交易</span>
-          </div>
-          ) : (
-          // A股和港股都收盘——正常休市
-          <div style={{
-            border: `1px solid ${D.comment}`,
-            borderLeft: `3px solid ${D.comment}`,
-            background: "rgba(98, 114, 164, 0.06)",
-            color: D.comment,
-            padding: "9px 16px",
-            borderRadius: 6,
-            marginBottom: 12,
-            fontSize: 12,
-            fontWeight: 500,
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-          }}>
-            <span>● 已休市，行情暂时停止更新</span>
-          </div>
-          )
-        )}
+        <QuoteStaleBanner
+          pollMs={pollMs}
+          ts={ts}
+          fetchError={fetchError}
+          tradingStatus={tradingStatus}
+        />
 
         {/* error banner */}
         {fetchError && (
@@ -715,7 +603,7 @@ function Home() {
 
           const holdHeader = (
             <div style={{ display: "flex", whiteSpace: "pre", color: D.pink, borderBottom: `1px solid ${D.currentLine}`, paddingBottom: 3, marginBottom: 2, fontWeight: 500 }}>
-              <span style={{ width: "9ch" }}> 类型</span>
+              <span style={{ width: "9ch" }}> 标记</span>
               <span style={hs("10ch", "id")} onClick={() => ht("id")}>代码{ha("id")}</span>
               <span style={{ width: "10ch" }}>名称</span>
               <span style={hs("10ch", "price", true)} onClick={() => ht("price")}>{pad("现价" + ha("price"), 9, true)}</span>
@@ -754,37 +642,37 @@ function Home() {
 
           return (
             <>
-              {/* ── pinned (starred) ── */}
+              {/* ── 置顶 ── */}
               {pinnedList.length > 0 && (
                 <>
                   <div style={{ color: D.comment, padding: "4px 0 1px" }}>
                     <span style={{ color: D.yellow }}>★</span>
-                    {" "}# ── pinned ({pinnedList.length}) ──
+                    {" "}# ── 置顶 ({pinnedList.length}) ──
                   </div>
                   {holdHeader}{pinnedList.map((s) => <HoldRow key={s.id} s={s} />)}
                 </>
               )}
 
-              {/* ── prod:stocks ── */}
+              {/* ── 持仓:股票 ── */}
               {prodStock.length > 0 && (
                 <>
-                  {secTitle("prod:stocks", prodStock.length, prodStockOpen, setProdStockOpen)}
+                  {secTitle("持仓:股票", prodStock.length, prodStockOpen, setProdStockOpen)}
                   {prodStockOpen && <>{holdHeader}{prodStock.map((s) => <HoldRow key={s.id} s={s} />)}</>}
                 </>
               )}
 
-              {/* ── prod:ETF ── */}
+              {/* ── 持仓:ETF ── */}
               {prodETF.length > 0 && (
                 <>
-                  {secTitle("prod:ETF", prodETF.length, prodETFOpen, setProdETFOpen)}
+                  {secTitle("持仓:ETF", prodETF.length, prodETFOpen, setProdETFOpen)}
                   {prodETFOpen && <>{holdHeader}{prodETF.map((s) => <HoldRow key={s.id} s={s} />)}</>}
                 </>
               )}
 
-              {/* ── hidden ── */}
+              {/* ── 隐藏 ── */}
               {hiddenList.length > 0 && (
                 <>
-                  {secTitle("hidden", hiddenList.length, hiddenOpen, setHiddenOpen, 0.6)}
+                  {secTitle("隐藏", hiddenList.length, hiddenOpen, setHiddenOpen, 0.6)}
                   {hiddenOpen && (
                     <>
                       {holdHeader}{hiddenList.map((s) => <HoldRow key={s.id} s={s} />)}

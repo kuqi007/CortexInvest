@@ -8,7 +8,7 @@ import { EditableCell } from "../components/EditableCell";
 import { Toast } from "../components/Toast";
 
 import type { WatchEntry, MonitorConfig } from "../types";
-import { tagColor } from "../lib/tag-utils";
+import { layeredTagChipStyle } from "../lib/tag-utils";
 import { TagArea } from "../components/TagArea";
 
 function TabBar({ holdingsCount, watchingCount }: { holdingsCount: number; watchingCount: number }) {
@@ -836,12 +836,8 @@ export default function ManagePage() {
                       onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
                     >
                       <span style={{
-                        background: tagColor(t),
-                        color: "#282a36",
+                        ...layeredTagChipStyle(t),
                         padding: "0 6px",
-                        borderRadius: 3,
-                        fontSize: 10,
-                        fontWeight: 700,
                       }}>{t}</span>
                     </div>
                   ))}
