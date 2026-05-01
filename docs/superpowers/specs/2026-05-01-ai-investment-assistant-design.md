@@ -268,24 +268,24 @@ Before enabling Feishu for new signal types:
 ## Recommended First PR Sequence
 
 1. Schema foundation:
-   - versioned migration runner
-   - `schema_migrations`
-   - `job_requests`
-   - `job_runs`
-   - `ai_investment_events`
-   - `daily_summaries.report_md`
-   - migration/init tests
+  - versioned migration runner
+  - `schema_migrations`
+  - `job_requests`
+  - `job_runs`
+  - `ai_investment_events`
+  - `daily_summaries.report_md`
+  - migration/init tests
 2. Earnings trigger contract:
-   - `/api/earnings` inserts `job_requests`
-   - daemon claims jobs and writes `job_runs`
+  - `/api/earnings` inserts `job_requests`
+  - daemon claims jobs and writes `job_runs`
 3. Health and startup observability:
-   - `/api/health`
-   - earnings daemon in start/status/stop
+  - `/api/health`
+  - earnings daemon in start/status/stop
 4. Daily summary contract:
-   - persist and expose `report_md`
-   - fallback summary window
+  - persist and expose `report_md`
+  - fallback summary window
 5. Notifier AI-event skeleton:
-   - consume pending AI events
-   - convert eligible events to `alert_events`
+  - consume pending AI events
+  - convert eligible events to `alert_events`
 
 Main-wave, trend-reversal, recommendation apply APIs, Today Action Center, and new Feishu signal escalation are intentionally out of scope for the first PR.
