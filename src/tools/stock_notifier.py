@@ -1426,6 +1426,8 @@ def write_alert_events(alerts: list[dict]):
             display = a.get("display", a.get("message", ""))
         elif kind == "tick_monitor":
             display = a.get("display", a.get("message", ""))
+        elif kind == "ai_investment":
+            display = a.get("display", a.get("title", a.get("message", "")))
         else:
             # title 格式: "股票名 ↑+4.5% → 217.45"，直接用
             title = a.get("title", "")
@@ -1507,6 +1509,144 @@ def write_alert_events(alerts: list[dict]):
     finally:
         if conn:
             conn.close()
+
+
+# ══════════════════════════════════════════
+# 5. AI investment events → alert_events (single notifier entry point)
+# ══════════════════════════════════════════
+
+AI_INVESTMENT_EVENT_BATCH = 20
+
+
+def _map_ai_investment_row_to_alert(row: dict) -> tuple[dict | None, str]:
+    """Build one alert dict for write_alert_events / stealth_dispatch; return notify_status to persist.
+
+    Returns (None, status) when the row should be marked suppressed without an alert.
+    """
+    scope = (row.get("delivery_scope") or "web_only").strip()
+    if scope == "suppressed":
+        return None, "suppressed"
+
+    sev = (row.get("severity") or "normal").strip()
+    sym = (row.get("symbol") or "").strip()
+    title = (row.get("title") or "AI").strip()
+    summary = (row.get("summary") or "").strip()
+    eid = row.get("id") or ""
+    verdict = (row.get("verdict") or "").strip()
+    message = f"[AI {eid}] {summary}" if summary else f"[AI {eid}] {title}"
+    if len(message) > 900:
+        message = message[:897] + "..."
+
+    line = f"{sym} {title}".strip() if sym else title
+    if verdict:
+        line = f"{line} — {verdict[:120]}"
+
+    if scope == "web_only":
+        level = 3
+        nstatus = "web_only"
+    elif scope == "daily_only":
+        level = 3
+        nstatus = "web_only"
+    elif scope == "feishu_high":
+        if sev in ("critical", "high"):
+            level = 1
+        else:
+            level = 2
+        nstatus = "sent"
+    elif scope == "feishu_normal":
+        level = 2
+        nstatus = "sent"
+    else:
+        level = 3
+        nstatus = "web_only"
+
+    alert = {
+        "title": title,
+        "message": message,
+        "symbol": sym,
+        "display": line[:500],
+        "_kind": "ai_investment",
+        "_level": level,
+        "_change_pct": 0.0,
+        "_stealth": message[:500],
+    }
+    return alert, nstatus
+
+
+def _update_ai_investment_notify_status(event_id: str, status: str) -> None:
+    from src.sim_trading.db import get_connection
+
+    now_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            UPDATE ai_investment_events
+            SET notify_status = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (status, now_iso, event_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def consume_pending_ai_investment_events() -> int:
+    """Drain pending rows from ai_investment_events into alert_events and update notify_status.
+
+    Intended to be called periodically from the notifier main loop (not from other daemons).
+    Returns the number of rows finalized (including suppressed without an alert).
+    """
+    from src.sim_trading.db import get_connection
+
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT * FROM ai_investment_events
+            WHERE notify_status = 'pending'
+            ORDER BY created_at ASC
+            LIMIT ?
+            """,
+            (AI_INVESTMENT_EVENT_BATCH,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    if not rows:
+        return 0
+
+    done = 0
+    for row in rows:
+        r = dict(row)
+        eid = r.get("id")
+        if not eid:
+            continue
+        try:
+            alert, nstatus = _map_ai_investment_row_to_alert(r)
+            if alert is None:
+                _update_ai_investment_notify_status(eid, nstatus)
+                done += 1
+                continue
+
+            write_alert_events([alert])
+            lvl = alert.get("_level", 3)
+            if lvl == 1:
+                stealth_dispatch([alert], sound="default")
+            elif lvl == 2:
+                stealth_dispatch([alert], sound="")
+            _update_ai_investment_notify_status(eid, nstatus)
+            done += 1
+        except Exception as e:
+            logger.warning("ai_investment_events id=%s failed: %s", eid, e)
+            try:
+                _update_ai_investment_notify_status(eid, "failed")
+            except Exception as e2:
+                logger.warning("ai_investment_events id=%s mark failed: %s", eid, e2)
+            done += 1
+
+    return done
 
 
 # ══════════════════════════════════════════
@@ -3260,6 +3400,8 @@ def run():
     plan_engine = TradePlanEngine()
     watchdog = DataFreshnessWatchdog(poll_interval=settings.get("poll_interval", 30))
     last_heartbeat = int(time.time())
+    last_ai_investment_poll = 0.0
+    AI_INVESTMENT_POLL_INTERVAL = 5.0
 
     # ── 注册通用形态引擎（新增形态只需在此 register 一行）──
     register_pattern_engine(GapFadeEngine(config))
@@ -3539,6 +3681,15 @@ def run():
                     notify("Daily Report", "Signal digest ready", sound="")
                 except Exception as e:
                     logger.error(f"Daily summary generation failed: {e}")
+
+        # ── AI investment events (DB queue → alert_events, notifier-only dispatch) ──
+        ts_poll = time.time()
+        if ts_poll - last_ai_investment_poll >= AI_INVESTMENT_POLL_INTERVAL:
+            last_ai_investment_poll = ts_poll
+            try:
+                consume_pending_ai_investment_events()
+            except Exception as e:
+                logger.warning("consume_pending_ai_investment_events failed: %s", e)
 
         # Heartbeat refresh
         now = int(time.time())
