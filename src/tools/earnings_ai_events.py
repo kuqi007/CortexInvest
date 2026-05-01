@@ -8,6 +8,7 @@ Phase 2: 持仓 + star 股票 × earnings_calendar → ai_investment_events（�
 - metrics 附带：对应市场 `earnings_market`、`trading_sessions_until_report`（(ref, report] 交易日数）；
   若 `earnings_history` 有可比 eps/营收，写入环比增幅字段。
 - 倒计时 / 交易日倒计时分支尽力跑 `analyze_pre_earnings_bullish_bearish`，写入 `metrics.pre_earnings` 与可选 `recommendation_json`。
+- 预判扫描按 `(matched, ref_date)` 进程内缓存（TTL 默认 4h，条数上限 512；`EARNINGS_PRE_SCAN_CACHE_TTL_SEC` 覆盖）。
 - 自然日窗口 T5/T3/T1/T0（dedupe `earnings:{tag}:…`）。
 - 若自然日未命中且披露日在未来：按 **(今日, 披露日]** 交易日数命中 T5/T3/T1/T0 时追加 `earnings_countdown_session`（dedupe `earnings:sess{tag}:…`）。
 - dedupe_key 幂等。
@@ -15,9 +16,13 @@ Phase 2: 持仓 + star 股票 × earnings_calendar → ai_investment_events（�
 
 from __future__ import annotations
 
+import copy
 import json
+import os
 import uuid
+from collections import OrderedDict
 from datetime import date, datetime, timedelta
+from time import time
 from typing import Any, Optional
 
 from src.sim_trading.db import get_connection
@@ -41,6 +46,23 @@ SOURCE = "earnings_calendar"
 
 # 预计披露日过后的跟进窗口（自然日，含 report_date 次日直到第 N 天）
 POST_REPORT_WINDOW_DAYS = 7
+
+# 预判扫描缓存（daemon 同进程内多标的 / 多日历行去重）
+_PRE_EARNINGS_SCAN_CACHE: OrderedDict[str, tuple[float, dict[str, Any]]] = OrderedDict()
+_PRE_EARNINGS_SCAN_CACHE_MAX_KEYS = 512
+
+
+def _pre_earnings_scan_cache_ttl_sec() -> float:
+    raw = (os.environ.get("EARNINGS_PRE_SCAN_CACHE_TTL_SEC") or "").strip()
+    if raw.isdigit():
+        v = int(raw, 10)
+        if 0 <= v <= 86400 * 7:
+            return float(v)
+    return 4 * 3600.0
+
+
+def _pre_earnings_scan_cache_key(matched: str, ref: date) -> str:
+    return f"{matched}|{ref.isoformat()}"
 
 
 def infer_earnings_market(watch_symbol: str) -> str:
@@ -197,8 +219,8 @@ def _enrich_metrics_and_reasons(
         reasons.append(f"历史披露营收较上一期: {rev_ch:+.1f}%")
 
 
-def _pre_earnings_scan_for_emit(cal_sym: str, matched: str, name: str) -> dict[str, Any]:
-    """调用 earnings_calendar 预判扫描（尽力而为，失败返回空 dict）。"""
+def _pre_earnings_scan_compute(cal_sym: str, matched: str, name: str) -> dict[str, Any]:
+    """调用 earnings_calendar 预判扫描（无缓存；尽力而为，失败返回空 dict）。"""
     try:
         from src.tools.earnings_calendar import (
             analyze_pre_earnings_bullish_bearish,
@@ -271,15 +293,35 @@ def _pre_earnings_scan_for_emit(cal_sym: str, matched: str, name: str) -> dict[s
     }
 
 
+def _pre_earnings_scan_for_emit(
+    cal_sym: str, matched: str, name: str, ref: date
+) -> dict[str, Any]:
+    """预判扫描 + 按 (matched, ref 自然日) 进程内 TTL 缓存。"""
+    key = _pre_earnings_scan_cache_key(matched, ref)
+    now = time()
+    ttl = _pre_earnings_scan_cache_ttl_sec()
+    if key in _PRE_EARNINGS_SCAN_CACHE:
+        ts, payload = _PRE_EARNINGS_SCAN_CACHE.pop(key)
+        if now - ts < ttl:
+            _PRE_EARNINGS_SCAN_CACHE[key] = (ts, payload)
+            return copy.deepcopy(payload)
+    out = _pre_earnings_scan_compute(cal_sym, matched, name)
+    while len(_PRE_EARNINGS_SCAN_CACHE) >= _PRE_EARNINGS_SCAN_CACHE_MAX_KEYS:
+        _PRE_EARNINGS_SCAN_CACHE.popitem(last=False)
+    _PRE_EARNINGS_SCAN_CACHE[key] = (now, copy.deepcopy(out))
+    return copy.deepcopy(out)
+
+
 def _apply_pre_earnings_scan(
     metrics: dict[str, Any],
     reasons: list[str],
     cal_sym: str,
     matched: str,
     name: str,
+    ref: date,
 ) -> Optional[str]:
     """合并预判到 metrics / reasons，返回 recommendation_json 或 None。"""
-    block = _pre_earnings_scan_for_emit(cal_sym, matched, name)
+    block = _pre_earnings_scan_for_emit(cal_sym, matched, name, ref)
     if not block:
         return None
     metrics.update(block)
@@ -462,7 +504,7 @@ def emit_holdings_star_earnings_ai_events(
                     conn_ins, metrics, reasons, cal_sym, matched, ref, rd
                 )
                 recommendation_j = _apply_pre_earnings_scan(
-                    metrics, reasons, cal_sym, matched, name
+                    metrics, reasons, cal_sym, matched, name, ref
                 )
             elif -POST_REPORT_WINDOW_DAYS <= days_until <= -1:
                 days_past = -days_until
@@ -523,7 +565,7 @@ def emit_holdings_star_earnings_ai_events(
                     conn_ins, metrics, reasons, cal_sym, matched, ref, rd
                 )
                 recommendation_j = _apply_pre_earnings_scan(
-                    metrics, reasons, cal_sym, matched, name
+                    metrics, reasons, cal_sym, matched, name, ref
                 )
             else:
                 continue

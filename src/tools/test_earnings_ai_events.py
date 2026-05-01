@@ -13,8 +13,10 @@ from src.tools.earnings_ai_events import (
 
 
 @pytest.fixture(autouse=True)
-def _disable_pre_earnings_network_by_default(monkeypatch):
+def _disable_pre_earnings_network_by_default(request, monkeypatch):
     """避免各用例隐式拉财务/akshare；需要预判的用例再单独 patch。"""
+    if request.function.__name__ == "test_pre_earnings_cache_reuses_compute":
+        return
     monkeypatch.setattr(
         "src.tools.earnings_ai_events._pre_earnings_scan_for_emit",
         lambda *_a, **_k: {},
@@ -54,7 +56,7 @@ def test_countdown_includes_pre_earnings_when_scan_returns(tmp_path, monkeypatch
     db.init_config_db()
     db.init_trading_db()
 
-    def fake_scan(cal_sym, matched, name):
+    def fake_scan(cal_sym, matched, name, ref):
         return {
             "pre_earnings": {
                 "verdict": "bullish",
@@ -66,10 +68,7 @@ def test_countdown_includes_pre_earnings_when_scan_returns(tmp_path, monkeypatch
             }
         }
 
-    monkeypatch.setattr(
-        "src.tools.earnings_ai_events._pre_earnings_scan_for_emit",
-        fake_scan,
-    )
+    monkeypatch.setattr("src.tools.earnings_ai_events._pre_earnings_scan_for_emit", fake_scan)
 
     conn = db.get_config_connection()
     conn.execute(
@@ -125,6 +124,35 @@ def test_countdown_includes_pre_earnings_when_scan_returns(tmp_path, monkeypatch
     rec = json.loads(row["recommendation_json"])
     assert rec["pre_earnings_verdict"] == "bullish"
     assert rec["pre_earnings_score"] == 3.2
+
+
+def test_pre_earnings_cache_reuses_compute(monkeypatch):
+    import src.tools.earnings_ai_events as eae
+
+    eae._PRE_EARNINGS_SCAN_CACHE.clear()
+    calls = {"n": 0}
+
+    def fake_compute(cal_sym, matched, name):
+        calls["n"] += 1
+        return {
+            "pre_earnings": {
+                "verdict": "neutral",
+                "score": 0.0,
+                "reasons_sample": [],
+                "symbol_used": matched,
+                "metrics_nonempty": False,
+                "source": "unit",
+            }
+        }
+
+    monkeypatch.setattr(eae, "_pre_earnings_scan_compute", fake_compute)
+    ref = date(2026, 1, 1)
+    eae._pre_earnings_scan_for_emit("600000", "600000", "x", ref)
+    eae._pre_earnings_scan_for_emit("600000", "600000", "x", ref)
+    assert calls["n"] == 1
+
+    eae._pre_earnings_scan_for_emit("600000", "600000", "x", date(2026, 1, 2))
+    assert calls["n"] == 2
 
 
 def test_emit_t5_creates_pending_web_only(tmp_path, monkeypatch):
