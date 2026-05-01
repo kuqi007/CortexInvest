@@ -7,6 +7,7 @@ Phase 2: 持仓 + star 股票 × earnings_calendar → ai_investment_events（�
 - 跟进：披露日已过、且在过后 N 个自然日内 → earnings_post_window（持仓 → feishu_normal）。
 - metrics 附带：对应市场 `earnings_market`、`trading_sessions_until_report`（(ref, report] 交易日数）；
   若 `earnings_history` 有可比 eps/营收，写入环比增幅字段。
+- 倒计时 / 交易日倒计时分支尽力跑 `analyze_pre_earnings_bullish_bearish`，写入 `metrics.pre_earnings` 与可选 `recommendation_json`。
 - 自然日窗口 T5/T3/T1/T0（dedupe `earnings:{tag}:…`）。
 - 若自然日未命中且披露日在未来：按 **(今日, 披露日]** 交易日数命中 T5/T3/T1/T0 时追加 `earnings_countdown_session`（dedupe `earnings:sess{tag}:…`）。
 - dedupe_key 幂等。
@@ -196,6 +197,109 @@ def _enrich_metrics_and_reasons(
         reasons.append(f"历史披露营收较上一期: {rev_ch:+.1f}%")
 
 
+def _pre_earnings_scan_for_emit(cal_sym: str, matched: str, name: str) -> dict[str, Any]:
+    """调用 earnings_calendar 预判扫描（尽力而为，失败返回空 dict）。"""
+    try:
+        from src.tools.earnings_calendar import (
+            analyze_pre_earnings_bullish_bearish,
+            fetch_profit_forecast,
+            get_stock_financial_metrics,
+        )
+    except Exception as e:
+        logger.debug("pre_earnings import failed: %s", e)
+        return {}
+
+    variants = symbol_lookup_variants(cal_sym, matched)
+    if not variants:
+        return {}
+
+    metrics_fc: dict = {}
+    for c in variants:
+        try:
+            m = get_stock_financial_metrics(c)
+        except Exception as e:
+            logger.debug("get_stock_financial_metrics %s: %s", c, e)
+            m = {}
+        if m:
+            metrics_fc = m
+            break
+
+    forecast = None
+    for c in variants:
+        flat = _strip_cn_prefix(c)
+        if flat.isdigit() and len(flat) == 6:
+            try:
+                forecast = fetch_profit_forecast(flat)
+            except Exception as e:
+                logger.debug("fetch_profit_forecast %s: %s", flat, e)
+                forecast = None
+            if forecast:
+                break
+    if forecast is None:
+        for c in variants:
+            try:
+                forecast = fetch_profit_forecast(c)
+            except Exception as e:
+                logger.debug("fetch_profit_forecast %s: %s", c, e)
+                forecast = None
+            if forecast:
+                break
+
+    sym_tag = variants[0]
+    try:
+        analysis = analyze_pre_earnings_bullish_bearish(
+            sym_tag,
+            name,
+            metrics_fc,
+            forecast,
+            {"price": 0.0, "pct_change": 0.0},
+        )
+    except Exception as e:
+        logger.debug("analyze_pre_earnings_bullish_bearish failed: %s", e)
+        return {}
+
+    reasons = analysis.get("reasons") or []
+    return {
+        "pre_earnings": {
+            "verdict": analysis.get("verdict"),
+            "score": analysis.get("score"),
+            "reasons_sample": reasons[:8],
+            "symbol_used": sym_tag,
+            "metrics_nonempty": bool(metrics_fc),
+            "source": "analyze_pre_earnings_bullish_bearish",
+        }
+    }
+
+
+def _apply_pre_earnings_scan(
+    metrics: dict[str, Any],
+    reasons: list[str],
+    cal_sym: str,
+    matched: str,
+    name: str,
+) -> Optional[str]:
+    """合并预判到 metrics / reasons，返回 recommendation_json 或 None。"""
+    block = _pre_earnings_scan_for_emit(cal_sym, matched, name)
+    if not block:
+        return None
+    metrics.update(block)
+    pex = block.get("pre_earnings") or {}
+    for line in (pex.get("reasons_sample") or [])[:2]:
+        reasons.append(f"预判参考: {line}")
+    verdict = pex.get("verdict")
+    score = pex.get("score")
+    if verdict is None or score is None:
+        return None
+    return json.dumps(
+        {
+            "stance": "observe",
+            "pre_earnings_verdict": verdict,
+            "pre_earnings_score": score,
+        },
+        ensure_ascii=False,
+    )
+
+
 def _strip_cn_prefix(sym: str) -> str:
     s = (sym or "").strip().upper()
     for p in ("SH", "SZ", "BJ"):
@@ -328,6 +432,8 @@ def emit_holdings_star_earnings_ai_events(
             days_until = (rd - ref).days
             is_holding = bool(watch_roles.get(matched))
 
+            recommendation_j: Optional[str] = None
+
             window = next((w for w in COUNTDOWN_DAYS if w[0] == days_until), None)
             if window is not None:
                 _days, tag, severity, label_cn = window
@@ -354,6 +460,9 @@ def emit_holdings_star_earnings_ai_events(
                 event_type = "earnings_countdown"
                 _enrich_metrics_and_reasons(
                     conn_ins, metrics, reasons, cal_sym, matched, ref, rd
+                )
+                recommendation_j = _apply_pre_earnings_scan(
+                    metrics, reasons, cal_sym, matched, name
                 )
             elif -POST_REPORT_WINDOW_DAYS <= days_until <= -1:
                 days_past = -days_until
@@ -413,6 +522,9 @@ def emit_holdings_star_earnings_ai_events(
                 _enrich_metrics_and_reasons(
                     conn_ins, metrics, reasons, cal_sym, matched, ref, rd
                 )
+                recommendation_j = _apply_pre_earnings_scan(
+                    metrics, reasons, cal_sym, matched, name
+                )
             else:
                 continue
 
@@ -446,7 +558,7 @@ def emit_holdings_star_earnings_ai_events(
                         summary,
                         json.dumps(reasons, ensure_ascii=False),
                         json.dumps(metrics, ensure_ascii=False),
-                        None,
+                        recommendation_j,
                         "pending",
                         now_iso,
                         now_iso,

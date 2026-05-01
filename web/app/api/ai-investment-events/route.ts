@@ -85,7 +85,7 @@ export async function GET(request: Request) {
   try {
     const cols = `id, event_date, symbol, name, source, event_type, severity, delivery_scope,
                   verdict, confidence, dedupe_key, title, summary, reasons_json, metrics_json,
-                  notify_status, created_at, updated_at`;
+                  recommendation_json, notify_status, created_at, updated_at`;
 
     const clauses: string[] = [];
     const params: unknown[] = [];
