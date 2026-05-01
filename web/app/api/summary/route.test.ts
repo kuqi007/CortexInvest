@@ -168,4 +168,51 @@ describe("GET /api/summary", () => {
     const body = await response.json();
     expect(body.data.perStock).toEqual([]);
   });
+
+  it("falls back to latest prior daily summary when today has no row", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const y = new Date();
+    y.setUTCDate(y.getUTCDate() - 1);
+    const yesterday = y.toISOString().slice(0, 10);
+
+    const db = new Database(TEST_DB_PATH);
+    db.exec("DELETE FROM daily_summaries;");
+    db.exec("DELETE FROM morning_briefings;");
+    db.exec(`
+      INSERT INTO daily_summaries (date, market, stats_json, per_stock_json, report_md, generated_at)
+      VALUES ('${yesterday}', 'A-share', '{}', '[]', '# Prior session', 1714000000);
+    `);
+    db.close();
+
+    const response = await getSummary();
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.data.date).toBe(yesterday);
+    expect(body.data.report).toBe("# Prior session");
+    expect(body.data.summaryFallback).toBe(true);
+    expect(body.data.morning).toBeNull();
+  });
+
+  it("fallback summary still attaches today morning briefing when present", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const y = new Date();
+    y.setUTCDate(y.getUTCDate() - 1);
+    const yesterday = y.toISOString().slice(0, 10);
+
+    const db = new Database(TEST_DB_PATH);
+    db.exec("DELETE FROM daily_summaries;");
+    db.exec("DELETE FROM morning_briefings;");
+    db.exec(`
+      INSERT INTO daily_summaries (date, market, stats_json, per_stock_json, report_md, generated_at)
+      VALUES ('${yesterday}', 'A-share', '{}', '[]', '# Old report', 1714000000);
+      INSERT INTO morning_briefings (date, generated_at, content_json)
+      VALUES ('${today}', '2024-04-26T08:00:00Z', '{"title": "Today AM"}');
+    `);
+    db.close();
+
+    const response = await getSummary();
+    const body = await response.json();
+    expect(body.data.summaryFallback).toBe(true);
+    expect(body.data.morning).toEqual({ title: "Today AM" });
+  });
 });
