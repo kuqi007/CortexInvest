@@ -9,8 +9,8 @@ import { AppTitleBar } from "./components/AppTitleBar";
 import { MarketSwitch, type MarketTab } from "./components/MarketSwitch";
 import MarketSummaryBar from './components/MarketSummaryBar';
 import { DataTrustBar } from "./components/DataTrustBar";
+import { QuoteStaleBanner } from "./components/QuoteStaleBanner";
 import { StockTagChips } from "./components/StockTagChips";
-import { computeQuoteTrust } from "./lib/data-trust";
 import { useMetrics } from "./providers/MetricsProvider";
 import { useTradePlans } from "./hooks/useTradePlans";
 import { StockDrawer } from "./components/StockDrawer";
@@ -192,8 +192,6 @@ function Home() {
   const now = ts
     ? new Date(ts).toLocaleTimeString("zh-CN", { hour12: false })
     : "--:--:--";
-  const quoteTrust = computeQuoteTrust({ ts, pollMs, fetchError, tradingStatus });
-  const quoteAgeMs = ts > 0 ? Date.now() - ts : 0;
 
 
   // ── 当前 Tab 统计 ──
@@ -532,71 +530,15 @@ function Home() {
           tradingStatus={tradingStatus}
           tradingLoading={tradingStatusLoading}
           dataRuntimeHint={dataRuntimeHint}
-          pollHint={<span>每 {pollMs / 1000} 秒轮询一次（Web → /api/metrics）</span>}
+          pollHint={<span>每 {pollMs / 1000} 秒拉取 /api/metrics · 持仓</span>}
         />
 
-        {/* Context banner — snapshot age vs session; skipped when fetch failed (error strip handles that) */}
-        {!fetchError && ts > 0 && quoteAgeMs > pollMs * 6 && (
-          tradingStatus?.markets?.cn ? (
-          <div style={{
-            border: `1px solid ${D.orange}`,
-            borderLeft: `3px solid ${D.orange}`,
-            background: "rgba(255, 184, 108, 0.06)",
-            color: D.fg,
-            padding: "9px 16px",
-            borderRadius: 6,
-            marginBottom: 12,
-            fontSize: 12,
-            fontWeight: 500,
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-          }}>
-            <span style={{ color: D.orange, fontSize: 14 }}>⚠</span>
-            <span>
-              A股交易时段 · 行情快照已 <span style={{ color: D.orange, fontWeight: 700 }}>{Math.round(quoteAgeMs / 60000)}</span> 分钟未刷新 — 优先检查 poller / trading.db 写入
-            </span>
-          </div>
-          ) : tradingStatus?.markets?.hk ? (
-          <div style={{
-            border: `1px solid ${D.comment}`,
-            borderLeft: `3px solid ${D.comment}`,
-            background: "rgba(98, 114, 164, 0.06)",
-            color: D.comment,
-            padding: "9px 16px",
-            borderRadius: 6,
-            marginBottom: 12,
-            fontSize: 12,
-            fontWeight: 500,
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-          }}>
-            <span>● A股已收盘，港股仍在交易 — 快照 age 偏大通常与 A 股侧停更有关；仍以 SQLite last 时间为准</span>
-          </div>
-          ) : (
-          <div style={{
-            border: `1px solid ${D.comment}`,
-            borderLeft: `3px solid ${D.comment}`,
-            background: "rgba(98, 114, 164, 0.06)",
-            color: D.comment,
-            padding: "9px 16px",
-            borderRadius: 6,
-            marginBottom: 12,
-            fontSize: 12,
-            fontWeight: 500,
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-          }}>
-            <span>
-              ● {quoteTrust === "CLOSED_STALE"
-                ? "休市 · 快照偏旧（过久未见 DB 写入），确认 poller 是否停用"
-                : "休市 · CLOSED — last 行情时间见顶栏"}
-            </span>
-          </div>
-          )
-        )}
+        <QuoteStaleBanner
+          pollMs={pollMs}
+          ts={ts}
+          fetchError={fetchError}
+          tradingStatus={tradingStatus}
+        />
 
         {/* error banner */}
         {fetchError && (
@@ -661,7 +603,7 @@ function Home() {
 
           const holdHeader = (
             <div style={{ display: "flex", whiteSpace: "pre", color: D.pink, borderBottom: `1px solid ${D.currentLine}`, paddingBottom: 3, marginBottom: 2, fontWeight: 500 }}>
-              <span style={{ width: "9ch" }}> 类型</span>
+              <span style={{ width: "9ch" }}> 标记</span>
               <span style={hs("10ch", "id")} onClick={() => ht("id")}>代码{ha("id")}</span>
               <span style={{ width: "10ch" }}>名称</span>
               <span style={hs("10ch", "price", true)} onClick={() => ht("price")}>{pad("现价" + ha("price"), 9, true)}</span>
@@ -700,37 +642,37 @@ function Home() {
 
           return (
             <>
-              {/* ── pinned (starred) ── */}
+              {/* ── 置顶 ── */}
               {pinnedList.length > 0 && (
                 <>
                   <div style={{ color: D.comment, padding: "4px 0 1px" }}>
                     <span style={{ color: D.yellow }}>★</span>
-                    {" "}# ── pinned ({pinnedList.length}) ──
+                    {" "}# ── 置顶 ({pinnedList.length}) ──
                   </div>
                   {holdHeader}{pinnedList.map((s) => <HoldRow key={s.id} s={s} />)}
                 </>
               )}
 
-              {/* ── prod:stocks ── */}
+              {/* ── 持仓:股票 ── */}
               {prodStock.length > 0 && (
                 <>
-                  {secTitle("prod:stocks", prodStock.length, prodStockOpen, setProdStockOpen)}
+                  {secTitle("持仓:股票", prodStock.length, prodStockOpen, setProdStockOpen)}
                   {prodStockOpen && <>{holdHeader}{prodStock.map((s) => <HoldRow key={s.id} s={s} />)}</>}
                 </>
               )}
 
-              {/* ── prod:ETF ── */}
+              {/* ── 持仓:ETF ── */}
               {prodETF.length > 0 && (
                 <>
-                  {secTitle("prod:ETF", prodETF.length, prodETFOpen, setProdETFOpen)}
+                  {secTitle("持仓:ETF", prodETF.length, prodETFOpen, setProdETFOpen)}
                   {prodETFOpen && <>{holdHeader}{prodETF.map((s) => <HoldRow key={s.id} s={s} />)}</>}
                 </>
               )}
 
-              {/* ── hidden ── */}
+              {/* ── 隐藏 ── */}
               {hiddenList.length > 0 && (
                 <>
-                  {secTitle("hidden", hiddenList.length, hiddenOpen, setHiddenOpen, 0.6)}
+                  {secTitle("隐藏", hiddenList.length, hiddenOpen, setHiddenOpen, 0.6)}
                   {hiddenOpen && (
                     <>
                       {holdHeader}{hiddenList.map((s) => <HoldRow key={s.id} s={s} />)}

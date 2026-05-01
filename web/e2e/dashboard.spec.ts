@@ -19,7 +19,7 @@ test.describe("Dashboard (首页)", () => {
   });
 
   test("持仓 section 可见且可折叠", async ({ page }) => {
-    const prodSection = page.locator("text=/prod:(stocks|ETF)/").first();
+    const prodSection = page.locator("text=/持仓:(股票|ETF)/").first();
     if (await prodSection.isVisible()) {
       await prodSection.click();
       await prodSection.click();
@@ -37,7 +37,7 @@ test.describe("Dashboard (首页)", () => {
   });
 
   test("hidden section 默认折叠", async ({ page }) => {
-    const hiddenSection = page.locator("text=/hidden \\(\\d+\\)/");
+    const hiddenSection = page.locator("text=/隐藏 \\(\\d+\\)/");
     if (await hiddenSection.isVisible()) {
       // hidden section 的 ▸ 表示折叠状态
       await expect(hiddenSection).toContainText("▸");

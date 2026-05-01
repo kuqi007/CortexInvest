@@ -9,6 +9,7 @@ import { AppTitleBar } from "../components/AppTitleBar";
 import { MarketSwitch, type MarketTab } from "../components/MarketSwitch";
 import MarketSummaryBar from "../components/MarketSummaryBar";
 import { DataTrustBar } from "../components/DataTrustBar";
+import { QuoteStaleBanner } from "../components/QuoteStaleBanner";
 import { StockTagChips } from "../components/StockTagChips";
 import { useMetrics } from "../providers/MetricsProvider";
 import { StockDrawer } from "../components/StockDrawer";
@@ -400,7 +401,7 @@ function StarredPage() {
 
         {loading && (
           <div style={{ color: D.comment, padding: "16px 0" }}>
-            <span style={{ color: D.green }}>info</span> 加载中...
+            <span style={{ color: D.green }}>info</span> 正在加载数据...
           </div>
         )}
 
@@ -539,31 +540,43 @@ function StarredPage() {
               tradingStatus={tradingStatus}
               tradingLoading={tradingStatusLoading}
               dataRuntimeHint={dataRuntimeHint}
-              pollHint={<span>每 {pollMs / 1000}s · starred 视图</span>}
+              pollHint={<span>每 {pollMs / 1000} 秒拉取 /api/metrics · 星标</span>}
+            />
+
+            <QuoteStaleBanner
+              pollMs={pollMs}
+              ts={ts}
+              fetchError={fetchError}
+              tradingStatus={tradingStatus}
             />
 
             {fetchError && (
               <div style={{ color: D.red, marginBottom: 6, fontWeight: 500 }}>
-                [ERROR] metrics fetch failed: {fetchError}
+                [错误] 数据获取失败: {fetchError}
+                {ts > 0 && (
+                  <span style={{ color: D.comment, fontWeight: 400 }}>
+                    {" "}— 显示过期数据 (上次更新: {new Date(ts).toLocaleTimeString("zh-CN", { hour12: false })})
+                  </span>
+                )}
               </div>
             )}
 
             {/* 统计 */}
             <div style={{ color: D.comment, marginBottom: 6 }}>
-              <span>Nodes: <span style={{ color: D.purple }}>{starredCount}</span></span>
+              <span>节点:<span style={{ color: D.purple }}>{starredCount}</span></span>
               {"  "}
-              上涨:<span style={{ color: D.red }}>{starredUp}</span>
+              涨:<span style={{ color: D.red }}>{starredUp}</span>
               {"  "}
-              下跌:<span style={{ color: D.green }}>{starredDn}</span>
+              跌:<span style={{ color: D.green }}>{starredDn}</span>
               {holdings.length > 0 && (
                 <>
                   {"  "}
                   持仓:<span style={{ color: D.fg }}>{holdings.length}</span>
                   {"  "}
-                  仓位:<span style={{ color: D.fg }}>{fmtMoney(position).replace("+", "")}</span>
+                  总市值:<span style={{ color: D.fg }}>{fmtMoney(position).replace("+", "")}</span>
                   <span style={{ color: D.comment }}>{activeTab === "HK" ? "HK$" : "¥"}</span>
                   {"  "}
-                  收益:<span style={{ color: chgColor(totalPnl) }}>{fmtMoney(totalPnl)}</span>
+                  盈亏:<span style={{ color: chgColor(totalPnl) }}>{fmtMoney(totalPnl)}</span>
                   {"  "}
                   收益率:<span style={{ color: chgColor(returnPct) }}>{returnPct >= 0 ? "+" : ""}{returnPct.toFixed(1)}%</span>
                   {"  "}
@@ -574,7 +587,7 @@ function StarredPage() {
 
             {starredCount === 0 ? (
               <div style={{ color: D.comment, padding: "16px 0" }}>
-                # 暂无特别关注的股票，在 holdings 或 watching 页面点击 ☆ 添加
+                # 暂无特别关注的股票，在持仓或自选页面点击 ☆ 添加
               </div>
             ) : (
               <>
@@ -589,7 +602,7 @@ function StarredPage() {
                 {/* Holdings */}
                 {holdList.length > 0 && (
                   <>
-                    {secTitle("holdings", holdList.length, holdOpen, setHoldOpen)}
+                    {secTitle("持仓", holdList.length, holdOpen, setHoldOpen)}
                     {holdOpen && <>{header}{holdList.map((s) => <StarredRow key={s.id} s={s} />)}</>}
                   </>
                 )}
@@ -597,7 +610,7 @@ function StarredPage() {
                 {/* Watchlist Stocks */}
                 {stockList.length > 0 && (
                   <>
-                    {secTitle("watchlist:stocks", stockList.length, stockOpen, setStockOpen)}
+                    {secTitle("自选:股票", stockList.length, stockOpen, setStockOpen)}
                     {stockOpen && <>{header}{stockList.map((s) => <StarredRow key={s.id} s={s} />)}</>}
                   </>
                 )}
@@ -605,7 +618,7 @@ function StarredPage() {
                 {/* Watchlist ETFs */}
                 {etfList.length > 0 && (
                   <>
-                    {secTitle("watchlist:ETFs", etfList.length, etfOpen, setEtfOpen)}
+                    {secTitle("自选:ETF", etfList.length, etfOpen, setEtfOpen)}
                     {etfOpen && <>{header}{etfList.map((s) => <StarredRow key={s.id} s={s} />)}</>}
                   </>
                 )}
@@ -613,7 +626,7 @@ function StarredPage() {
                 {/* Hidden */}
                 {hiddenList.length > 0 && (
                   <>
-                    {secTitle("hidden", hiddenList.length, hiddenOpen, setHiddenOpen, 0.6)}
+                    {secTitle("隐藏", hiddenList.length, hiddenOpen, setHiddenOpen, 0.6)}
                     {hiddenOpen && <>{header}{hiddenList.map((s) => <StarredRow key={s.id} s={s} />)}</>}
                   </>
                 )}

@@ -15,6 +15,7 @@ import { AppTitleBar } from "../components/AppTitleBar";
 import { MarketSwitch, type MarketTab } from "../components/MarketSwitch";
 import MarketSummaryBar from "../components/MarketSummaryBar";
 import { DataTrustBar } from "../components/DataTrustBar";
+import { QuoteStaleBanner } from "../components/QuoteStaleBanner";
 import { StockTagChips } from "../components/StockTagChips";
 import { useMetrics } from "../providers/MetricsProvider";
 
@@ -225,7 +226,7 @@ function WatchingContent() {
 
   const header = (
     <div style={{ display: "flex", whiteSpace: "pre", color: D.pink, borderBottom: `1px solid ${D.currentLine}`, paddingBottom: 3, marginBottom: 2, fontWeight: 500 }}>
-      <span style={{ width: "9ch" }}> 类型</span>
+      <span style={{ width: "9ch" }}> 标记</span>
       <span style={mkHStyle("10ch", "id")} onClick={() => toggleWatchSort("id")}>代码{mkArrow("id")}</span>
       <span style={{ width: "10ch" }}>名称</span>
       <span style={mkHStyle("10ch", "price", true)} onClick={() => toggleWatchSort("price")}>{pad("现价" + mkArrow("price"), 9, true)}</span>
@@ -254,7 +255,7 @@ function WatchingContent() {
 
         {loading && (
           <div style={{ color: D.comment, padding: "16px 0" }}>
-            <span style={{ color: D.green }}>info</span> 加载中...
+            <span style={{ color: D.green }}>info</span> 正在加载数据...
           </div>
         )}
 
@@ -336,11 +337,22 @@ function WatchingContent() {
               tradingStatus={tradingStatus}
               tradingLoading={tradingStatusLoading}
               dataRuntimeHint={dataRuntimeHint}
-              pollHint={<span>每 {pollMs / 1000} 秒轮询一次（watching）</span>}
+              pollHint={<span>每 {pollMs / 1000} 秒拉取 /api/metrics · 自选</span>}
+            />
+            <QuoteStaleBanner
+              pollMs={pollMs}
+              ts={ts}
+              fetchError={fetchError}
+              tradingStatus={tradingStatus}
             />
             {fetchError && (
               <div style={{ color: D.red, marginBottom: 6, fontWeight: 500 }}>
-                [ERROR] metrics fetch failed: {fetchError}
+                [错误] 数据获取失败: {fetchError}
+                {ts > 0 && (
+                  <span style={{ color: D.comment, fontWeight: 400 }}>
+                    {" "}— 显示过期数据 (上次更新: {new Date(ts).toLocaleTimeString("zh-CN", { hour12: false })})
+                  </span>
+                )}
               </div>
             )}
 
