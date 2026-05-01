@@ -59,6 +59,8 @@ type AiInvestmentEventApiRow = {
   verdict: string;
   title: string;
   summary: string;
+  metrics_json?: string | null;
+  recommendation_json?: string | null;
   notify_status: string;
   created_at: string;
 };
@@ -841,6 +843,28 @@ export default function AlertsPage() {
                 <span style={{ color: D.comment, marginLeft: 8 }}>{row.created_at?.slice(0, 16)}</span>
                 <div style={{ color: D.fg, marginTop: 2 }}>{row.title}</div>
                 <div style={{ color: D.comment, marginTop: 2 }}>{row.summary}</div>
+                {(() => {
+                  try {
+                    const raw = row.metrics_json;
+                    if (!raw) {
+                      return null;
+                    }
+                    const m = JSON.parse(raw) as {
+                      pre_earnings?: { verdict?: string; score?: number };
+                    };
+                    const pe = m.pre_earnings;
+                    if (pe?.verdict !== undefined && pe.score !== undefined) {
+                      return (
+                        <div style={{ color: D.orange, marginTop: 4, fontSize: 10 }}>
+                          预判 {pe.verdict} · 评分 {pe.score}
+                        </div>
+                      );
+                    }
+                  } catch {
+                    /* ignore */
+                  }
+                  return null;
+                })()}
               </div>
             ))}
           </div>
