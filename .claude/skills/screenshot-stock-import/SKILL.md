@@ -38,6 +38,8 @@ agent 必须按下面流程执行。
 
 先提醒用户：截图会发送给视觉模型服务商，可能包含真实持仓、成本、股数等敏感信息。用户继续要求导入时视为同意。
 
+补充：**调试输出默认关闭。** Tier A 调试负载仅含脱敏字段（如哈希、计数、置信度），不含原始代码、名称、成本、股数、绝对路径或图片字节。仅在用户明确要求且环境受控时，方可使用 **`--debug-sensitive`** 保存完整服务商响应等敏感内容。
+
 ### 2. 干跑生成计划
 
 单张截图：
@@ -62,6 +64,8 @@ done
 ```
 
 优先使用 `glm`。若用户明确要求其他 provider，可用 `--provider kimi` 或 `--provider auto`。
+
+**分类置信度偏低或非交互环境退出码 3**：可 **`--confirm-threshold 0.5`**（按需调整），或在询问用户后 **`--platform eastmoney|ths|hk_panda`**、**`--type holding|watchlist`** 明确券商与截图类型后重跑。
 
 ### 3. 展示识别计划（必须全文列出后等你确认）
 
@@ -95,10 +99,14 @@ uv run python src/tools/screenshot_stock_import.py \
 
 若用户只让“识别一下”，不要 apply。
 
+也可用模块形式：`uv run python -m src.tools.screenshot_stock_import …`（参数相同）。
+
 ## 重要参数
 
 - `--provider glm`：推荐，使用智谱/GLM 视觉模型。
 - `--provider auto`：按环境变量自动选择，优先 GLM。
+- `--platform` / `--type`：分类不准或置信度不足时使用。
+- `--confirm-threshold`：默认 0.8；沙箱/批跑可适当降低以避免非交互 `needs_user_input` 退出。
 - `--output-json PATH`：保存识别计划。
 - `--debug-dir PATH`：保存分类、prompt、provider response 等调试文件。
 - `--debug-sensitive`：保存完整敏感调试内容，仅限用户明确要求。
@@ -107,12 +115,13 @@ uv run python src/tools/screenshot_stock_import.py \
 
 ## 识别与安全规则
 
-- 代码优先；代码不可靠时用名称匹配已有 watchlist、`stocks/catalog.json`，必要时走 MX API 查码。
+- 代码优先；代码不可靠时用名称匹配已有 watchlist、`stocks/catalog.json`（含短名模糊匹配），必要时走 MX API 查码。
 - 持仓截图必要字段是：股票身份 + 成本 + 股数。
 - 自选截图必要字段是：股票身份。
 - 不确定、异常、按名称补全的行进入 `needs_confirmation`，不得静默自动导入。
 - 板块/指数/概念等非股票项不要伪造成股票代码。
 - API key 必须来自环境变量，不能写入代码或日志。
+- 配置与持仓权威源是 **API / DB**；不要用多子 agent 各读一遍截图代替本 CLI + 冻结计划流程。
 
 ## 环境要求
 

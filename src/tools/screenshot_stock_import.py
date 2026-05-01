@@ -2,43 +2,67 @@
 """
 Screenshot Stock Import Tool
 
-从截图中识别股票信息并导入系统。
-支持持仓截图（更新成本和股数）和自选截图（添加股票到自选列表）
+Vision 流程（CLI）：`--dry-run` 生成冻结的 ImportPlan JSON；`--apply --plan` 经 Config API 落库。
+
+遗留 OCR 方法仍保留：`extract_text_from_image`、`parse_stocks_from_text`、`import_stocks_to_db`（供脚本/测试调用）。
 
 Usage:
-    uv run python -m src.tools.screenshot_stock_import /path/to/screenshot.png
-    uv run python -m src.tools.screenshot_stock_import /path/to/screenshot.png --type holding
-    uv run python -m src.tools.screenshot_stock_import /path/to/screenshot.png --type watchlist
+    uv run python -m src.tools.screenshot_stock_import shot.png --dry-run
+    uv run python -m src.tools.screenshot_stock_import --apply --plan import_plan.json
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import re
 import sys
 import time
 import uuid
+from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-# 尝试导入 PIL 和 pytesseract 进行 OCR
+from pydantic import ValidationError
+
+# 尝试导入 PIL；pytesseract 仅在旧 OCR 路径中懒加载，避免视觉导入启动时触发原生库崩溃。
 try:
     from PIL import Image
     HAS_PIL = True
 except ImportError:
     HAS_PIL = False
 
-try:
-    import pytesseract
-    HAS_TESSERACT = True
-except ImportError:
-    HAS_TESSERACT = False
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.sim_trading.db import get_config_connection, init_config_db
+from src.tools.screenshot_import import DEFAULT_CONFIRM_THRESHOLD
+from src.tools.screenshot_import.classifier import classify_fingerprint, extract_fingerprint
+from src.tools.screenshot_import.config_api import ConfigApiClient, ConfigApiError
+from src.tools.screenshot_import.debug_artifacts import tier_a_debug_payload, write_tier_a_bundle
+from src.tools.screenshot_import.models import ApplyLogEntry, ImportPlan, VisionResponse
+from src.tools.screenshot_import.path_safety import (
+    PathSafetyError,
+    atomic_write_json,
+    validate_debug_output_dir,
+    validate_existing_image_path,
+    validate_existing_plan_json_path,
+    validate_output_path,
+)
+from src.tools.screenshot_import.planner import (
+    apply_log_request_payload_hash,
+    build_import_plan,
+    verify_import_plan_integrity,
+)
+from src.tools.screenshot_import.prompts import (
+    build_upload_disclosure,
+    build_vision_prompt,
+)
+from src.tools.screenshot_import.providers import VisionRequest, create_provider, resolve_provider_name
+from src.tools.screenshot_import.validator import normalize_row
 from src.utils.audit_log import insert_config_outbox
 from src.utils.audit_system import build_audit_event_v2, make_actor
 
@@ -58,8 +82,10 @@ def extract_text_from_image(image_path: Path) -> str:
     """从图片中提取文本"""
     if not HAS_PIL:
         raise ImportError("需要安装 Pillow: uv pip install Pillow")
-    if not HAS_TESSERACT:
-        raise ImportError("需要安装 pytesseract: uv pip install pytesseract")
+    try:
+        import pytesseract
+    except ImportError as exc:
+        raise ImportError("需要安装 pytesseract: uv pip install pytesseract") from exc
     
     image = Image.open(image_path)
     text = pytesseract.image_to_string(image, lang='chi_sim+eng')
@@ -291,56 +317,446 @@ def import_stocks_to_db(stocks: list[dict[str, Any]], force_type: str | None = N
     
     return added, updated
 
-def main():
-    parser = argparse.ArgumentParser(description='从截图导入股票信息')
-    parser.add_argument('image_path', type=Path, help='截图文件路径')
-    parser.add_argument('--type', choices=['holding', 'watchlist'], 
-                        help='强制指定类型: holding=持仓, watchlist=自选')
-    
-    args = parser.parse_args()
-    
-    if not args.image_path.exists():
-        print(f'错误: 文件不存在 {args.image_path}')
-        sys.exit(1)
-    
-    print(f'正在处理截图: {args.image_path}')
-    print()
-    
+
+def _content_fingerprint_sha256(path: Path) -> str:
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    return f"sha256:{digest}"
+
+
+def _image_mime_type(image_path: Path) -> str:
+    if not HAS_PIL:
+        return "image/png"
     try:
-        # 提取文本
-        text = extract_text_from_image(args.image_path)
-        print('OCR 识别文本:')
-        print('-' * 50)
-        print(text[:500] + '...' if len(text) > 500 else text)
-        print('-' * 50)
-        print()
-        
-        # 解析股票
-        stocks = parse_stocks_from_text(text, args.type)
-        
-        if not stocks:
-            print('未识别到股票信息')
-            sys.exit(1)
-        
-        print(f'识别到 {len(stocks)} 只股票:')
-        for s in stocks:
-            print(f'  {s.get("code", "?")} - {s.get("name", "Unknown")} ' 
-                  f'(成本:{s.get("cost", "-")}, 股数:{s.get("shares", "-")})')
-        print()
-        
-        # 导入数据库
-        added, updated = import_stocks_to_db(stocks, args.type)
-        
-        print()
-        print(f'共处理 {len(stocks)} 只股票')
-        print(f'  新增: {added}')
-        print(f'  更新: {updated}')
-        print('配置已写入 config.db；JSON 快照由专用导出流程生成。')
-        
-    except Exception as e:
-        print(f'错误: {e}')
-        sys.exit(1)
+        with Image.open(image_path) as im:
+            fmt = (im.format or "").upper()
+    except OSError:
+        return "image/png"
+    mapping = {
+        "PNG": "image/png",
+        "JPEG": "image/jpeg",
+        "GIF": "image/gif",
+        "WEBP": "image/webp",
+        "BMP": "image/bmp",
+        "TIFF": "image/tiff",
+    }
+    return mapping.get(fmt, "image/png")
 
 
-if __name__ == '__main__':
-    main()
+def _provider_raw_response_path(out_path: Path) -> Path:
+    return out_path.with_name(f"{out_path.stem}.provider_raw_response.txt")
+
+
+def _write_provider_failure_artifacts(
+    *,
+    error: Any,
+    output_json: Path | None,
+    recognition_run_id: str,
+    allowed_roots: list[Path],
+) -> Path | None:
+    raw_response = getattr(error, "raw_response", "")
+    if not raw_response:
+        return None
+    if output_json is not None:
+        base_path = validate_output_path(output_json, allowed_roots)
+        raw_path = validate_output_path(_provider_raw_response_path(base_path), allowed_roots)
+    else:
+        raw_path = validate_output_path(
+            PROJECT_ROOT
+            / ".screenshot_import_runs"
+            / recognition_run_id
+            / "provider_raw_response.txt",
+            allowed_roots,
+        )
+    raw_path.parent.mkdir(parents=True, exist_ok=True)
+    raw_path.write_text(raw_response, encoding="utf-8")
+    try:
+        os.chmod(raw_path, 0o600)
+    except OSError:
+        pass
+    return raw_path
+
+
+def _collect_plan_codes(plan: ImportPlan) -> list[str]:
+    codes = [a.code for a in plan.auto_apply] + [a.code for a in plan.needs_confirmation]
+    for r in plan.rejected:
+        c = r.get("code")
+        if c is not None:
+            codes.append(str(c))
+    return codes
+
+
+def _stock_for_normalize(stock: Any, platform: str) -> Any:
+    if platform != "eastmoney" or not getattr(stock, "name", "").strip():
+        return stock
+    field_confidence = getattr(stock, "field_confidence", None)
+    if field_confidence is not None and hasattr(field_confidence, "model_copy"):
+        field_confidence = field_confidence.model_copy(update={"code": None})
+    return stock.model_copy(update={"code": None, "field_confidence": field_confidence})
+
+
+def _print_classification_debug(*, fingerprint: Any, classification: Any, threshold: float, reason: str) -> None:
+    debug_payload = {
+        "reason": reason,
+        "threshold": threshold,
+        "fingerprint": {
+            "width": fingerprint.width,
+            "height": fingerprint.height,
+            "top_bar_color": fingerprint.top_bar_color,
+            "background_color": fingerprint.background_color,
+            "red_ratio_top": round(float(fingerprint.red_ratio_top), 4),
+            "orange_ratio_top": round(float(fingerprint.orange_ratio_top), 4),
+            "dark_ratio_top": round(float(fingerprint.dark_ratio_top), 4),
+            "red_ratio_total": round(float(fingerprint.red_ratio_total), 4),
+            "blue_ratio_total": round(float(fingerprint.blue_ratio_total), 4),
+            "green_ratio_total": round(float(fingerprint.green_ratio_total), 4),
+            "dark_ratio_total": round(float(fingerprint.dark_ratio_total), 4),
+            "light_ratio_total": round(float(fingerprint.light_ratio_total), 4),
+            "layout": fingerprint.layout,
+        },
+        "classification": classification.model_dump(mode="json"),
+    }
+    print("[screenshot-import-debug] local classification", file=sys.stderr)
+    print(json.dumps(debug_payload, ensure_ascii=False, indent=2), file=sys.stderr)
+    if classification.confidence < threshold:
+        print(
+            "[screenshot-import-debug] classification confidence below threshold; "
+            "rerun with --platform/--type if you know the broker.",
+            file=sys.stderr,
+        )
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Vision screenshot import (frozen plan) or apply a saved plan."
+    )
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--dry-run", action="store_true", help="Recognize image and write ImportPlan JSON")
+    mode.add_argument("--apply", action="store_true", help="Apply auto_apply from --plan JSON via config API")
+
+    parser.add_argument(
+        "image_path",
+        nargs="?",
+        type=Path,
+        help="Screenshot path (required for --dry-run)",
+    )
+    parser.add_argument(
+        "--provider",
+        choices=["auto", "kimi", "glm", "minimax"],
+        default="auto",
+    )
+    parser.add_argument("--yes", action="store_true", help="With uncertain auto classification, force exit 3 instead of calling vision (same as non-interactive stdin)")
+    parser.add_argument("--plan", type=Path, help="ImportPlan JSON for --apply")
+    parser.add_argument("--confirm-threshold", type=float, default=DEFAULT_CONFIRM_THRESHOLD)
+    parser.add_argument("--type", dest="shot_type", choices=["auto", "holding", "watchlist"], default="auto")
+    parser.add_argument(
+        "--platform",
+        choices=["auto", "ths", "eastmoney", "hk_panda", "other"],
+        default="auto",
+    )
+    parser.add_argument("--output-json", type=Path, help="Write plan to this path (default: under .screenshot_import_runs/)")
+    parser.add_argument("--debug-dir", type=Path, default=None)
+    parser.add_argument("--debug-sensitive", action="store_true")
+    parser.add_argument(
+        "--debug-log",
+        action="store_true",
+        help="Print local classifier and prompt diagnostics to stderr",
+    )
+    parser.add_argument(
+        "--no-external-name-lookup",
+        action="store_true",
+        help="Disable MX API fallback for name-only rows; use only watchlist and stocks/catalog.json",
+    )
+    parser.add_argument("--allow-path", action="append", default=[], metavar="PATH", help="Additional allowed root (repeatable)")
+
+    args = parser.parse_args(argv)
+
+    if args.apply:
+        if not args.plan:
+            print("错误: --apply 需要 --plan", file=sys.stderr)
+            return 1
+        extra_roots = [Path(p).expanduser() for p in (args.allow_path or [])]
+        allowed_roots_apply = [PROJECT_ROOT, Path.home() / "Downloads", *extra_roots]
+        try:
+            plan_path = validate_existing_plan_json_path(args.plan, allowed_roots_apply)
+        except PathSafetyError as e:
+            print(f"错误: {e}", file=sys.stderr)
+            return 2
+        except OSError as e:
+            print(f"错误: {e}", file=sys.stderr)
+            return 2
+        try:
+            raw_plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            plan = ImportPlan.model_validate(raw_plan)
+        except (json.JSONDecodeError, ValueError, ValidationError) as e:
+            print(f"错误: 无法加载计划文件: {e}", file=sys.stderr)
+            return 2
+
+        ok, integrity_msg = verify_import_plan_integrity(plan)
+        if not ok:
+            print(f"错误: {integrity_msg}", file=sys.stderr)
+            return 5
+
+        client = ConfigApiClient()
+        successful_ids = {e.row_apply_id for e in plan.apply_log if e.response_ok}
+        to_apply = [a for a in plan.auto_apply if a.row_apply_id not in successful_ids]
+        for a in plan.auto_apply:
+            if a.row_apply_id in successful_ids:
+                print(f"  skip (already applied)  {a.code}")
+
+        if not to_apply:
+            if plan.auto_apply:
+                print("  no pending auto_apply rows")
+            return 0
+
+        result = client.apply_actions(to_apply, import_run_id=plan.import_run_id)
+        new_entries: list[ApplyLogEntry] = []
+        for action, row in zip(to_apply, result.rows, strict=True):
+            new_entries.append(
+                ApplyLogEntry(
+                    row_apply_id=action.row_apply_id,
+                    code=action.code,
+                    action=action.action,
+                    request_payload_hash=apply_log_request_payload_hash(action.payload),
+                    response_ok=row.ok,
+                    ts=datetime.now(timezone.utc),
+                    http_status=row.status_code,
+                    message=row.message or None,
+                )
+            )
+        updated_plan = plan.model_copy(update={"apply_log": [*plan.apply_log, *new_entries]})
+        atomic_write_json(plan_path, updated_plan.model_dump(mode="json"))
+
+        for row in result.applied:
+            print(f"  applied  {row.code}  HTTP {row.status_code}")
+        for row in result.failed:
+            print(f"  failed   {row.code}  HTTP {row.status_code}  {row.message}")
+        return 6 if result.failed else 0
+
+    if not args.image_path:
+        print("错误: --dry-run 需要截图路径", file=sys.stderr)
+        return 2
+
+    extra_roots = [Path(p).expanduser() for p in (args.allow_path or [])]
+    allowed_roots = [PROJECT_ROOT, Path.home() / "Downloads", *extra_roots]
+
+    debug_dir: Path | None = None
+    if args.debug_dir is not None:
+        try:
+            debug_dir = validate_debug_output_dir(args.debug_dir, allowed_roots)
+        except PathSafetyError as e:
+            print(f"错误: {e}", file=sys.stderr)
+            return 2
+
+    try:
+        image_path = validate_existing_image_path(args.image_path, allowed_roots)
+    except PathSafetyError as e:
+        print(f"错误: {e}", file=sys.stderr)
+        return 2
+    except OSError as e:
+        print(f"错误: {e}", file=sys.stderr)
+        return 2
+
+    fingerprint = extract_fingerprint(image_path)
+    forced_platform = args.platform
+    forced_type = args.shot_type
+    classification = classify_fingerprint(
+        fingerprint,
+        forced_platform=forced_platform,
+        forced_type=forced_type,
+    )
+
+    confirm_thr = float(args.confirm_threshold)
+    auto_class_low_confidence = (
+        args.platform == "auto"
+        and args.shot_type == "auto"
+        and classification.confidence < confirm_thr
+    )
+    if auto_class_low_confidence and (not sys.stdin.isatty() or args.yes):
+        _print_classification_debug(
+            fingerprint=fingerprint,
+            classification=classification,
+            threshold=confirm_thr,
+            reason="needs_user_input",
+        )
+        print(
+            json.dumps(
+                {"needs_user_input": True, "classification": classification.model_dump(mode="json")},
+                ensure_ascii=False,
+            )
+        )
+        return 3
+
+    if args.debug_log:
+        _print_classification_debug(
+            fingerprint=fingerprint,
+            classification=classification,
+            threshold=confirm_thr,
+            reason="debug_log",
+        )
+
+    try:
+        resolved_name = resolve_provider_name(args.provider)
+    except ValueError as e:
+        print(f"错误: {e}", file=sys.stderr)
+        return 2
+
+    print(build_upload_disclosure(resolved_name))
+
+    try:
+        provider = create_provider(args.provider)
+    except ValueError as e:
+        print(f"错误: {e}", file=sys.stderr)
+        return 2
+
+    existing_codes: set[str] = set()
+    existing_watchlist: dict[str, object] | None = None
+    try:
+        wl = ConfigApiClient().fetch_watchlist()
+        if isinstance(wl, dict):
+            existing_watchlist = wl
+            existing_codes = {str(k) for k in wl.keys()}
+    except ConfigApiError:
+        pass
+    except OSError:
+        pass
+
+    prompt = build_vision_prompt(classification)
+    if args.debug_log:
+        print("[screenshot-import-debug] prompt preview", file=sys.stderr)
+        print(prompt, file=sys.stderr)
+    recognition_run_id = uuid.uuid4().hex
+    mime_type = _image_mime_type(image_path)
+    request = VisionRequest(
+        image_path=str(image_path),
+        mime_type=mime_type,
+        prompt=prompt,
+        json_schema=VisionResponse.model_json_schema(),
+        timeout_s=60.0,
+        run_id=recognition_run_id,
+    )
+    outcome = provider.complete(request)
+    if not outcome.ok or outcome.response is None:
+        msg = outcome.error.message if outcome.error else "vision request failed"
+        print(f"错误: {msg}", file=sys.stderr)
+        if outcome.error is not None and outcome.error.kind == "schema_parse":
+            try:
+                raw_path = _write_provider_failure_artifacts(
+                    error=outcome.error,
+                    output_json=args.output_json,
+                    recognition_run_id=recognition_run_id,
+                    allowed_roots=allowed_roots,
+                )
+            except (OSError, PathSafetyError) as e:
+                print(f"警告: 无法保存 provider raw response: {e}", file=sys.stderr)
+            else:
+                if raw_path is not None:
+                    print(f"已保存 provider raw response: {raw_path}", file=sys.stderr)
+        return 4
+
+    norm_rows: list[Any] = []
+    for i, stock in enumerate(outcome.response.stocks):
+        try:
+            stock = _stock_for_normalize(stock, classification.platform)
+            norm_rows.append(
+                normalize_row(
+                    stock,
+                    source_row_index=i,
+                    existing_watchlist=existing_watchlist,
+                    allow_external_lookup=not args.no_external_name_lookup,
+                )
+            )
+        except (TypeError, ValueError) as e:
+            print(f"警告: 跳过无法规范化的行 {i}: {e}", file=sys.stderr)
+
+    content_fp = _content_fingerprint_sha256(image_path)
+    manual_platform = args.platform != "auto" and classification.confidence < confirm_thr
+    model_confidence = float(outcome.response.confidence)
+
+    plan = build_import_plan(
+        norm_rows,
+        provider=outcome.provider,
+        model=outcome.model,
+        classification=classification,
+        model_confidence=model_confidence,
+        threshold=confirm_thr,
+        content_fingerprint=content_fp,
+        existing_codes=existing_codes,
+        existing_watchlist=existing_watchlist,
+        manual_platform_after_low_confidence=manual_platform,
+    )
+
+    if args.output_json is not None:
+        out_path = validate_output_path(args.output_json, allowed_roots)
+    else:
+        default_path = (
+            PROJECT_ROOT / ".screenshot_import_runs" / plan.import_run_id / "import_plan.json"
+        )
+        out_path = validate_output_path(default_path, allowed_roots)
+
+    atomic_write_json(out_path, plan.model_dump(mode="json"))
+
+    if debug_dir is not None:
+        plan_summary_obj = tier_a_debug_payload(
+            outcome.provider,
+            _collect_plan_codes(plan),
+            {
+                "classifier": float(classification.confidence),
+                "model": model_confidence,
+            },
+            {
+                "auto_apply_count": len(plan.auto_apply),
+                "needs_confirmation_count": len(plan.needs_confirmation),
+                "rejected_count": len(plan.rejected),
+            },
+        )
+        fp_redacted = {
+            "width": fingerprint.width,
+            "height": fingerprint.height,
+            "layout": fingerprint.layout,
+            "classification_confidence": float(classification.confidence),
+        }
+        prov_redacted = {
+            "provider": outcome.provider,
+            "model": outcome.model,
+            "mime_type": mime_type,
+            "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+            "run_id": recognition_run_id,
+        }
+        write_tier_a_bundle(
+            debug_dir,
+            image_fingerprint_redacted=fp_redacted,
+            provider_request_redacted=prov_redacted,
+            import_plan_summary_redacted=plan_summary_obj,
+        )
+        if args.debug_sensitive:
+            dbg_fp = asdict(fingerprint)
+            (debug_dir / "fingerprint.json").write_text(
+                json.dumps(dbg_fp, ensure_ascii=False, indent=2, default=str) + "\n",
+                encoding="utf-8",
+            )
+            (debug_dir / "classification.json").write_text(
+                json.dumps(classification.model_dump(mode="json"), ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            (debug_dir / "provider_response.json").write_text(
+                json.dumps(outcome.response.model_dump(mode="json"), ensure_ascii=False, indent=2)
+                + "\n",
+                encoding="utf-8",
+            )
+            validated_payload = [r.model_dump(mode="json") for r in norm_rows]
+            (debug_dir / "validated_result.json").write_text(
+                json.dumps(validated_payload, ensure_ascii=False, indent=2, default=str) + "\n",
+                encoding="utf-8",
+            )
+            (debug_dir / "import_plan.json").write_text(
+                json.dumps(plan.model_dump(mode="json"), ensure_ascii=False, indent=2, default=str)
+                + "\n",
+                encoding="utf-8",
+            )
+
+    print(str(out_path))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -80,6 +80,9 @@ src/data/macro_analysis_cache.json
 
 src/crawler/*.ts
 
+# screenshot import vision debug / run output
+.screenshot_import_runs/
+
 # pid files
 .poller.pid
 .notifier.pid
