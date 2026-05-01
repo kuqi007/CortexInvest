@@ -16,6 +16,7 @@ describe("display-utils", () => {
     expect(fmtAmt(123_456_789)).toBe("1.2亿");
     expect(fmtAmt(-12_345)).toBe("-1万");
     expect(fmtMoney(12_345)).toBe("+1.2万");
+    expect(fmtMoney(12_345, { sign: "negativeOnly" })).toBe("1.2万");
     expect(fmtMoney(-999)).toBe("-999");
   });
 

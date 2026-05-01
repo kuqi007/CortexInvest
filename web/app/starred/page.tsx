@@ -11,19 +11,27 @@ import MarketSummaryBar from "../components/MarketSummaryBar";
 import { DataTrustBar } from "../components/DataTrustBar";
 import { QuoteStaleBanner } from "../components/QuoteStaleBanner";
 import { StockTagChips } from "../components/StockTagChips";
+import { CollapsibleSectionTitle } from "../components/CollapsibleSectionTitle";
+import { FetchErrorBanner } from "../components/FetchErrorBanner";
+import { MetricsLoadingBlock } from "../components/MetricsLoadingBlock";
+import { StockSearchToolbar } from "../components/StockSearchToolbar";
+import {
+  StockTableHeader,
+  l2Columns,
+  portfolioColumns,
+  tagColumn,
+  type StockTableColumn,
+} from "../components/StockTableHeader";
+import { TagFilterBanner } from "../components/TagFilterBanner";
 import {
   stockToolbarButtonStyle,
   stockToolbarFieldStyle,
-  stockToolbarLabelStyle,
-  stockToolbarMatchStyle,
   stockToolbarSelectStyle,
-  stockToolbarStyle,
 } from "../components/toolbarStyles";
 import { useMetrics } from "../providers/MetricsProvider";
 import { StockDrawer } from "../components/StockDrawer";
 import { useTradePlans } from "../hooks/useTradePlans";
 import { useTradingStatus } from "../lib/trading-hours";
-import { tagColor } from "../lib/tag-utils";
 import { buildPollHint, chgColor, fmtAmt, fmtMoney, pad } from "../lib/display-utils";
 import { D } from "../theme";
 
@@ -205,27 +213,6 @@ function StarredPage() {
   const costBasis = holdings.reduce((sum, s) => sum + s.cost! * s.shares!, 0);
   const returnPct = costBasis > 0 ? (totalPnl / costBasis) * 100 : 0;
 
-  // Sort header helpers
-  const mkArrow = (k: SortKey) => sortState.key === k ? (sortState.asc ? " ▲" : " ▼") : "";
-  const mkHStyle = (w: string, k: SortKey | null, right = false): React.CSSProperties => ({
-    width: w,
-    textAlign: right ? "right" : "left",
-    cursor: k ? "pointer" : "default",
-    userSelect: "none",
-    color: k && sortState.key === k ? D.yellow : D.pink,
-  });
-
-  // Section title with collapse (中文与 holdings/watching 一致)
-  const secTitle = (label: string, count: number, open: boolean, setOpen: (v: boolean | ((prev: boolean) => boolean)) => void, opacity = 1) => (
-    <div
-      style={{ color: D.comment, padding: "4px 0 1px", cursor: "pointer", userSelect: "none", opacity }}
-      onClick={() => setOpen((v) => !v)}
-    >
-      <span style={{ color: D.purple }}>{open ? "▾" : "▸"}</span>
-      {" "}# ── {label} ({count}) ──
-    </div>
-  );
-
   // Starred Row - 字段与 holdings 保持一致（中文表头）
   function StarredRow({ s }: { s: Service }) {
     const sign = s.change > 0 ? "+" : "";
@@ -347,26 +334,16 @@ function StarredPage() {
 
   // 表头与 holdings 保持一致（中文）
   const header = (
-    <div style={{ display: "flex", whiteSpace: "pre", color: D.pink, borderBottom: `1px solid ${D.currentLine}`, paddingBottom: 3, marginBottom: 2, fontWeight: 500 }}>
-      <span style={{ width: "9ch" }}> 标记</span>
-      <span style={mkHStyle("10ch", "id")} onClick={() => toggleSort("id")}>代码{mkArrow("id")}</span>
-      <span style={{ width: "10ch" }}>名称</span>
-      <span style={mkHStyle("10ch", "price", true)} onClick={() => toggleSort("price")}>{pad("现价" + mkArrow("price"), 9, true)}</span>
-      <span style={mkHStyle("9ch", "change", true)} onClick={() => toggleSort("change")}>{pad("涨跌幅" + mkArrow("change"), 8, true)}</span>
-      <span style={mkHStyle("9ch", "cost", true)} onClick={() => toggleSort("cost")}>{pad("成本" + mkArrow("cost"), 8, true)}</span>
-      <span style={{ width: "7ch", textAlign: "right" }}>{pad("股数", 6, true)}</span>
-      <span style={mkHStyle("10ch", "pnl", true)} onClick={() => toggleSort("pnl")}>{pad("盈亏%" + mkArrow("pnl"), 9, true)}</span>
-      <span style={mkHStyle("10ch", "mktVal", true)} onClick={() => toggleSort("mktVal")}>{pad("市值" + mkArrow("mktVal"), 9, true)}</span>
-      <span style={mkHStyle("8ch", "position_pct", true)} onClick={() => toggleSort("position_pct")}>{pad("仓位" + mkArrow("position_pct"), 7, true)}</span>
-      <span style={mkHStyle("10ch", "totalPnl", true)} onClick={() => toggleSort("totalPnl")}>{pad("盈亏额" + mkArrow("totalPnl"), 9, true)}</span>
-      <span style={mkHStyle("9ch", "dayPnl", true)} onClick={() => toggleSort("dayPnl")}>{pad("今日" + mkArrow("dayPnl"), 8, true)}</span>
-      <span style={mkHStyle("7ch", "volRatio", true)} onClick={() => toggleSort("volRatio")}>{pad("量比" + mkArrow("volRatio"), 6, true)}</span>
-      <span style={mkHStyle("8ch", "turnover", true)} onClick={() => toggleSort("turnover")}>{pad("换手%" + mkArrow("turnover"), 7, true)}</span>
-      <span style={mkHStyle("9ch", "amount", true)} onClick={() => toggleSort("amount")}>{pad("成交额" + mkArrow("amount"), 8, true)}</span>
-      {showL2 && <span style={mkHStyle("9ch", "mainNetInflow" as SortKey, true)} onClick={() => toggleSort("mainNetInflow" as SortKey)}>{pad("主力" + mkArrow("mainNetInflow" as SortKey), 8, true)}</span>}
-      {showL2 && <span style={mkHStyle("7ch", "mainNetInflowPct" as SortKey, true)} onClick={() => toggleSort("mainNetInflowPct" as SortKey)}>{pad("主力%" + mkArrow("mainNetInflowPct" as SortKey), 6, true)}</span>}
-      <span style={{ width: "12ch", color: D.pink, marginLeft: 8 }}>标签</span>
-    </div>
+    <StockTableHeader
+      columns={[
+        ...(portfolioColumns as StockTableColumn<SortKey>[]),
+        ...(showL2 ? l2Columns<SortKey>() : []),
+        tagColumn<SortKey>(),
+      ]}
+      sortKey={sortState.key}
+      sortAsc={sortState.asc}
+      onSort={toggleSort}
+    />
   );
 
   return (
@@ -386,36 +363,21 @@ function StarredPage() {
         </div>
 
         {loading && (
-          <div style={{ color: D.comment, padding: "16px 0" }}>
-            <span style={{ color: D.green }}>info</span> 正在加载数据...
-          </div>
+          <MetricsLoadingBlock />
         )}
 
         {!loading && (
           <>
             {/* 标签筛选栏 */}
-            {filterTag && (
-              <div style={{ padding: "4px 8px", backgroundColor: "#44475a", color: D.fg, fontSize: 12, marginBottom: 4, display: "flex", alignItems: "center", gap: 8, borderRadius: 3 }}>
-                <span>筛选: <span style={{ color: tagColor(filterTag), fontWeight: 500 }}>{filterTag}</span></span>
-                <span style={{ cursor: "pointer", color: D.red, fontWeight: 500 }} onClick={() => setFilterTag(null)}>x</span>
-              </div>
-            )}
+            <TagFilterBanner tag={filterTag} onClear={() => setFilterTag(null)} />
 
             {/* search + add */}
-            <div style={stockToolbarStyle}>
-              <span style={stockToolbarLabelStyle}>搜索:</span>
-              <input
-                placeholder="代码或名称..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                style={stockToolbarFieldStyle(140)}
-              />
-              {search && (
-                <span style={stockToolbarMatchStyle}>
-                  {searchFiltered.length}/{tabStarred.length} 匹配
-                </span>
-              )}
-              <div style={{ flex: 1 }} />
+            <StockSearchToolbar
+              search={search}
+              onSearchChange={setSearch}
+              matchCount={searchFiltered.length}
+              totalCount={tabStarred.length}
+            >
               <input
                 placeholder="代码"
                 value={addCode}
@@ -455,7 +417,7 @@ function StarredPage() {
               >
                 添加关注
               </button>
-            </div>
+            </StockSearchToolbar>
 
             <DataTrustBar
               pollMs={pollMs}
@@ -475,16 +437,7 @@ function StarredPage() {
               tradingStatus={tradingStatus}
             />
 
-            {fetchError && (
-              <div style={{ color: D.red, marginBottom: 6, fontWeight: 500 }}>
-                [错误] 数据获取失败: {fetchError}
-                {ts > 0 && (
-                  <span style={{ color: D.comment, fontWeight: 400 }}>
-                    {" "}— 显示过期数据 (上次更新: {new Date(ts).toLocaleTimeString("zh-CN", { hour12: false })})
-                  </span>
-                )}
-              </div>
-            )}
+            <FetchErrorBanner fetchError={fetchError} ts={ts} />
 
             {/* 统计 */}
             <div style={{ color: D.comment, marginBottom: 6 }}>
@@ -498,7 +451,7 @@ function StarredPage() {
                   {"  "}
                   持仓:<span style={{ color: D.fg }}>{holdings.length}</span>
                   {"  "}
-                  总市值:<span style={{ color: D.fg }}>{fmtMoney(position).replace("+", "")}</span>
+                  总市值:<span style={{ color: D.fg }}>{fmtMoney(position, { sign: "negativeOnly" })}</span>
                   <span style={{ color: D.comment }}>{activeTab === "HK" ? "HK$" : "¥"}</span>
                   {"  "}
                   盈亏:<span style={{ color: chgColor(totalPnl) }}>{fmtMoney(totalPnl)}</span>
@@ -519,7 +472,12 @@ function StarredPage() {
                 {/* 置顶 */}
                 {pinnedList.length > 0 && (
                   <>
-                    {secTitle("置顶", pinnedList.length, pinnedOpen, setPinnedOpen)}
+                    <CollapsibleSectionTitle
+                      label="置顶"
+                      count={pinnedList.length}
+                      open={pinnedOpen}
+                      onToggle={() => setPinnedOpen((v) => !v)}
+                    />
                     {pinnedOpen && <>{header}{pinnedList.map((s) => <StarredRow key={s.id} s={s} />)}</>}
                   </>
                 )}
@@ -527,7 +485,12 @@ function StarredPage() {
                 {/* Holdings */}
                 {holdList.length > 0 && (
                   <>
-                    {secTitle("持仓", holdList.length, holdOpen, setHoldOpen)}
+                    <CollapsibleSectionTitle
+                      label="持仓"
+                      count={holdList.length}
+                      open={holdOpen}
+                      onToggle={() => setHoldOpen((v) => !v)}
+                    />
                     {holdOpen && <>{header}{holdList.map((s) => <StarredRow key={s.id} s={s} />)}</>}
                   </>
                 )}
@@ -535,7 +498,12 @@ function StarredPage() {
                 {/* Watchlist Stocks */}
                 {stockList.length > 0 && (
                   <>
-                    {secTitle("自选:股票", stockList.length, stockOpen, setStockOpen)}
+                    <CollapsibleSectionTitle
+                      label="自选:股票"
+                      count={stockList.length}
+                      open={stockOpen}
+                      onToggle={() => setStockOpen((v) => !v)}
+                    />
                     {stockOpen && <>{header}{stockList.map((s) => <StarredRow key={s.id} s={s} />)}</>}
                   </>
                 )}
@@ -543,7 +511,12 @@ function StarredPage() {
                 {/* Watchlist ETFs */}
                 {etfList.length > 0 && (
                   <>
-                    {secTitle("自选:ETF", etfList.length, etfOpen, setEtfOpen)}
+                    <CollapsibleSectionTitle
+                      label="自选:ETF"
+                      count={etfList.length}
+                      open={etfOpen}
+                      onToggle={() => setEtfOpen((v) => !v)}
+                    />
                     {etfOpen && <>{header}{etfList.map((s) => <StarredRow key={s.id} s={s} />)}</>}
                   </>
                 )}
@@ -551,7 +524,13 @@ function StarredPage() {
                 {/* Hidden */}
                 {hiddenList.length > 0 && (
                   <>
-                    {secTitle("隐藏", hiddenList.length, hiddenOpen, setHiddenOpen, 0.6)}
+                    <CollapsibleSectionTitle
+                      label="隐藏"
+                      count={hiddenList.length}
+                      open={hiddenOpen}
+                      onToggle={() => setHiddenOpen((v) => !v)}
+                      opacity={0.6}
+                    />
                     {hiddenOpen && <>{header}{hiddenList.map((s) => <StarredRow key={s.id} s={s} />)}</>}
                   </>
                 )}
@@ -578,13 +557,6 @@ function StarredPage() {
           </>
         )}
       </div>
-
-      <style>{`
-        @keyframes blink {
-          50% { opacity: 0; }
-        }
-      `}</style>
-
       <StockDrawer
         symbol={drawerSymbol}
         services={services}

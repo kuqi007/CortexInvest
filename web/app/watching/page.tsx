@@ -6,7 +6,6 @@ import { useAlerts } from "../hooks/useAlerts";
 import { useLogEntries } from "../hooks/useCommand";
 import { useTradePlans } from "../hooks/useTradePlans";
 import type { Service } from "../types";
-import { tagColor } from "../lib/tag-utils";
 import { useTradingStatus } from "../lib/trading-hours";
 import { D } from "../theme";
 import { StockDrawer } from "../components/StockDrawer";
@@ -18,12 +17,21 @@ import { DataTrustBar } from "../components/DataTrustBar";
 import { QuoteStaleBanner } from "../components/QuoteStaleBanner";
 import { StockTagChips } from "../components/StockTagChips";
 import { useMetrics } from "../providers/MetricsProvider";
+import { CollapsibleSectionTitle } from "../components/CollapsibleSectionTitle";
+import { FetchErrorBanner } from "../components/FetchErrorBanner";
+import { MetricsLoadingBlock } from "../components/MetricsLoadingBlock";
+import { StockSearchToolbar } from "../components/StockSearchToolbar";
+import {
+  StockTableHeader,
+  l2Columns,
+  tagColumn,
+  watchingColumns,
+  type StockTableColumn,
+} from "../components/StockTableHeader";
+import { TagFilterBanner } from "../components/TagFilterBanner";
 import {
   stockToolbarButtonStyle,
   stockToolbarFieldStyle,
-  stockToolbarLabelStyle,
-  stockToolbarMatchStyle,
-  stockToolbarStyle,
 } from "../components/toolbarStyles";
 import { buildPollHint, chgColor, fmtAmt, pad } from "../lib/display-utils";
 
@@ -207,30 +215,17 @@ function WatchingContent() {
     );
   }
 
-  const mkArrow = (k: SortKey) => (watchSort.key === k ? (watchSort.asc ? " ▲" : " ▼") : "");
-  const mkHStyle = (w: string, k: SortKey, right = false) => ({
-    width: w,
-    textAlign: right ? "right" as const : "left" as const,
-    cursor: "pointer",
-    userSelect: "none" as const,
-    color: watchSort.key === k ? D.yellow : D.pink,
-  });
-
   const header = (
-    <div style={{ display: "flex", whiteSpace: "pre", color: D.pink, borderBottom: `1px solid ${D.currentLine}`, paddingBottom: 3, marginBottom: 2, fontWeight: 500 }}>
-      <span style={{ width: "9ch" }}> 标记</span>
-      <span style={mkHStyle("10ch", "id")} onClick={() => toggleWatchSort("id")}>代码{mkArrow("id")}</span>
-      <span style={{ width: "10ch" }}>名称</span>
-      <span style={mkHStyle("10ch", "price", true)} onClick={() => toggleWatchSort("price")}>{pad("现价" + mkArrow("price"), 9, true)}</span>
-      <span style={mkHStyle("9ch", "change", true)} onClick={() => toggleWatchSort("change")}>{pad("涨跌幅" + mkArrow("change"), 8, true)}</span>
-      <span style={mkHStyle("8ch", "chgAmt", true)} onClick={() => toggleWatchSort("chgAmt")}>{pad("涨跌" + mkArrow("chgAmt"), 7, true)}</span>
-      <span style={mkHStyle("7ch", "volRatio", true)} onClick={() => toggleWatchSort("volRatio")}>{pad("量比" + mkArrow("volRatio"), 6, true)}</span>
-      <span style={mkHStyle("8ch", "turnover", true)} onClick={() => toggleWatchSort("turnover")}>{pad("换手%" + mkArrow("turnover"), 7, true)}</span>
-      <span style={mkHStyle("9ch", "amount", true)} onClick={() => toggleWatchSort("amount")}>{pad("成交额" + mkArrow("amount"), 8, true)}</span>
-      {showL2 && <span style={mkHStyle("9ch", "mainNetInflow" as SortKey, true)} onClick={() => toggleWatchSort("mainNetInflow" as SortKey)}>{pad("主力" + mkArrow("mainNetInflow" as SortKey), 8, true)}</span>}
-      {showL2 && <span style={mkHStyle("7ch", "mainNetInflowPct" as SortKey, true)} onClick={() => toggleWatchSort("mainNetInflowPct" as SortKey)}>{pad("主力%" + mkArrow("mainNetInflowPct" as SortKey), 6, true)}</span>}
-      <span style={{ width: "12ch", color: D.pink, marginLeft: 8 }}>标签</span>
-    </div>
+    <StockTableHeader
+      columns={[
+        ...(watchingColumns as StockTableColumn<SortKey>[]),
+        ...(showL2 ? l2Columns<SortKey>() : []),
+        tagColumn<SortKey>(),
+      ]}
+      sortKey={watchSort.key}
+      sortAsc={watchSort.asc}
+      onSort={toggleWatchSort}
+    />
   );
 
   return (
@@ -246,36 +241,21 @@ function WatchingContent() {
         </div>
 
         {loading && (
-          <div style={{ color: D.comment, padding: "16px 0" }}>
-            <span style={{ color: D.green }}>info</span> 正在加载数据...
-          </div>
+          <MetricsLoadingBlock />
         )}
 
         {!loading && (
           <>
             {/* tag filter bar */}
-            {filterTag && (
-              <div style={{ padding: "4px 8px", backgroundColor: "#44475a", color: D.fg, fontSize: 12, marginBottom: 4, display: "flex", alignItems: "center", gap: 8, borderRadius: 3 }}>
-                <span>筛选: <span style={{ color: tagColor(filterTag), fontWeight: 500 }}>{filterTag}</span></span>
-                <span style={{ cursor: "pointer", color: D.red, fontWeight: 500 }} onClick={() => setFilterTag(null)}>x</span>
-              </div>
-            )}
+            <TagFilterBanner tag={filterTag} onClear={() => setFilterTag(null)} />
 
             {/* search + add */}
-            <div style={stockToolbarStyle}>
-              <span style={stockToolbarLabelStyle}>搜索:</span>
-              <input
-                placeholder="代码或名称..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                style={stockToolbarFieldStyle(140)}
-              />
-              {search && (
-                <span style={stockToolbarMatchStyle}>
-                  {searchFiltered.length}/{tabServices.length} 匹配
-                </span>
-              )}
-              <div style={{ flex: 1 }} />
+            <StockSearchToolbar
+              search={search}
+              onSearchChange={setSearch}
+              matchCount={searchFiltered.length}
+              totalCount={tabServices.length}
+            >
               <input
                 placeholder="代码"
                 value={addCode}
@@ -289,7 +269,7 @@ function WatchingContent() {
               >
                 添加自选
               </button>
-            </div>
+            </StockSearchToolbar>
 
             <DataTrustBar
               pollMs={pollMs}
@@ -307,16 +287,7 @@ function WatchingContent() {
               fetchError={fetchError}
               tradingStatus={tradingStatus}
             />
-            {fetchError && (
-              <div style={{ color: D.red, marginBottom: 6, fontWeight: 500 }}>
-                [错误] 数据获取失败: {fetchError}
-                {ts > 0 && (
-                  <span style={{ color: D.comment, fontWeight: 400 }}>
-                    {" "}— 显示过期数据 (上次更新: {new Date(ts).toLocaleTimeString("zh-CN", { hour12: false })})
-                  </span>
-                )}
-              </div>
-            )}
+            <FetchErrorBanner fetchError={fetchError} ts={ts} />
 
             <div style={{ color: D.comment, marginBottom: 6 }}>
               节点: <span style={{ color: D.purple }}>{tabServices.length}</span>{"  "}
@@ -326,36 +297,48 @@ function WatchingContent() {
 
             {pinnedList.length > 0 && (
               <>
-                <div style={{ color: D.comment, padding: "4px 0 1px" }}>
-                  <span style={{ color: D.yellow }}>★</span> # ── 置顶 ({pinnedList.length}) ──
-                </div>
+                <CollapsibleSectionTitle
+                  label="置顶"
+                  count={pinnedList.length}
+                  variant="star"
+                />
                 {header}{pinnedList.map((s) => <WatchRow key={s.id} s={s} />)}
               </>
             )}
 
             {watchStock.length > 0 && (
               <>
-                <div style={{ color: D.comment, padding: "4px 0 1px", cursor: "pointer", userSelect: "none" }} onClick={() => setWatchStockOpen((v) => !v)}>
-                  <span style={{ color: D.purple }}>{watchStockOpen ? "▾" : "▸"}</span> # ── 自选:股票 ({watchStock.length}) ──
-                </div>
+                <CollapsibleSectionTitle
+                  label="自选:股票"
+                  count={watchStock.length}
+                  open={watchStockOpen}
+                  onToggle={() => setWatchStockOpen((v) => !v)}
+                />
                 {watchStockOpen && <>{header}{watchStock.map((s) => <WatchRow key={s.id} s={s} />)}</>}
               </>
             )}
 
             {watchETF.length > 0 && (
               <>
-                <div style={{ color: D.comment, padding: "4px 0 1px", cursor: "pointer", userSelect: "none" }} onClick={() => setWatchETFOpen((v) => !v)}>
-                  <span style={{ color: D.purple }}>{watchETFOpen ? "▾" : "▸"}</span> # ── 自选:ETF ({watchETF.length}) ──
-                </div>
+                <CollapsibleSectionTitle
+                  label="自选:ETF"
+                  count={watchETF.length}
+                  open={watchETFOpen}
+                  onToggle={() => setWatchETFOpen((v) => !v)}
+                />
                 {watchETFOpen && <>{header}{watchETF.map((s) => <WatchRow key={s.id} s={s} />)}</>}
               </>
             )}
 
             {hiddenList.length > 0 && (
               <>
-                <div style={{ color: D.comment, opacity: 0.6, padding: "4px 0 1px", cursor: "pointer", userSelect: "none" }} onClick={() => setHiddenOpen((v) => !v)}>
-                  <span style={{ color: D.purple }}>{hiddenOpen ? "▾" : "▸"}</span> # ── 隐藏 ({hiddenList.length}) ──
-                </div>
+                <CollapsibleSectionTitle
+                  label="隐藏"
+                  count={hiddenList.length}
+                  open={hiddenOpen}
+                  onToggle={() => setHiddenOpen((v) => !v)}
+                  opacity={0.6}
+                />
                 {hiddenOpen && <>{header}{hiddenList.map((s) => <WatchRow key={s.id} s={s} />)}</>}
               </>
             )}

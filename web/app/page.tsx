@@ -11,19 +11,27 @@ import MarketSummaryBar from './components/MarketSummaryBar';
 import { DataTrustBar } from "./components/DataTrustBar";
 import { QuoteStaleBanner } from "./components/QuoteStaleBanner";
 import { StockTagChips } from "./components/StockTagChips";
+import { CollapsibleSectionTitle } from "./components/CollapsibleSectionTitle";
+import { FetchErrorBanner } from "./components/FetchErrorBanner";
+import { MetricsLoadingBlock } from "./components/MetricsLoadingBlock";
+import { StockSearchToolbar } from "./components/StockSearchToolbar";
+import {
+  StockTableHeader,
+  l2Columns,
+  portfolioColumns,
+  tagColumn,
+  type StockTableColumn,
+} from "./components/StockTableHeader";
+import { TagFilterBanner } from "./components/TagFilterBanner";
 import {
   stockToolbarButtonStyle,
   stockToolbarFieldStyle,
-  stockToolbarLabelStyle,
-  stockToolbarMatchStyle,
-  stockToolbarStyle,
 } from "./components/toolbarStyles";
 import { useMetrics } from "./providers/MetricsProvider";
 import { useTradePlans } from "./hooks/useTradePlans";
 import { StockDrawer } from "./components/StockDrawer";
 
 import type { Service } from "./types";
-import { tagColor } from "./lib/tag-utils";
 import { useTradingStatus } from "./lib/trading-hours";
 import { buildPollHint, chgColor, fmtAmt, fmtMoney, pad } from "./lib/display-utils";
 
@@ -197,21 +205,6 @@ function Home() {
   const avail = activeTab === "HK" ? (settings.available_balance_hkd ?? 0) : (settings.available_balance_rmb ?? 0);
   const totalAssets = avail + tabPosition;
 
-  /* ── sort header helpers (per-section) ── */
-  const mkArrow = (st: SortState) => (k: SortKey) =>
-    st.key === k ? (st.asc ? " ▲" : " ▼") : "";
-  const mkHStyle = (st: SortState) => (
-    w: string,
-    k: SortKey | null,
-    right = false,
-  ): React.CSSProperties => ({
-    width: w,
-    textAlign: right ? "right" : "left",
-    cursor: k ? "pointer" : "default",
-    userSelect: "none",
-    color: k && st.key === k ? D.yellow : D.pink,
-  });
-
   /* ── Holdings Row ── */
   function HoldRow({ s }: { s: Service }) {
     const sign = s.change > 0 ? "+" : "";
@@ -324,7 +317,7 @@ function Home() {
           borderBottom: `1px solid #191a21`,
         }}
       >
-        <span style={{ color: s.star ? D.yellow : D.comment, width: "9ch" }}>{s.star ? "★" : " "} DEV</span>
+        <span style={{ color: s.star ? D.yellow : D.comment, width: "9ch" }}>{s.star ? "★" : " "}</span>
         <span style={{ color: D.cyan, width: "10ch" }}>{pad(s.id, 9)}</span>
         <span style={{ color: D.fg, width: "10ch" }}>{pad(s.name.slice(0, 6), 8)}</span>
         <span style={{ color: D.fg, width: "10ch", textAlign: "right" }}>
@@ -396,36 +389,20 @@ function Home() {
         </div>
 
         {loading && (
-          <div style={{ color: D.comment, padding: "16px 0" }}>
-            <span style={{ color: D.green }}>info</span> 正在加载数据...
-            <span style={{ animation: "blink 1s step-end infinite" }}>...</span>
-          </div>
+          <MetricsLoadingBlock blink />
         )}
 
         {!loading && (<>
         {/* tag filter bar */}
-        {filterTag && (
-          <div style={{ padding: "4px 8px", backgroundColor: "#44475a", color: D.fg, fontSize: 12, marginBottom: 4, display: "flex", alignItems: "center", gap: 8, borderRadius: 3 }}>
-            <span>筛选: <span style={{ color: tagColor(filterTag), fontWeight: 500 }}>{filterTag}</span></span>
-            <span style={{ cursor: "pointer", color: D.red, fontWeight: 500 }} onClick={() => setFilterTag(null)}>x</span>
-          </div>
-        )}
+        <TagFilterBanner tag={filterTag} onClear={() => setFilterTag(null)} />
 
         {/* search + add */}
-        <div style={stockToolbarStyle}>
-          <span style={stockToolbarLabelStyle}>搜索:</span>
-          <input
-            placeholder="代码或名称..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={stockToolbarFieldStyle(140)}
-          />
-          {search && (
-            <span style={stockToolbarMatchStyle}>
-              {searchFiltered.length}/{tabServices.length} 匹配
-            </span>
-          )}
-          <div style={{ flex: 1 }} />
+        <StockSearchToolbar
+          search={search}
+          onSearchChange={setSearch}
+          matchCount={searchFiltered.length}
+          totalCount={tabServices.length}
+        >
           <input
             placeholder="代码"
             value={addCode}
@@ -455,7 +432,7 @@ function Home() {
           >
             添加持仓
           </button>
-        </div>
+        </StockSearchToolbar>
 
         <DataTrustBar
           pollMs={pollMs}
@@ -475,17 +452,7 @@ function Home() {
           tradingStatus={tradingStatus}
         />
 
-        {/* error banner */}
-        {fetchError && (
-          <div style={{ color: D.red, marginBottom: 6, fontWeight: 500 }}>
-            [错误] 数据获取失败: {fetchError}
-            {ts > 0 && (
-              <span style={{ color: D.comment, fontWeight: 400 }}>
-                {" "}— 显示过期数据 (上次更新: {new Date(ts).toLocaleTimeString("zh-CN", { hour12: false })})
-              </span>
-            )}
-          </div>
-        )}
+        <FetchErrorBanner fetchError={fetchError} ts={ts} />
 
         {/* summary bar — current tab */}
         <div style={{ color: D.comment, marginBottom: 6 }}>
@@ -511,13 +478,13 @@ function Home() {
         {/* tab portfolio summary */}
         {tabHoldings.length > 0 && (
           <div style={{ color: D.comment, marginBottom: 6 }}>
-            可用:<span style={{ color: D.fg }}>{fmtMoney(avail).replace("+", "")}</span>
+            可用:<span style={{ color: D.fg }}>{fmtMoney(avail, { sign: "negativeOnly" })}</span>
             <span style={{ color: D.comment }}>{activeTab === "HK" ? "HK$" : "¥"}</span>
             {"  "}
-            总市值:<span style={{ color: D.fg }}>{fmtMoney(tabPosition).replace("+", "")}</span>
+            总市值:<span style={{ color: D.fg }}>{fmtMoney(tabPosition, { sign: "negativeOnly" })}</span>
             <span style={{ color: D.comment }}>{activeTab === "HK" ? "HK$" : "¥"}</span>
             {"  "}
-            总资产:<span style={{ color: D.fg }}>{fmtMoney(totalAssets).replace("+", "")}</span>
+            总资产:<span style={{ color: D.fg }}>{fmtMoney(totalAssets, { sign: "negativeOnly" })}</span>
             <span style={{ color: D.comment }}>{activeTab === "HK" ? "HK$" : "¥"}</span>
             {"  "}
             盈亏:<span style={{ color: chgColor(tabPnl) }}>{fmtMoney(tabPnl)}</span>
@@ -532,47 +499,17 @@ function Home() {
 
         {/* ══ Section renderer ══ */}
         {(() => {
-          const ha = mkArrow(holdSort);
-          const hs = mkHStyle(holdSort);
-          const ht = toggleHoldSort;
-
           const holdHeader = (
-            <div style={{ display: "flex", whiteSpace: "pre", color: D.pink, borderBottom: `1px solid ${D.currentLine}`, paddingBottom: 3, marginBottom: 2, fontWeight: 500 }}>
-              <span style={{ width: "9ch" }}> 标记</span>
-              <span style={hs("10ch", "id")} onClick={() => ht("id")}>代码{ha("id")}</span>
-              <span style={{ width: "10ch" }}>名称</span>
-              <span style={hs("10ch", "price", true)} onClick={() => ht("price")}>{pad("现价" + ha("price"), 9, true)}</span>
-              <span style={hs("9ch", "change", true)} onClick={() => ht("change")}>{pad("涨跌幅" + ha("change"), 8, true)}</span>
-              <span style={hs("9ch", "cost", true)} onClick={() => ht("cost")}>{pad("成本" + ha("cost"), 8, true)}</span>
-              <span style={{ width: "7ch", textAlign: "right" }}>{pad("股数", 6, true)}</span>
-              <span style={hs("10ch", "pnl", true)} onClick={() => ht("pnl")}>{pad("盈亏%" + ha("pnl"), 9, true)}</span>
-              <span style={hs("10ch", "mktVal", true)} onClick={() => ht("mktVal")}>{pad("市值" + ha("mktVal"), 9, true)}</span>
-              <span style={hs("8ch", "position_pct", true)} onClick={() => ht("position_pct")}>{pad("仓位" + ha("position_pct"), 7, true)}</span>
-              <span style={hs("10ch", "totalPnl", true)} onClick={() => ht("totalPnl")}>{pad("盈亏额" + ha("totalPnl"), 9, true)}</span>
-              <span style={hs("9ch", "dayPnl", true)} onClick={() => ht("dayPnl")}>{pad("今日" + ha("dayPnl"), 8, true)}</span>
-              <span style={hs("7ch", "volRatio", true)} onClick={() => ht("volRatio")}>{pad("量比" + ha("volRatio"), 6, true)}</span>
-              <span style={hs("8ch", "turnover", true)} onClick={() => ht("turnover")}>{pad("换手%" + ha("turnover"), 7, true)}</span>
-              <span style={hs("9ch", "amount", true)} onClick={() => ht("amount")}>{pad("成交额" + ha("amount"), 8, true)}</span>
-              {activeTab === "HK" && <span style={hs("9ch", "mainNetInflow" as SortKey, true)} onClick={() => ht("mainNetInflow" as SortKey)}>{pad("主力" + ha("mainNetInflow" as SortKey), 8, true)}</span>}
-              {activeTab === "HK" && <span style={hs("7ch", "mainNetInflowPct" as SortKey, true)} onClick={() => ht("mainNetInflowPct" as SortKey)}>{pad("主力%" + ha("mainNetInflowPct" as SortKey), 6, true)}</span>}
-              <span style={{ width: "12ch", color: D.pink, marginLeft: 8 }}>标签</span>
-            </div>
-          );
-
-          const secTitle = (
-            label: string,
-            count: number,
-            open: boolean,
-            toggle: (v: (prev: boolean) => boolean) => void,
-            opacity = 1,
-          ) => (
-            <div
-              style={{ color: D.comment, padding: "4px 0 1px", cursor: "pointer", userSelect: "none", opacity }}
-              onClick={() => toggle((v) => !v)}
-            >
-              <span style={{ color: D.purple }}>{open ? "▾" : "▸"}</span>
-              {" "}# ── {label} ({count}) ──
-            </div>
+            <StockTableHeader
+              columns={[
+                ...(portfolioColumns as StockTableColumn<SortKey>[]),
+                ...(activeTab === "HK" ? l2Columns<SortKey>() : []),
+                tagColumn<SortKey>(),
+              ]}
+              sortKey={holdSort.key}
+              sortAsc={holdSort.asc}
+              onSort={toggleHoldSort}
+            />
           );
 
           return (
@@ -580,10 +517,11 @@ function Home() {
               {/* ── 置顶 ── */}
               {pinnedList.length > 0 && (
                 <>
-                  <div style={{ color: D.comment, padding: "4px 0 1px" }}>
-                    <span style={{ color: D.yellow }}>★</span>
-                    {" "}# ── 置顶 ({pinnedList.length}) ──
-                  </div>
+                  <CollapsibleSectionTitle
+                    label="置顶"
+                    count={pinnedList.length}
+                    variant="star"
+                  />
                   {holdHeader}{pinnedList.map((s) => <HoldRow key={s.id} s={s} />)}
                 </>
               )}
@@ -591,7 +529,12 @@ function Home() {
               {/* ── 持仓:股票 ── */}
               {prodStock.length > 0 && (
                 <>
-                  {secTitle("持仓:股票", prodStock.length, prodStockOpen, setProdStockOpen)}
+                  <CollapsibleSectionTitle
+                    label="持仓:股票"
+                    count={prodStock.length}
+                    open={prodStockOpen}
+                    onToggle={() => setProdStockOpen((v) => !v)}
+                  />
                   {prodStockOpen && <>{holdHeader}{prodStock.map((s) => <HoldRow key={s.id} s={s} />)}</>}
                 </>
               )}
@@ -599,7 +542,12 @@ function Home() {
               {/* ── 持仓:ETF ── */}
               {prodETF.length > 0 && (
                 <>
-                  {secTitle("持仓:ETF", prodETF.length, prodETFOpen, setProdETFOpen)}
+                  <CollapsibleSectionTitle
+                    label="持仓:ETF"
+                    count={prodETF.length}
+                    open={prodETFOpen}
+                    onToggle={() => setProdETFOpen((v) => !v)}
+                  />
                   {prodETFOpen && <>{holdHeader}{prodETF.map((s) => <HoldRow key={s.id} s={s} />)}</>}
                 </>
               )}
@@ -607,7 +555,13 @@ function Home() {
               {/* ── 隐藏 ── */}
               {hiddenList.length > 0 && (
                 <>
-                  {secTitle("隐藏", hiddenList.length, hiddenOpen, setHiddenOpen, 0.6)}
+                  <CollapsibleSectionTitle
+                    label="隐藏"
+                    count={hiddenList.length}
+                    open={hiddenOpen}
+                    onToggle={() => setHiddenOpen((v) => !v)}
+                    opacity={0.6}
+                  />
                   {hiddenOpen && (
                     <>
                       {holdHeader}{hiddenList.map((s) => <HoldRow key={s.id} s={s} />)}

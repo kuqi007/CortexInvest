@@ -18,8 +18,12 @@ export function fmtAmt(n: number): string {
   return n.toFixed(0);
 }
 
-export function fmtMoney(n: number): string {
-  const sign = n >= 0 ? "+" : "";
+export function fmtMoney(
+  n: number,
+  options: { sign?: "always" | "negativeOnly" } = {},
+): string {
+  const signMode = options.sign ?? "always";
+  const sign = n >= 0 && signMode === "always" ? "+" : "";
   const abs = Math.abs(n);
   if (abs >= 1e4) return `${sign}${(n / 1e4).toFixed(1)}万`;
   return `${sign}${Math.round(n).toLocaleString("en-US")}`;
