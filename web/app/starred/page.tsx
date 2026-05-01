@@ -11,39 +11,25 @@ import MarketSummaryBar from "../components/MarketSummaryBar";
 import { DataTrustBar } from "../components/DataTrustBar";
 import { QuoteStaleBanner } from "../components/QuoteStaleBanner";
 import { StockTagChips } from "../components/StockTagChips";
+import {
+  stockToolbarButtonStyle,
+  stockToolbarFieldStyle,
+  stockToolbarLabelStyle,
+  stockToolbarMatchStyle,
+  stockToolbarSelectStyle,
+  stockToolbarStyle,
+} from "../components/toolbarStyles";
 import { useMetrics } from "../providers/MetricsProvider";
 import { StockDrawer } from "../components/StockDrawer";
 import { useTradePlans } from "../hooks/useTradePlans";
 import { useTradingStatus } from "../lib/trading-hours";
 import { tagColor } from "../lib/tag-utils";
+import { buildPollHint, chgColor, fmtAmt, fmtMoney, pad } from "../lib/display-utils";
 import { D } from "../theme";
 
 import type { Service } from "../types";
 
 const DEFAULT_POLL_SEC = 30;
-
-function chgColor(v: number) {
-  return v > 0 ? D.red : v < 0 ? D.green : D.comment;
-}
-
-function pad(s: string, n: number, right = false): string {
-  return right ? s.padStart(n) : s.padEnd(n);
-}
-
-function fmtAmt(n: number): string {
-  const abs = Math.abs(n);
-  const sign = n < 0 ? "-" : "";
-  if (abs >= 1e8) return sign + (abs / 1e8).toFixed(1) + "亿";
-  if (abs >= 1e4) return sign + (abs / 1e4).toFixed(0) + "万";
-  return n.toFixed(0);
-}
-
-function fmtMoney(n: number): string {
-  const sign = n >= 0 ? "+" : "";
-  const abs = Math.abs(n);
-  if (abs >= 1e4) return `${sign}${(n / 1e4).toFixed(1)}万`;
-  return `${sign}${Math.round(n).toLocaleString("en-US")}`;
-}
 
 export default function Page() {
   return (
@@ -416,26 +402,16 @@ function StarredPage() {
             )}
 
             {/* search + add */}
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
-              <span style={{ color: D.comment }}>搜索:</span>
+            <div style={stockToolbarStyle}>
+              <span style={stockToolbarLabelStyle}>搜索:</span>
               <input
                 placeholder="代码或名称..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                style={{
-                  background: D.currentLine,
-                  border: `1px solid ${D.comment}`,
-                  color: D.fg,
-                  fontFamily: "JetBrains Mono, monospace",
-                  fontSize: 12,
-                  padding: "2px 8px",
-                  outline: "none",
-                  borderRadius: 2,
-                  width: 140,
-                }}
+                style={stockToolbarFieldStyle(140)}
               />
               {search && (
-                <span style={{ color: D.comment, fontSize: 11 }}>
+                <span style={stockToolbarMatchStyle}>
                   {searchFiltered.length}/{tabStarred.length} 匹配
                 </span>
               )}
@@ -444,32 +420,13 @@ function StarredPage() {
                 placeholder="代码"
                 value={addCode}
                 onChange={(e) => setAddCode(e.target.value.toUpperCase())}
-                style={{
-                  background: D.currentLine,
-                  border: `1px solid ${D.comment}`,
-                  color: D.fg,
-                  fontFamily: "JetBrains Mono, monospace",
-                  fontSize: 12,
-                  padding: "2px 8px",
-                  outline: "none",
-                  borderRadius: 2,
-                  width: 90,
-                }}
+                style={stockToolbarFieldStyle(90)}
                 onKeyDown={(e) => { if (e.key === "Enter") handleAdd(); }}
               />
               <select
                 value={addType}
                 onChange={(e) => setAddType(e.target.value as "watching" | "holding")}
-                style={{
-                  background: D.currentLine,
-                  border: `1px solid ${D.comment}`,
-                  color: D.fg,
-                  fontFamily: "JetBrains Mono, monospace",
-                  fontSize: 12,
-                  padding: "2px 8px",
-                  outline: "none",
-                  borderRadius: 2,
-                }}
+                style={stockToolbarSelectStyle}
               >
                 <option value="watching">自选</option>
                 <option value="holding">持仓</option>
@@ -481,18 +438,7 @@ function StarredPage() {
                 value={addCost}
                 onChange={(e) => setAddCost(e.target.value)}
                 disabled={addType !== "holding"}
-                style={{
-                  background: D.currentLine,
-                  border: `1px solid ${D.comment}`,
-                  color: D.fg,
-                  fontFamily: "JetBrains Mono, monospace",
-                  fontSize: 12,
-                  padding: "2px 8px",
-                  outline: "none",
-                  borderRadius: 2,
-                  width: 70,
-                  opacity: addType !== "holding" ? 0.5 : 1,
-                }}
+                style={stockToolbarFieldStyle(70, addType !== "holding")}
               />
               <input
                 placeholder="股数"
@@ -501,32 +447,11 @@ function StarredPage() {
                 value={addShares}
                 onChange={(e) => setAddShares(e.target.value)}
                 disabled={addType !== "holding"}
-                style={{
-                  background: D.currentLine,
-                  border: `1px solid ${D.comment}`,
-                  color: D.fg,
-                  fontFamily: "JetBrains Mono, monospace",
-                  fontSize: 12,
-                  padding: "2px 8px",
-                  outline: "none",
-                  borderRadius: 2,
-                  width: 70,
-                  opacity: addType !== "holding" ? 0.5 : 1,
-                }}
+                style={stockToolbarFieldStyle(70, addType !== "holding")}
               />
               <button
                 onClick={handleAdd}
-                style={{
-                  background: D.purple,
-                  color: D.bg,
-                  border: "none",
-                  fontFamily: "JetBrains Mono, monospace",
-                  fontSize: 12,
-                  fontWeight: 700,
-                  padding: "3px 12px",
-                  borderRadius: 3,
-                  cursor: "pointer",
-                }}
+                style={stockToolbarButtonStyle}
               >
                 添加关注
               </button>
@@ -540,7 +465,7 @@ function StarredPage() {
               tradingStatus={tradingStatus}
               tradingLoading={tradingStatusLoading}
               dataRuntimeHint={dataRuntimeHint}
-              pollHint={<span>每 {pollMs / 1000} 秒拉取 /api/metrics · 星标</span>}
+              pollHint={<span>{buildPollHint(pollMs, "starred")}</span>}
             />
 
             <QuoteStaleBanner
