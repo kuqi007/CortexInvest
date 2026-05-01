@@ -17,6 +17,8 @@ interface DailySummary {
   generatedAt: number;
   report?: string;
   morning?: MorningBriefing | null;
+  /** True when today's row is missing; report is the latest prior daily_summaries with report_md */
+  summaryFallback?: boolean;
 }
 
 interface CloseEvent {
@@ -179,7 +181,10 @@ export default function DailyPage() {
   }, [fetchData, fetchCloseEvent]);
 
   const morning = data?.morning;
-  const hasReport = data?.report && data.date === new Date().toISOString().slice(0, 10);
+  const utcToday = new Date().toISOString().slice(0, 10);
+  const hasReport = Boolean(
+    data?.report && (data.date === utcToday || data.summaryFallback === true),
+  );
 
   return (
     <div
@@ -229,8 +234,26 @@ export default function DailyPage() {
                   </span>
                   <span style={{ color: D.purple, fontWeight: 700, fontSize: 13 }}>
                     信号日报 — {data.date}
+                    {data.summaryFallback && (
+                      <span style={{ color: D.comment, fontWeight: 400, marginLeft: 8 }}>
+                        （今日尚未生成，展示最近一期）
+                      </span>
+                    )}
                   </span>
                 </div>
+
+                {data.summaryFallback && summaryOpen && (
+                  <div
+                    style={{
+                      padding: "8px 16px 0",
+                      color: D.yellow,
+                      fontSize: 11,
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    以下为截至 {data.date} 的收盘复盘；生成今日日报后将自动替换。
+                  </div>
+                )}
 
                 {summaryOpen && (
                   <div style={{ padding: "16px 20px", lineHeight: 1.7 }}>

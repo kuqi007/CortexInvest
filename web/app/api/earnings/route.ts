@@ -7,6 +7,9 @@ const DAYS_DEFAULT = 7;
 const DAYS_MIN = 1;
 const DAYS_MAX = 366;
 
+/** Max length for Idempotency-Key / X-Idempotency-Key (storage + audit safety). */
+const MAX_IDEMPOTENCY_KEY_LEN = 128;
+
 /** Safe window for ?days= — avoids NaN/negative/huge cutoffs from bad query strings. */
 export function parseDaysAhead(raw: string | null): number {
   const n = parseInt(raw ?? String(DAYS_DEFAULT), 10);
@@ -83,10 +86,20 @@ export async function POST(request: NextRequest) {
 
     if (action === "trigger_check") {
       const requestPayloadJson = JSON.stringify({ action: "trigger_check" });
-      const idempotencyKey =
-        request.headers.get("Idempotency-Key") ||
+      const rawIdempotencyKey =
+        request.headers.get("Idempotency-Key") ??
         request.headers.get("X-Idempotency-Key");
-      const correlationId = idempotencyKey || randomUUID();
+      const trimmedKey = rawIdempotencyKey?.trim();
+      if (trimmedKey !== undefined && trimmedKey.length > MAX_IDEMPOTENCY_KEY_LEN) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `Idempotency-Key must be at most ${MAX_IDEMPOTENCY_KEY_LEN} characters`,
+          },
+          { status: 400 },
+        );
+      }
+      const correlationId = trimmedKey && trimmedKey.length > 0 ? trimmedKey : randomUUID();
       const requestId = randomUUID();
       const createdAtMs = Date.now();
       const jobRequest = {

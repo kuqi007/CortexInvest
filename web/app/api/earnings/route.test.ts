@@ -252,6 +252,20 @@ describe("POST /api/earnings", () => {
     expect(row.count).toBe(1);
   });
 
+  it("rejects Idempotency-Key longer than 128 characters", async () => {
+    const longKey = "k".repeat(129);
+    const request = new Request("http://localhost/api/earnings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": longKey },
+      body: JSON.stringify({ action: "trigger_check" }),
+    });
+    const response = await postEarnings(request as any);
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("128");
+  });
+
   it("unknown action returns 400", async () => {
     const request = new Request("http://localhost/api/earnings", {
       method: "POST",

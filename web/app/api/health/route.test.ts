@@ -77,6 +77,7 @@ describe("GET /api/health", () => {
     const body = await res.json();
     expect(body.success).toBe(true);
     expect(body.freshness.overall).toBe("unknown");
+    expect(body.freshness.overallScope).toBe("price_snapshots");
     expect(body.data.priceSnapshotsMs).toBeNull();
     expect(body.data.jobs.earningsCheckPending).toBe(0);
     expect(body.data.jobs.recentFailures).toEqual([]);
@@ -134,5 +135,28 @@ describe("GET /api/health", () => {
     expect(body.data.jobs.recentFailures).toHaveLength(1);
     expect(body.data.jobs.recentFailures[0].error).toBe("boom");
     expect(body.warnings).toContain("recent_job_failures");
+  });
+
+  it("only lists earnings_check failures and redacts long errors", async () => {
+    setupEmptyDb();
+    const db = new Database(TEST_DB_PATH);
+    const longErr = "x".repeat(400);
+    db.exec(
+      `INSERT INTO job_runs (id, job_type, runner, status, started_at_ms, finished_at_ms, error, correlation_id)
+       VALUES ('r-earn', 'earnings_check', 'd', 'failed', 1, 9999, '${longErr}', '${"c".repeat(80)}');`,
+    );
+    db.exec(
+      `INSERT INTO job_runs (id, job_type, runner, status, started_at_ms, finished_at_ms, error, correlation_id)
+       VALUES ('r-other', 'other_job', 'd', 'failed', 2, 9999, 'other-err', 'corr-x');`,
+    );
+    db.close();
+
+    const res = await healthGet();
+    const body = await res.json();
+    expect(body.data.jobs.recentFailures).toHaveLength(1);
+    expect(body.data.jobs.recentFailures[0].id).toBe("r-earn");
+    expect(body.data.jobs.recentFailures[0].error?.length).toBeLessThanOrEqual(201);
+    expect(body.data.jobs.recentFailures[0].error?.endsWith("…")).toBe(true);
+    expect(body.data.jobs.recentFailures[0].correlation_id.length).toBeLessThanOrEqual(65);
   });
 });
