@@ -649,6 +649,17 @@ CREATE INDEX IF NOT EXISTS idx_ai_investment_events_notify
 CREATE INDEX IF NOT EXISTS idx_ai_investment_events_symbol_date
     ON ai_investment_events(symbol, event_date);
 
+CREATE TABLE IF NOT EXISTS pre_earnings_scan_cache (
+    cache_key TEXT PRIMARY KEY,
+    matched_symbol TEXT NOT NULL,
+    ref_date TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at_ms INTEGER NOT NULL,
+    expires_at_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pre_earnings_scan_cache_expires
+    ON pre_earnings_scan_cache(expires_at_ms);
+
 CREATE TABLE IF NOT EXISTS trading_audit_outbox (
     event_id TEXT PRIMARY KEY,
     schema_version INTEGER NOT NULL DEFAULT 1,

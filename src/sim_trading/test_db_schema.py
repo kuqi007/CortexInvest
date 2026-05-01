@@ -24,6 +24,7 @@ REQUIRED_TRADING_TABLES = {
     "job_requests",
     "job_runs",
     "ai_investment_events",
+    "pre_earnings_scan_cache",
     "trading_audit_outbox",
     "trading_restore_sessions",
     "trading_restore_applied_events",

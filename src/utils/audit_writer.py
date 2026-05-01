@@ -30,6 +30,7 @@ EXCLUDED_AUDIT_TABLES: dict[str, set[str]] = {
         "daily_kline",
         "earnings_calendar",
         "earnings_history",
+        "pre_earnings_scan_cache",
         "indicator_cache",
         "sentiment_cache",
         "sector_rotation",

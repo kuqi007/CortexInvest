@@ -8,7 +8,7 @@ Phase 2: 持仓 + star 股票 × earnings_calendar → ai_investment_events（�
 - metrics 附带：对应市场 `earnings_market`、`trading_sessions_until_report`（(ref, report] 交易日数）；
   若 `earnings_history` 有可比 eps/营收，写入环比增幅字段。
 - 倒计时 / 交易日倒计时分支尽力跑 `analyze_pre_earnings_bullish_bearish`，写入 `metrics.pre_earnings` 与可选 `recommendation_json`。
-- 预判扫描按 `(matched, ref_date)` 进程内缓存（TTL 默认 4h，条数上限 512；`EARNINGS_PRE_SCAN_CACHE_TTL_SEC` 覆盖）。
+- 预判扫描按 `(matched, ref_date)` 写入 `trading.db:pre_earnings_scan_cache`（跨进程/重启仍命中；TTL 默认 4h，`EARNINGS_PRE_SCAN_CACHE_TTL_SEC` 覆盖；空结果不落盘）。
 - 自然日窗口 T5/T3/T1/T0（dedupe `earnings:{tag}:…`）。
 - 若自然日未命中且披露日在未来：按 **(今日, 披露日]** 交易日数命中 T5/T3/T1/T0 时追加 `earnings_countdown_session`（dedupe `earnings:sess{tag}:…`）。
 - dedupe_key 幂等。
@@ -20,7 +20,6 @@ import copy
 import json
 import os
 import uuid
-from collections import OrderedDict
 from datetime import date, datetime, timedelta
 from time import time
 from typing import Any, Optional
@@ -47,11 +46,6 @@ SOURCE = "earnings_calendar"
 # 预计披露日过后的跟进窗口（自然日，含 report_date 次日直到第 N 天）
 POST_REPORT_WINDOW_DAYS = 7
 
-# 预判扫描缓存（daemon 同进程内多标的 / 多日历行去重）
-_PRE_EARNINGS_SCAN_CACHE: OrderedDict[str, tuple[float, dict[str, Any]]] = OrderedDict()
-_PRE_EARNINGS_SCAN_CACHE_MAX_KEYS = 512
-
-
 def _pre_earnings_scan_cache_ttl_sec() -> float:
     raw = (os.environ.get("EARNINGS_PRE_SCAN_CACHE_TTL_SEC") or "").strip()
     if raw.isdigit():
@@ -63,6 +57,74 @@ def _pre_earnings_scan_cache_ttl_sec() -> float:
 
 def _pre_earnings_scan_cache_key(matched: str, ref: date) -> str:
     return f"{matched}|{ref.isoformat()}"
+
+
+def _pre_earnings_disk_cache_get(cache_key: str) -> Optional[dict[str, Any]]:
+    """读取未过期的缓存行；过期则删除该行。"""
+    now_ms = int(time() * 1000)
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT payload_json, expires_at_ms FROM pre_earnings_scan_cache
+            WHERE cache_key = ?
+            """,
+            (cache_key,),
+        ).fetchone()
+        if not row:
+            return None
+        exp = int(row["expires_at_ms"])
+        if exp <= now_ms:
+            conn.execute(
+                "DELETE FROM pre_earnings_scan_cache WHERE cache_key = ?",
+                (cache_key,),
+            )
+            conn.commit()
+            return None
+        return json.loads(row["payload_json"])
+    except Exception as e:
+        logger.debug("pre_earnings disk get failed: %s", e)
+        return None
+    finally:
+        conn.close()
+
+
+def _pre_earnings_disk_cache_put(
+    cache_key: str, matched: str, ref: date, payload: dict[str, Any]
+) -> None:
+    """写入缓存；空 dict 不写入（允许下次重试拉数）。"""
+    if not payload:
+        return
+    now_ms = int(time() * 1000)
+    ttl_ms = int(_pre_earnings_scan_cache_ttl_sec() * 1000)
+    expires_ms = now_ms + ttl_ms
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO pre_earnings_scan_cache (
+                cache_key, matched_symbol, ref_date, payload_json, created_at_ms, expires_at_ms
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                cache_key,
+                matched,
+                ref.isoformat(),
+                json.dumps(payload, ensure_ascii=False),
+                now_ms,
+                expires_ms,
+            ),
+        )
+        conn.execute(
+            "DELETE FROM pre_earnings_scan_cache WHERE expires_at_ms <= ?",
+            (now_ms,),
+        )
+        conn.commit()
+    except Exception as e:
+        logger.warning("pre_earnings disk put failed: %s", e)
+    finally:
+        conn.close()
 
 
 def infer_earnings_market(watch_symbol: str) -> str:
@@ -296,19 +358,13 @@ def _pre_earnings_scan_compute(cal_sym: str, matched: str, name: str) -> dict[st
 def _pre_earnings_scan_for_emit(
     cal_sym: str, matched: str, name: str, ref: date
 ) -> dict[str, Any]:
-    """预判扫描 + 按 (matched, ref 自然日) 进程内 TTL 缓存。"""
+    """预判扫描 + `trading.db` TTL 缓存（跨进程/重启）。"""
     key = _pre_earnings_scan_cache_key(matched, ref)
-    now = time()
-    ttl = _pre_earnings_scan_cache_ttl_sec()
-    if key in _PRE_EARNINGS_SCAN_CACHE:
-        ts, payload = _PRE_EARNINGS_SCAN_CACHE.pop(key)
-        if now - ts < ttl:
-            _PRE_EARNINGS_SCAN_CACHE[key] = (ts, payload)
-            return copy.deepcopy(payload)
+    hit = _pre_earnings_disk_cache_get(key)
+    if hit is not None:
+        return copy.deepcopy(hit)
     out = _pre_earnings_scan_compute(cal_sym, matched, name)
-    while len(_PRE_EARNINGS_SCAN_CACHE) >= _PRE_EARNINGS_SCAN_CACHE_MAX_KEYS:
-        _PRE_EARNINGS_SCAN_CACHE.popitem(last=False)
-    _PRE_EARNINGS_SCAN_CACHE[key] = (now, copy.deepcopy(out))
+    _pre_earnings_disk_cache_put(key, matched, ref, out)
     return copy.deepcopy(out)
 
 

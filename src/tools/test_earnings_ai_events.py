@@ -126,10 +126,12 @@ def test_countdown_includes_pre_earnings_when_scan_returns(tmp_path, monkeypatch
     assert rec["pre_earnings_score"] == 3.2
 
 
-def test_pre_earnings_cache_reuses_compute(monkeypatch):
+def test_pre_earnings_cache_reuses_compute(tmp_path, monkeypatch):
     import src.tools.earnings_ai_events as eae
 
-    eae._PRE_EARNINGS_SCAN_CACHE.clear()
+    monkeypatch.setattr(db, "_db_path_override", str(tmp_path / "trading.db"))
+    db.init_trading_db()
+
     calls = {"n": 0}
 
     def fake_compute(cal_sym, matched, name):
