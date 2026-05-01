@@ -14,6 +14,7 @@ import { NextRequest } from "next/server";
 const TEST_DB_PATH = join(tmpdir(), "test_earnings.db");
 let getEarnings: typeof import("./route").GET;
 let postEarnings: typeof import("./route").POST;
+let parseDaysAhead: typeof import("./route").parseDaysAhead;
 
 function setupTestDb() {
   cleanupTestDb();
@@ -58,12 +59,30 @@ beforeAll(async () => {
   const route = await import("./route");
   getEarnings = route.GET;
   postEarnings = route.POST;
+  parseDaysAhead = route.parseDaysAhead;
 });
 
 afterAll(() => {
   delete process.env.AI_INVESTOR_TRADING_DB_PATH;
   delete process.env.AI_INVESTOR_ALLOW_TEST_DB_OVERRIDE;
   cleanupTestDb();
+});
+
+describe("parseDaysAhead", () => {
+  it("defaults null, empty, and non-numeric values to 7", () => {
+    expect(parseDaysAhead(null)).toBe(7);
+    expect(parseDaysAhead("")).toBe(7);
+    expect(parseDaysAhead("abc")).toBe(7);
+    expect(parseDaysAhead("12.5")).toBe(12);
+  });
+
+  it("clamps to 1..366", () => {
+    expect(parseDaysAhead("0")).toBe(1);
+    expect(parseDaysAhead("-99")).toBe(1);
+    expect(parseDaysAhead("99999")).toBe(366);
+    expect(parseDaysAhead("366")).toBe(366);
+    expect(parseDaysAhead("1")).toBe(1);
+  });
 });
 
 describe("GET /api/earnings", () => {
@@ -105,6 +124,30 @@ describe("GET /api/earnings", () => {
     const body = await response.json();
     expect(body.count).toBe(1);
     expect(body.upcoming[0].symbol).toBe("000001");
+  });
+
+  it("clamps huge days so query window stays bounded", async () => {
+    const today = new Date();
+    const todayStr = today.toISOString().slice(0, 10);
+    const at200 = new Date(today);
+    at200.setDate(at200.getDate() + 200);
+    const at200Str = at200.toISOString().slice(0, 10);
+
+    const db = new Database(TEST_DB_PATH);
+    db.exec(`DELETE FROM earnings_calendar;`);
+    db.exec(`
+      INSERT INTO earnings_calendar (symbol, report_date, name, source, created_at, updated_at)
+      VALUES ('FAR200', '${at200Str}', 'x', 's', '${todayStr}', '${todayStr}');
+    `);
+    db.close();
+
+    const short = new NextRequest("http://localhost/api/earnings?days=1", { method: "GET" });
+    expect((await (await getEarnings(short)).json()).count).toBe(0);
+
+    const capped = new NextRequest("http://localhost/api/earnings?days=99999", { method: "GET" });
+    const body = await (await getEarnings(capped)).json();
+    expect(body.count).toBe(1);
+    expect(body.upcoming[0].symbol).toBe("FAR200");
   });
 
   it("returns last_updated", async () => {

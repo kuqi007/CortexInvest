@@ -3,12 +3,25 @@ import { randomUUID } from "crypto";
 import { openTradingDb } from "../../lib/db";
 import { buildAuditEventV2, insertTradingAuditOutbox, makeActor } from "../../lib/audit";
 
+const DAYS_DEFAULT = 7;
+const DAYS_MIN = 1;
+const DAYS_MAX = 366;
+
+/** Safe window for ?days= — avoids NaN/negative/huge cutoffs from bad query strings. */
+export function parseDaysAhead(raw: string | null): number {
+  const n = parseInt(raw ?? String(DAYS_DEFAULT), 10);
+  if (!Number.isFinite(n)) {
+    return DAYS_DEFAULT;
+  }
+  return Math.min(DAYS_MAX, Math.max(DAYS_MIN, n));
+}
+
 // GET /api/earnings — 获取财报日历列表
 export async function GET(request: NextRequest) {
   const db = openTradingDb(true);
   try {
     const searchParams = request.nextUrl.searchParams;
-    const days = parseInt(searchParams.get("days") || "7", 10);
+    const days = parseDaysAhead(searchParams.get("days"));
 
     const now = new Date();
     const cutoff = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
@@ -61,7 +74,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST /api/earnings — 手动触发一次检查（仅CLI触发，API不做实际操作）
+// POST /api/earnings — 手动触发财报检查：写入 job_requests，由 earnings_calendar_daemon 认领并落 job_runs
 export async function POST(request: NextRequest) {
   const db = openTradingDb();
   try {
