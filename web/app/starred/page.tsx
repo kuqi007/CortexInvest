@@ -8,6 +8,8 @@ import { AppTabs } from "../components/AppTabs";
 import { AppTitleBar } from "../components/AppTitleBar";
 import { MarketSwitch, type MarketTab } from "../components/MarketSwitch";
 import MarketSummaryBar from "../components/MarketSummaryBar";
+import { DataTrustBar } from "../components/DataTrustBar";
+import { StockTagChips } from "../components/StockTagChips";
 import { useMetrics } from "../providers/MetricsProvider";
 import { StockDrawer } from "../components/StockDrawer";
 import { useTradePlans } from "../hooks/useTradePlans";
@@ -51,8 +53,8 @@ export default function Page() {
 }
 
 function StarredPage() {
-  const { services, ts, tick, loading, settings, fetchError, alertEvents, marketTurnover, refresh } = useMetrics();
-  const { status: tradingStatus } = useTradingStatus();
+  const { services, ts, tick, loading, settings, fetchError, alertEvents, marketTurnover, refresh, dataRuntimeHint } = useMetrics();
+  const { status: tradingStatus, loading: tradingStatusLoading } = useTradingStatus();
   const searchParams = useSearchParams();
 
   function getDefaultTab(): MarketTab {
@@ -203,11 +205,6 @@ function StarredPage() {
     [services]
   );
 
-  const now = ts
-    ? new Date(ts).toLocaleTimeString("zh-CN", { hour12: false })
-    : "--:--:--";
-  const isStale = (ts > 0 && Date.now() - ts > pollMs * 3) || fetchError !== null;
-
   // Stats
   const starredCount = tagFiltered.length;
   const starredUp = tagFiltered.filter((s) => s.change > 0).length;
@@ -229,19 +226,6 @@ function StarredPage() {
     cursor: k ? "pointer" : "default",
     userSelect: "none",
     color: k && sortState.key === k ? D.yellow : D.pink,
-  });
-
-  // Tag chip style
-  const tagChipStyle = (tag: string): React.CSSProperties => ({
-    display: "inline-block",
-    padding: "1px 6px",
-    borderRadius: 3,
-    fontSize: 10,
-    marginRight: 3,
-    cursor: "pointer",
-    color: "#282a36",
-    background: tagColor(tag),
-    whiteSpace: "nowrap",
   });
 
   // Section title with collapse (中文与 holdings/watching 一致)
@@ -364,9 +348,11 @@ function StarredPage() {
         )}
         {/* 标签 */}
         <span style={{ width: "12ch", overflow: "hidden", whiteSpace: "nowrap", marginLeft: 8 }}>
-          {(s.tags ?? []).map((t) => (
-            <span key={t} style={tagChipStyle(t)} onClick={(e) => { e.stopPropagation(); setFilterTag(t); }}>{t}</span>
-          ))}
+          <StockTagChips
+            tags={s.tags}
+            maxVisible={3}
+            onTagClick={(t, e) => { e.stopPropagation(); setFilterTag(t); }}
+          />
         </span>
       </div>
     );
@@ -545,16 +531,16 @@ function StarredPage() {
               </button>
             </div>
 
-            {/* 状态行 */}
-            <div style={{ color: D.comment, marginBottom: 6 }}>
-              <span>Every {pollMs / 1000}.0s: svc-monitor --starred</span>
-              <span style={{ float: "right" }}>
-                {isStale && <span style={{ color: D.red, fontWeight: 500, marginRight: 8 }}>STALE</span>}
-                {tradingStatus?.trading ? "交易中" : "休市"}
-                {" | "}
-                devbox: <span style={{ color: isStale ? D.red : D.comment }}>{now}</span> &nbsp; refresh #{tick}
-              </span>
-            </div>
+            <DataTrustBar
+              pollMs={pollMs}
+              ts={ts}
+              tick={tick}
+              fetchError={fetchError}
+              tradingStatus={tradingStatus}
+              tradingLoading={tradingStatusLoading}
+              dataRuntimeHint={dataRuntimeHint}
+              pollHint={<span>每 {pollMs / 1000}s · starred 视图</span>}
+            />
 
             {fetchError && (
               <div style={{ color: D.red, marginBottom: 6, fontWeight: 500 }}>

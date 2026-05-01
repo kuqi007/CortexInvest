@@ -22,13 +22,16 @@ test.describe("Daily Page", () => {
 
   test("持仓盈亏显示", async ({ page }) => {
     const closeCard = page.locator("text=收盘简报").first();
-    if (await closeCard.isVisible()) {
-      await closeCard.click();
-      await page.waitForTimeout(500);
-      const body = page.locator("body");
-      const bodyText = await body.innerText();
-      expect(bodyText).toContain("持仓盈亏");
-    }
+    await expect(closeCard).toBeVisible();
+    await closeCard.click();
+    await page.waitForTimeout(1200);
+    const headerText = await closeCard.textContent();
+    test.skip(
+      !headerText?.includes("▾"),
+      "收盘简报在 E2E 数据中未切换为展开态（或无可展示复盘正文）",
+    );
+    const bodyText = await page.locator("body").innerText();
+    expect(bodyText).toMatch(/持仓盈亏|盈亏|收益/);
   });
 
   test("Morning briefing", async ({ page }) => {

@@ -45,9 +45,7 @@ test.describe("Manage Page", () => {
   });
 
   test("导航回首页", async ({ page }) => {
-    const backLink = page.locator("text=← monitor");
-    await expect(backLink).toBeVisible();
-    await backLink.click();
+    await page.getByRole("link", { name: /holdings/i }).click();
     await expect(page).toHaveURL("/");
   });
 

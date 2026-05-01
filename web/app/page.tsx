@@ -8,6 +8,9 @@ import { AppTabs } from "./components/AppTabs";
 import { AppTitleBar } from "./components/AppTitleBar";
 import { MarketSwitch, type MarketTab } from "./components/MarketSwitch";
 import MarketSummaryBar from './components/MarketSummaryBar';
+import { DataTrustBar } from "./components/DataTrustBar";
+import { StockTagChips } from "./components/StockTagChips";
+import { computeQuoteTrust } from "./lib/data-trust";
 import { useMetrics } from "./providers/MetricsProvider";
 import { useTradePlans } from "./hooks/useTradePlans";
 import { StockDrawer } from "./components/StockDrawer";
@@ -53,8 +56,8 @@ export default function Page() {
 }
 
 function Home() {
-  const { services, ts, tick, loading, settings, fetchError, alertEvents, marketTurnover, hkdCnyRate, refresh } = useMetrics();
-  const { status: tradingStatus } = useTradingStatus();
+  const { services, ts, tick, loading, settings, fetchError, alertEvents, marketTurnover, hkdCnyRate, refresh, dataRuntimeHint } = useMetrics();
+  const { status: tradingStatus, loading: tradingStatusLoading } = useTradingStatus();
   // tab state: URL ?tab=A|HK, default by time (before 15:00 → A, after → HK)
   const searchParams = useSearchParams();
 
@@ -189,7 +192,8 @@ function Home() {
   const now = ts
     ? new Date(ts).toLocaleTimeString("zh-CN", { hour12: false })
     : "--:--:--";
-  const isStale = (ts > 0 && Date.now() - ts > pollMs * 3) || fetchError !== null;
+  const quoteTrust = computeQuoteTrust({ ts, pollMs, fetchError, tradingStatus });
+  const quoteAgeMs = ts > 0 ? Date.now() - ts : 0;
 
 
   // ── 当前 Tab 统计 ──
@@ -223,19 +227,6 @@ function Home() {
     cursor: k ? "pointer" : "default",
     userSelect: "none",
     color: k && st.key === k ? D.yellow : D.pink,
-  });
-
-  /* ── Tag chip style ── */
-  const tagChipStyle = (tag: string): React.CSSProperties => ({
-    display: "inline-block",
-    padding: "1px 6px",
-    borderRadius: 3,
-    fontSize: 10,
-    marginRight: 3,
-    cursor: "pointer",
-    color: "#282a36",
-    background: tagColor(tag),
-    whiteSpace: "nowrap",
   });
 
   /* ── Holdings Row ── */
@@ -326,9 +317,11 @@ function Home() {
           {s.mainNetInflowPct != null ? `${s.mainNetInflowPct >= 0 ? "+" : ""}${s.mainNetInflowPct.toFixed(1)}%` : pad("-", 6, true)}
         </span>)}
         <span style={{ width: "12ch", overflow: "hidden", whiteSpace: "nowrap", marginLeft: 8 }}>
-          {(s.tags ?? []).map((t) => (
-            <span key={t} style={tagChipStyle(t)} onClick={(e) => { e.stopPropagation(); setFilterTag(t); }}>{t}</span>
-          ))}
+          <StockTagChips
+            tags={s.tags}
+            maxVisible={3}
+            onTagClick={(t, e) => { e.stopPropagation(); setFilterTag(t); }}
+          />
         </span>
       </div>
     );
@@ -379,9 +372,11 @@ function Home() {
           {s.mainNetInflowPct != null ? `${s.mainNetInflowPct >= 0 ? "+" : ""}${s.mainNetInflowPct.toFixed(1)}%` : pad("-", 6, true)}
         </span>)}
         <span style={{ width: "12ch", overflow: "hidden", whiteSpace: "nowrap", marginLeft: 8 }}>
-          {(s.tags ?? []).map((t) => (
-            <span key={t} style={tagChipStyle(t)} onClick={() => setFilterTag(t)}>{t}</span>
-          ))}
+          <StockTagChips
+            tags={s.tags}
+            maxVisible={3}
+            onTagClick={(t, e) => { e.stopPropagation(); setFilterTag(t); }}
+          />
         </span>
       </div>
     );
@@ -529,70 +524,19 @@ function Home() {
           </button>
         </div>
 
-        {/* watch header */}
-        <div style={{ color: D.comment, marginBottom: 6 }}>
-          <span>每 {pollMs / 1000} 秒轮询一次</span>
-          <span style={{ float: "right", display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ color: tradingStatus?.markets?.cn ? D.green : D.comment, fontSize: 11, fontWeight: 600 }}>● A股 {tradingStatus?.markets?.cn ? "交易中" : "休市"}</span>
-            <span style={{ color: tradingStatus?.markets?.hk ? D.green : D.comment, fontSize: 11, fontWeight: 600 }}>● 港股 {tradingStatus?.markets?.hk ? "交易中" : "休市"}</span>
-            <span style={{ color: D.comment }}>|</span>
-            {/* Freshness chip */}
-            {isStale && Date.now() - ts > pollMs * 10 ? (
-              // Very stale (>5 min) — show "已休市"
-              <span style={{
-                color: D.comment,
-                fontSize: 11,
-                fontWeight: 600,
-                background: "rgba(98, 114, 164, 0.15)",
-                border: `1px solid ${D.comment}`,
-                padding: "1px 8px",
-                borderRadius: 20,
-              }}>已休市</span>
-            ) : isStale ? (
-              // Stale (2–5 min) — show minutes in orange
-              <span style={{
-                color: D.orange,
-                fontSize: 11,
-                fontWeight: 600,
-                background: "rgba(255, 184, 108, 0.12)",
-                border: `1px solid ${D.orange}`,
-                padding: "1px 8px",
-                borderRadius: 20,
-              }}>数据 {Math.round((Date.now() - ts) / 60000)} 分钟前更新</span>
-            ) : (
-              // Fresh (<=2 min) — show seconds in green
-              <span style={{
-                color: D.green,
-                fontSize: 11,
-                fontWeight: 600,
-                background: "rgba(80, 250, 123, 0.10)",
-                border: `1px solid ${D.green}`,
-                padding: "1px 8px",
-                borderRadius: 20,
-              }}>数据 {Math.round((Date.now() - ts) / 1000)} 秒前更新</span>
-            )}
-            {/* Alert status pill */}
-            <span style={{
-              fontSize: 11,
-              fontWeight: 600,
-              color: isStale ? D.red : D.green,
-              background: isStale ? "rgba(255, 85, 85, 0.12)" : "rgba(80, 250, 123, 0.10)",
-              border: `1px solid ${isStale ? D.red : D.green}`,
-              padding: "1px 8px",
-              borderRadius: 20,
-            }}>告警 {isStale ? "过期" : "正常"}</span>
-            <span style={{ color: D.comment }}>|</span>
-            <span style={{ color: isStale ? D.red : D.comment }}>时间: {now}</span>
-            <span style={{ color: D.comment }}> #{tick}</span>
-          </span>
-        </div>
+        <DataTrustBar
+          pollMs={pollMs}
+          ts={ts}
+          tick={tick}
+          fetchError={fetchError}
+          tradingStatus={tradingStatus}
+          tradingLoading={tradingStatusLoading}
+          dataRuntimeHint={dataRuntimeHint}
+          pollHint={<span>每 {pollMs / 1000} 秒轮询一次（Web → /api/metrics）</span>}
+        />
 
-        {/* stale warning/info banner — shows after > 3 min stale:
-            - A股交易中 → orange warning "行情已停止更新" (poller可能挂了)
-            - A股收盘 + 港股交易中 → gray "A股已收盘，港股仍在交易" (正常，无需警告)
-            - A股和港股都收盘 → gray "已休市" (正常休市)
-        */}
-        {isStale && (Date.now() - ts > pollMs * 6) && (
+        {/* Context banner — snapshot age vs session; skipped when fetch failed (error strip handles that) */}
+        {!fetchError && ts > 0 && quoteAgeMs > pollMs * 6 && (
           tradingStatus?.markets?.cn ? (
           <div style={{
             border: `1px solid ${D.orange}`,
@@ -610,11 +554,10 @@ function Home() {
           }}>
             <span style={{ color: D.orange, fontSize: 14 }}>⚠</span>
             <span>
-              行情已停止更新 <span style={{ color: D.orange, fontWeight: 700 }}>{Math.round((Date.now() - ts) / 60000)}</span> 分钟 — 请检查 poller 进程是否在运行
+              A股交易时段 · 行情快照已 <span style={{ color: D.orange, fontWeight: 700 }}>{Math.round(quoteAgeMs / 60000)}</span> 分钟未刷新 — 优先检查 poller / trading.db 写入
             </span>
           </div>
           ) : tradingStatus?.markets?.hk ? (
-          // A股收盘，港股仍在交易——数据陈旧是正常的，不警告
           <div style={{
             border: `1px solid ${D.comment}`,
             borderLeft: `3px solid ${D.comment}`,
@@ -629,10 +572,9 @@ function Home() {
             alignItems: "center",
             gap: 8,
           }}>
-            <span>● A股已收盘，港股仍在交易</span>
+            <span>● A股已收盘，港股仍在交易 — 快照 age 偏大通常与 A 股侧停更有关；仍以 SQLite last 时间为准</span>
           </div>
           ) : (
-          // A股和港股都收盘——正常休市
           <div style={{
             border: `1px solid ${D.comment}`,
             borderLeft: `3px solid ${D.comment}`,
@@ -647,7 +589,11 @@ function Home() {
             alignItems: "center",
             gap: 8,
           }}>
-            <span>● 已休市，行情暂时停止更新</span>
+            <span>
+              ● {quoteTrust === "CLOSED_STALE"
+                ? "休市 · 快照偏旧（过久未见 DB 写入），确认 poller 是否停用"
+                : "休市 · CLOSED — last 行情时间见顶栏"}
+            </span>
           </div>
           )
         )}

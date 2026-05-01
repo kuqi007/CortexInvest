@@ -3,6 +3,14 @@ import { openConfigDb, openTradingDb } from "../../lib/db";
 
 const EMPTY = { services: [], ts: 0, settings: {} };
 
+function dataRuntimeHintFromEnv(): string | undefined {
+  const dir = process.env.AI_INVESTOR_DATA_DIR ?? "";
+  if (!dir) return undefined;
+  const n = dir.replace(/\\/g, "/");
+  if (n.includes(".e2e-runs") || n.includes(".e2e-data")) return "E2E";
+  return undefined;
+}
+
 type DbWatchRow = {
   symbol: string;
   name: string;
@@ -413,6 +421,11 @@ export async function GET() {
 
     if (marketTurnover) {
       response.marketTurnover = marketTurnover;
+    }
+
+    const hint = dataRuntimeHintFromEnv();
+    if (hint) {
+      response.dataRuntimeHint = hint;
     }
 
     return NextResponse.json(response);
