@@ -21,10 +21,13 @@ const DATA_DIR = resolveDataDir();
 function dbPath(envName: string, defaultPath: string) {
   const override = process.env[envName];
   if (!override) return defaultPath;
-  const allowOverride = process.env.AI_INVESTOR_ALLOW_TEST_DB_OVERRIDE === "1";
-  const isTestRuntime = process.env.NODE_ENV === "test" || process.env.VITEST;
-  if (allowOverride && isTestRuntime) return override;
-  throw new Error(`${envName} requires AI_INVESTOR_ALLOW_TEST_DB_OVERRIDE=1 in test`);
+  // Test runtime needs flag to prevent accidental prod override; dev always allowed
+  if (process.env.NODE_ENV === "test" || process.env.VITEST) {
+    if (process.env.AI_INVESTOR_ALLOW_TEST_DB_OVERRIDE !== "1") {
+      throw new Error(`${envName} requires AI_INVESTOR_ALLOW_TEST_DB_OVERRIDE=1 in test`);
+    }
+  }
+  return override;
 }
 
 export const CONFIG_DB_PATH = dbPath("AI_INVESTOR_CONFIG_DB_PATH", join(DATA_DIR, "config.db"));
