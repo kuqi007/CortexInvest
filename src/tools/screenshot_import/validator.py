@@ -140,6 +140,75 @@ def _load_catalog_name_index(catalog_path: str) -> dict[str, tuple[str, ...]]:
     return {name: tuple(sorted(codes)) for name, codes in by_name.items()}
 
 
+# 东财等客户端常用短名称；与 watchlist 全名做保守模糊匹配（唯一命中才采用）。
+_FUZZY_STRIP_SUFFIXES: tuple[str, ...] = ("股份", "股")
+
+
+def _strip_listing_name_suffixes(norm: str) -> str:
+    t = norm.strip()
+    if not t:
+        return t
+    changed = True
+    while changed:
+        changed = False
+        for suf in _FUZZY_STRIP_SUFFIXES:
+            if len(t) > len(suf) + 1 and t.endswith(suf):
+                t = t[: -len(suf)].strip()
+                changed = True
+    return t
+
+
+def _watchlist_item_name_variants(raw_item: Mapping) -> list[str]:
+    """Names and aliases from a watchlist entry (normalized for lookup)."""
+    out: list[str] = []
+    for key in ("name", "alias"):
+        raw = raw_item.get(key)
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        n = _normalized_name(_display_name_for_lookup(raw))
+        if n:
+            out.append(n)
+    return out
+
+
+def _fuzzy_watchlist_name_hit(needle: str, candidate: str) -> bool:
+    """True if screenshot/listing label `needle` plausibly refers to `candidate` (local full name)."""
+    if not needle or not candidate:
+        return False
+    if needle == candidate:
+        return True
+    cn = _strip_listing_name_suffixes(needle)
+    cc = _strip_listing_name_suffixes(candidate)
+    if cn and cc and cn == cc:
+        return True
+    shorter, longer = (needle, candidate) if len(needle) <= len(candidate) else (candidate, needle)
+    if len(shorter) >= 2 and shorter in longer:
+        return True
+    if len(cn) >= 2 and len(cc) >= 2 and (cn in cc or cc in cn):
+        return True
+    return False
+
+
+def _collect_fuzzy_watchlist_codes(
+    needle: str,
+    existing_watchlist: Mapping[str, object],
+) -> list[str]:
+    if not needle:
+        return []
+    found: list[str] = []
+    for raw_code, raw_item in existing_watchlist.items():
+        if not isinstance(raw_item, Mapping):
+            continue
+        code = _normalize_catalog_code(str(raw_code))
+        if code is None:
+            continue
+        for variant in _watchlist_item_name_variants(raw_item):
+            if _fuzzy_watchlist_name_hit(needle, variant):
+                found.append(code)
+                break
+    return found
+
+
 def resolve_code_by_catalog_name(
     name: str,
     catalog_path: Path = DEFAULT_STOCK_CATALOG_PATH,
@@ -149,6 +218,54 @@ def resolve_code_by_catalog_name(
     if not codes:
         codes = index.get(_normalized_name(_stock_name_alias(name)), ())
     return codes[0] if len(codes) == 1 else None
+
+
+def _name_lookup_variants(raw_name: str) -> list[str]:
+    """Normalized labels for catalog fuzzy match (东财短名、比亚迪A、×股 等)."""
+    lookup = _display_name_for_lookup(raw_name)
+    base = _normalized_name(lookup)
+    out: list[str] = []
+    for x in (base, _strip_listing_name_suffixes(base)):
+        if x:
+            out.append(x)
+    if len(base) > 2 and base.endswith("a"):
+        stripped_a = base[:-1].strip()
+        if stripped_a:
+            out.append(stripped_a)
+            sa2 = _strip_listing_name_suffixes(stripped_a)
+            if sa2:
+                out.append(sa2)
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for x in out:
+        if x not in seen:
+            seen.add(x)
+            deduped.append(x)
+    return deduped
+
+
+def resolve_code_by_catalog_fuzzy(
+    name: str,
+    catalog_path: Path = DEFAULT_STOCK_CATALOG_PATH,
+) -> str | None:
+    """When exact catalog name miss, match short listing labels to full official names (unique code only)."""
+    variants = _name_lookup_variants(name)
+    if not variants:
+        return None
+    index = _load_catalog_name_index(str(catalog_path))
+    matches: set[str] = set()
+    for cat_name, codes in index.items():
+        if not cat_name:
+            continue
+        hit = False
+        for v in variants:
+            if _fuzzy_watchlist_name_hit(v, cat_name):
+                hit = True
+                break
+        if hit:
+            for c in codes:
+                matches.add(c)
+    return next(iter(matches)) if len(matches) == 1 else None
 
 
 def _mx_entity_tags(payload: object) -> list[Mapping[str, object]]:
@@ -237,7 +354,15 @@ def resolve_code_by_name(
         return unique[0]
     if len(unique) > 1:
         return None
+    if existing_watchlist is not None:
+        fuzzy_codes = _collect_fuzzy_watchlist_codes(needle, existing_watchlist)
+        unique_fuzzy = sorted(set(fuzzy_codes))
+        if len(unique_fuzzy) == 1:
+            return unique_fuzzy[0]
     code = resolve_code_by_catalog_name(lookup_name, catalog_path)
+    if code is not None:
+        return code
+    code = resolve_code_by_catalog_fuzzy(lookup_name, catalog_path)
     if code is not None:
         return code
     return resolve_code_by_mx_name(lookup_name) if allow_external_lookup else None

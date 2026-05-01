@@ -9,6 +9,7 @@ from src.tools.screenshot_import.models import FieldConfidence, HoldingStockRow,
 from src.tools.screenshot_import.validator import (
     normalize_code,
     normalize_row,
+    resolve_code_by_catalog_fuzzy,
     resolve_code_by_catalog_name,
     resolve_code_by_name,
     resolve_code_by_mx_name,
@@ -127,6 +128,54 @@ def test_resolve_code_by_name_requires_unique_match() -> None:
     }
 
     assert resolve_code_by_name("比亚迪股份", existing) is None
+
+
+def test_resolve_code_by_name_fuzzy_watchlist_eastmoney_short_label() -> None:
+    existing = {"HK01211": {"name": "比亚迪股份"}}
+    assert resolve_code_by_name("比亚迪股", existing) == "HK01211"
+    assert resolve_code_by_name("比亚迪", existing) == "HK01211"
+
+
+def test_resolve_code_by_name_fuzzy_watchlist_substring_unique() -> None:
+    existing = {"HK00700": {"name": "腾讯控股"}}
+    assert resolve_code_by_name("腾讯", existing) == "HK00700"
+
+
+def test_resolve_code_by_name_fuzzy_watchlist_matches_alias() -> None:
+    existing = {"HK00700": {"name": "腾讯控股", "alias": "港股腾讯"}}
+    assert resolve_code_by_name("港股腾讯", existing) == "HK00700"
+
+
+def test_resolve_code_by_name_fuzzy_ambiguous_no_unique_code(tmp_path: Path) -> None:
+    existing = {
+        "HK01211": {"name": "比亚迪股份"},
+        "HK00001": {"name": "比亚迪电子"},
+    }
+    catalog = tmp_path / "catalog.json"
+    catalog.write_text('{"stocks": {}}', encoding="utf-8")
+    assert (
+        resolve_code_by_name("比亚迪", existing, catalog, allow_external_lookup=False)
+        is None
+    )
+
+
+def test_resolve_code_by_catalog_fuzzy_short_label(tmp_path: Path) -> None:
+    catalog = tmp_path / "catalog.json"
+    catalog.write_text(
+        '{"stocks": {"02259.HK": {"name": "紫金黄金国际"}}}',
+        encoding="utf-8",
+    )
+    assert resolve_code_by_catalog_fuzzy("紫金黄金", catalog) == "HK02259"
+
+
+def test_resolve_code_by_name_catalog_fuzzy_eastmoney_labels(tmp_path: Path) -> None:
+    catalog = tmp_path / "catalog.json"
+    catalog.write_text(
+        '{"stocks": {"01211.HK": {"name": "比亚迪股份"}}}',
+        encoding="utf-8",
+    )
+    assert resolve_code_by_name("比亚迪股", {}, catalog, allow_external_lookup=False) == "HK01211"
+    assert resolve_code_by_name("比亚迪A", {}, catalog, allow_external_lookup=False) == "HK01211"
 
 
 def test_resolve_code_by_catalog_name(tmp_path: Path) -> None:
