@@ -1518,8 +1518,41 @@ def write_alert_events(alerts: list[dict]):
 AI_INVESTMENT_EVENT_BATCH = 20
 
 
+def _send_ai_investment_feishu(row: dict, alert: dict) -> bool:
+    """Send Feishu card only (no macOS). Returns whether the API reported success."""
+    from src.tools.stock_monitor import feishu_send
+
+    title = (alert.get("title") or "AI 投资").strip()
+    sym = (row.get("symbol") or "").strip()
+    summary = (row.get("summary") or "").strip()
+    verdict = (row.get("verdict") or "").strip()
+    source = (row.get("source") or "").strip()
+    scope = (row.get("delivery_scope") or "").strip()
+    lines: list[str] = []
+    if summary:
+        lines.append(summary)
+    if verdict:
+        lines.append(f"结论: {verdict}")
+    if source or scope:
+        lines.append(f"来源: {source} · {scope}")
+    message = "\n".join(lines) if lines else alert.get("message", title)
+
+    if sym:
+        stock_info = {
+            "name": (row.get("name") or sym).strip(),
+            "code": sym,
+            "price": "",
+            "change_pct": 0.0,
+            "_kind": "ai_investment",
+        }
+        return bool(feishu_send(title, message, change_pct=0.0, stock_info=stock_info))
+    return bool(feishu_send(title, message, change_pct=None, stock_info=None))
+
+
 def _map_ai_investment_row_to_alert(row: dict) -> tuple[dict | None, str]:
-    """Build one alert dict for write_alert_events / stealth_dispatch; return notify_status to persist.
+    """Build one alert dict for write_alert_events; return notify_status to persist.
+
+    Feishu scopes are delivered via _send_ai_investment_feishu only (no stealth_dispatch).
 
     Returns (None, status) when the row should be marked suppressed without an alert.
     """
@@ -1631,12 +1664,14 @@ def consume_pending_ai_investment_events() -> int:
                 continue
 
             write_alert_events([alert])
-            lvl = alert.get("_level", 3)
-            if lvl == 1:
-                stealth_dispatch([alert], sound="default")
-            elif lvl == 2:
-                stealth_dispatch([alert], sound="")
-            _update_ai_investment_notify_status(eid, nstatus)
+            scope = (r.get("delivery_scope") or "web_only").strip()
+            if scope in ("feishu_high", "feishu_normal"):
+                if _send_ai_investment_feishu(r, alert):
+                    _update_ai_investment_notify_status(eid, nstatus)
+                else:
+                    _update_ai_investment_notify_status(eid, "failed")
+            else:
+                _update_ai_investment_notify_status(eid, nstatus)
             done += 1
         except Exception as e:
             logger.warning("ai_investment_events id=%s failed: %s", eid, e)

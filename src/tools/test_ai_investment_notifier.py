@@ -99,11 +99,13 @@ def test_consume_web_only_writes_alert_and_skips_stealth(tmp_path, monkeypatch):
     assert row["level"] == 3
 
 
-def test_consume_feishu_high_critical_calls_stealth_l1(tmp_path, monkeypatch):
+def test_consume_feishu_high_calls_feishu_only_not_stealth(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "_db_path_override", str(tmp_path / "trading.db"))
     monkeypatch.setattr(db, "_config_db_path_override", str(tmp_path / "config.db"))
     db.init_trading_db()
+    mock_feishu = MagicMock(return_value=True)
     mock_sd = MagicMock()
+    monkeypatch.setattr("src.tools.stock_monitor.feishu_send", mock_feishu)
     monkeypatch.setattr("src.tools.stock_notifier.stealth_dispatch", mock_sd)
 
     conn = db.get_connection()
@@ -118,9 +120,8 @@ def test_consume_feishu_high_critical_calls_stealth_l1(tmp_path, monkeypatch):
     conn.close()
 
     assert consume_pending_ai_investment_events() == 1
-    mock_sd.assert_called_once()
-    assert mock_sd.call_args[0][0][0]["_level"] == 1
-    assert mock_sd.call_args[1].get("sound") == "default"
+    mock_feishu.assert_called_once()
+    mock_sd.assert_not_called()
 
     conn = db.get_connection()
     st = conn.execute(
@@ -128,3 +129,33 @@ def test_consume_feishu_high_critical_calls_stealth_l1(tmp_path, monkeypatch):
     ).fetchone()[0]
     conn.close()
     assert st == "sent"
+
+
+def test_consume_feishu_send_failure_marks_failed(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "_db_path_override", str(tmp_path / "trading.db"))
+    monkeypatch.setattr(db, "_config_db_path_override", str(tmp_path / "config.db"))
+    db.init_trading_db()
+    monkeypatch.setattr("src.tools.stock_monitor.feishu_send", MagicMock(return_value=False))
+    monkeypatch.setattr("src.tools.stock_notifier.stealth_dispatch", MagicMock())
+
+    conn = db.get_connection()
+    eid = _insert_event(
+        conn,
+        delivery_scope="feishu_normal",
+        title="测",
+        summary="试",
+    )
+    conn.commit()
+    conn.close()
+
+    assert consume_pending_ai_investment_events() == 1
+
+    conn = db.get_connection()
+    st = conn.execute(
+        "SELECT notify_status FROM ai_investment_events WHERE id = ?", (eid,)
+    ).fetchone()[0]
+    ac = conn.execute("SELECT COUNT(*) FROM alert_events").fetchone()[0]
+    conn.close()
+
+    assert st == "failed"
+    assert ac == 1
