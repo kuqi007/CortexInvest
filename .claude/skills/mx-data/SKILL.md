@@ -26,7 +26,7 @@ env:
 ## 配置
 
 - **API Key**: 通过环境变量 `MX_APIKEY` 设置
-- **默认输出目录**: `/root/.openclaw/workspace/mx_data/output/`（自动创建）
+- **默认输出目录**: `./mx_data_output`（当前目录下自动创建，可通过第二个参数指定）
 - **输出文件名前缀**: `mx_data_`
 - **输出文件**:
   - `mx_data_{query}.xlsx` - Excel 文件，每个数据表一个 sheet（多 sheet）
@@ -87,7 +87,7 @@ python ./mx_data.py "贵州茅台近五年年报" /path/to/output
 
 脚本执行后会：
 1. 在终端输出查询结果预览（前20行）
-2. 自动创建输出目录 `/root/.openclaw/workspace/mx_data/output/`
+2. 自动创建输出目录 `./mx_data_output/`（当前目录下）
 3. 保存完整数据到 Excel 文件（多 sheet）
 4. 保存原始 JSON 响应供二次处理
 5. 保存描述文件记录查询条件和结果统计
