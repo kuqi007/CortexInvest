@@ -29,6 +29,7 @@ import os
 import sqlite3
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -43,7 +44,11 @@ from src.tools.stock_monitor import feishu_send
 
 logger = setup_logger("earnings_calendar")
 
-# ── Lock file (daemon 单例) ──
+# ── Timeout protection for slow akshare calls ──
+# WARNING: stock_zh_a_disclosure_report_cninfo(symbol="") iterates over all ~9551 A-share
+# stocks and can take ~170 seconds with no network timeout. Set to 120s to allow most
+# valid responses while preventing indefinite blocking of the main thread.
+AKSHARE_FULL_SCAN_TIMEOUT = 120  # seconds
 LOCK_FILE = PROJECT_ROOT / "data" / ".earnings_calendar.lock"
 
 # ── 数据缓存路径 ──
@@ -177,7 +182,7 @@ def fetch_earnings_calendar(start_date: str, end_date: str, symbols: list = None
                             'name': str(row.get('name', '')),
                             'report_date': report_str,
                             'period': period,
-                            'is_actual': str(row.get('actual_date', ''))[:10] != '' or pd.isna(row.get('actual_date')),
+                            'is_actual': pd.notna(row.get('actual_date')) and str(row.get('actual_date', ''))[:10] != '',
                         })
             except Exception as e:
                 logger.debug(f"获取 {period} 财报披露数据失败: {e}")
@@ -185,27 +190,39 @@ def fetch_earnings_calendar(start_date: str, end_date: str, symbols: list = None
 
         # ── 方法2: 补充 stock_zh_a_disclosure_report_cninfo（历史实际披露）──
         # 用于填充已实际发布的历史财报（供复盘分析用）
-        try:
-            df_hist = ak.stock_zh_a_disclosure_report_cninfo(symbol="")
-            if df_hist is not None and not df_hist.empty:
-                keywords = ["年报", "半年报", "季报", "季度", "审计", "财务报告", "经营业绩"]
-                df_hist = df_hist[df_hist["公告标题"].apply(
-                    lambda x: any(k in str(x) for k in keywords)
-                )]
-                # 过滤日期范围
-                df_hist = df_hist[df_hist["公告时间"] >= today_str]
-                df_hist = df_hist[df_hist["公告时间"] <= end_date]
+        # ⚠️ 注意: symbol="" 会遍历全市场 9551 只股票，极慢（~170秒）。
+        # 仅在全量检查时启用，持仓检查时跳过以节省时间。
+        # ⚠️ 已添加 AKSHARE_FULL_SCAN_TIMEOUT=120s 保护，防止无限阻塞。
+        if symbols is None:
+            try:
+                # Run in thread pool with timeout to prevent indefinite blocking
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(ak.stock_zh_a_disclosure_report_cninfo, symbol="")
+                    df_hist = future.result(timeout=AKSHARE_FULL_SCAN_TIMEOUT)
+                if df_hist is not None and not df_hist.empty:
+                    keywords = ["年报", "半年报", "季报", "季度", "审计", "财务报告", "经营业绩"]
+                    df_hist = df_hist[df_hist["公告标题"].apply(
+                        lambda x: any(k in str(x) for k in keywords)
+                    )]
+                    # 过滤日期范围
+                    df_hist = df_hist[df_hist["公告时间"] >= today_str]
+                    df_hist = df_hist[df_hist["公告时间"] <= end_date]
 
-                for _, row in df_hist.iterrows():
-                    all_records.append({
-                        'code': str(row.get("代码", "")),
-                        'name': str(row.get("简称", "")),
-                        'report_date': str(row.get("公告时间", ""))[:10],
-                        'period': str(row.get("公告标题", ""))[:50],
-                        'is_actual': True,
-                    })
-        except Exception as e:
-            logger.debug(f"获取历史财报披露数据失败: {e}")
+                    for _, row in df_hist.iterrows():
+                        all_records.append({
+                            'code': str(row.get("代码", "")),
+                            'name': str(row.get("简称", "")),
+                            'report_date': str(row.get("公告时间", ""))[:10],
+                            'period': str(row.get("公告标题", ""))[:50],
+                            'is_actual': True,
+                        })
+            except FuturesTimeoutError:
+                logger.warning(
+                    f"获取全市场财报披露数据超时（>{AKSHARE_FULL_SCAN_TIMEOUT}s），跳过全量查询。"
+                    "提示：symbols=None 时会遍历全市场 9551 只股票，耗时较长。"
+                )
+            except Exception as e:
+                logger.debug(f"获取历史财报披露数据失败: {e}")
 
         # 按股票代码过滤（如果指定了symbols）
         if symbols:
@@ -702,17 +719,12 @@ class EarningsCalendar:
             )
             if resp.status_code == 200:
                 data = resp.json()
-                return [s.get("symbol") or s.get("code") for s in data.get("positions", [])]
+                return [s.get("symbol") or s.get("code") for s in data.get("holdings", [])]
         except Exception:
             pass
 
-        # 回退：从配置文件读取
-        try:
-            from src.utils.config_reader import read_monitor_config
-            config = read_monitor_config()
-            return list(config.get("watchlist", {}).keys())
-        except Exception:
-            return []
+        # 仅从 API 获取，不回退到配置文件
+        return []
 
     def refresh_calendar(self, days_ahead: int = 30) -> list:
         """
