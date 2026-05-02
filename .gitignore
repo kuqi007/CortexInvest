@@ -164,3 +164,6 @@ backups/
 # Research downloads (prefer summaries in-repo over binary blobs)
 research/**/*.pdf
 research/**/*.docx
+web/web/.next/trace
+.helloagents
+.earnings_calendar_daemon.pid
