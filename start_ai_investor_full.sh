@@ -7,13 +7,13 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 # 加载 .env（供 Python daemon 读取 AI_INVESTOR_DATA_DIR 等环境变量）
 [ -f "$DIR/.env" ] && set -a && source "$DIR/.env" && set +a
 
-POLLER_PID="$DIR/.poller.pid"
-NOTIFIER_PID="$DIR/.notifier.pid"
-L2_DAEMON_PID="$DIR/.l2_daemon.pid"
-L2_DAEMON_WATCHDOG_PID="$DIR/.l2_daemon_watchdog.pid"
-TICK_MONITOR_PID="$DIR/.tick_monitor.pid"
-EARNINGS_DAEMON_PID="$DIR/.earnings_calendar_daemon.pid"
-WEB_PID="$DIR/.web.pid"
+POLLER_PID="$DIR/run/poller.pid"
+NOTIFIER_PID="$DIR/run/notifier.pid"
+L2_DAEMON_PID="$DIR/run/l2_daemon.pid"
+L2_DAEMON_WATCHDOG_PID="$DIR/run/l2_daemon_watchdog.pid"
+TICK_MONITOR_PID="$DIR/run/tick_monitor.pid"
+EARNINGS_DAEMON_PID="$DIR/run/earnings_calendar_daemon.pid"
+WEB_PID="$DIR/run/web.pid"
 POLLER_LOG="$DIR/logs/poller.log"
 NOTIFIER_LOG="$DIR/logs/notifier.log"
 L2_DAEMON_LOG="$DIR/logs/l2_daemon_out.log"
@@ -21,7 +21,7 @@ TICK_MONITOR_LOG="$DIR/logs/tick_monitor.log"
 EARNINGS_DAEMON_LOG="$DIR/logs/earnings_daemon.log"
 WEB_LOG="$DIR/logs/web.log"
 
-mkdir -p "$DIR/logs"
+mkdir -p "$DIR/logs" "$DIR/run"
 
 # 按日期生成日志文件名
 TODAY=$(date +%Y-%m-%d)
@@ -128,8 +128,16 @@ _resolve_data_dir() {
   fi
 }
 
+_cleanup_old_root_pid_files() {
+  # 迁移兼容：清理根目录散落的旧 .*.pid 文件
+  rm -f "$DIR/.poller.pid" "$DIR/.notifier.pid" "$DIR/.web.pid" \
+        "$DIR/.l2_daemon.pid" "$DIR/.l2_daemon_watchdog.pid" \
+        "$DIR/.tick_monitor.pid" "$DIR/.earnings_calendar_daemon.pid"
+}
+
 do_start() {
   DATA_DIR=$(_resolve_data_dir)
+  _cleanup_old_root_pid_files
 
   # 清理 OneDrive 同步冲突残留文件（带机器ID后缀的副本，如 -ADSKKN7X1GJJYG）
   find "$DATA_DIR" -name '*-[A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9]*' -delete 2>/dev/null || true

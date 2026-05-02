@@ -83,12 +83,8 @@ src/crawler/*.ts
 # screenshot import vision debug / run output
 .screenshot_import_runs/
 
-# pid files
-.poller.pid
-.notifier.pid
-.web.pid
-.l2_daemon.pid
-.l2_daemon_watchdog.pid
+# pid files (stored in run/)
+run/
 
 # browser state (runtime)
 browser-state*.json
@@ -145,7 +141,6 @@ logs/screen_shots/
 .opencode/plugins/
 # src/data symlink (git tracked it as a file — untrack to let each machine configure its own)
 src/data
-.tick_monitor.pid
 
 # Runtime data (root data/)
 data/*.db
@@ -166,4 +161,3 @@ research/**/*.pdf
 research/**/*.docx
 web/web/.next/trace
 .helloagents
-.earnings_calendar_daemon.pid

@@ -4,7 +4,8 @@
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 WEB_LOG="$DIR/logs/web.log"
-WEB_PID_FILE="$DIR/.web.pid"
+WEB_PID_FILE="$DIR/run/web.pid"
+RUN_DIR="$DIR/run"
 
 _is_running() {
     [ -f "$WEB_PID_FILE" ] && kill -0 "$(cat "$WEB_PID_FILE")" 2>/dev/null
@@ -53,7 +54,7 @@ case "${1:-}" in
             exit 0
         fi
 
-        mkdir -p "$DIR/logs"
+        mkdir -p "$DIR/logs" "$DIR/run"
 
         echo "启动 Web Dashboard (只读模式)..."
         cd "$DIR/web"
