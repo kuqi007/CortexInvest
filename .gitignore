@@ -143,7 +143,8 @@ src/data/*.db-*
 logs/*.log
 logs/screen_shots/
 .opencode/plugins/
-src/data/
+# src/data symlink (git tracked it as a file — untrack to let each machine configure its own)
+src/data
 .tick_monitor.pid
 
 # Runtime data (root data/)

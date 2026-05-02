@@ -8,12 +8,18 @@ function resolveDataDir(): string {
 
   const repoRoot = join(process.cwd(), "..");
 
-  const srcDataPath = join(repoRoot, "src", "data");
-
-  // 2. Fall back to <repo>/src/data (same symlink path as Python)
+  // 2. Try <repo>/src/data (symlink — may or may not exist)
   // 3. Fall back to <repo>/data
-  // NOTE: Without fs access we can't detect symlink existence, so prefer src/data
-  return srcDataPath;
+  const srcDataPath = join(repoRoot, "src", "data");
+  const repoDataPath = join(repoRoot, "data");
+
+  try {
+    const fs = require("fs") as typeof import("fs");
+    if (fs.existsSync(srcDataPath)) return srcDataPath;
+  } catch {
+    // fs not available (edge runtime) — assume src/data
+  }
+  return repoDataPath;
 }
 
 const DATA_DIR = resolveDataDir();

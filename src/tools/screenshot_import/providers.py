@@ -432,6 +432,189 @@ def _parse_vision_payload(raw: str | dict[str, Any], provider: str, model: str) 
     return VisionResult(ok=True, provider=provider, model=model, response=vr)
 
 
+_PLATFORM_ALIASES: dict[str, str] = {
+    "tonghuashun": "ths",
+    "同花顺": "ths",
+    "eastmoney": "eastmoney",
+    "东方财富": "eastmoney",
+    "hk_panda": "hk_panda",
+    "香港熊猫": "hk_panda",
+    "other": "other",
+    "unknown": "unknown",
+}
+
+
+def _normalize_platform(raw: str | None) -> str:
+    if isinstance(raw, str):
+        clean = raw.strip().lower()
+        return _PLATFORM_ALIASES.get(clean, "unknown")
+    return "unknown"
+
+
+def _ensure_provider_object(content: str) -> str:
+    """Normalize mmx CLI response into the expected vision response JSON.
+
+    Handles two cases:
+    1. mmx returns a bare JSON array → wrap it as an object with stocks key.
+    2. mmx returns an object with wrong platform name → normalize.
+    """
+    stripped = content.strip()
+    fence = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", stripped, flags=re.DOTALL)
+    if fence:
+        stripped = fence.group(1).strip()
+    try:
+        data = json.loads(stripped)
+    except json.JSONDecodeError:
+        return content
+    if isinstance(data, list):
+        data = [s for s in data if isinstance(s, dict) and (s.get("code") or s.get("name"))]
+        return json.dumps(
+            {"platform": "unknown", "screenshot_type": "holding",
+             "stocks": data, "warnings": []},
+            ensure_ascii=False,
+        )
+    if isinstance(data, dict):
+        data["platform"] = _normalize_platform(data.get("platform"))
+        return json.dumps(data, ensure_ascii=False)
+    return content
+
+
+class MmxCliVisionProvider:
+    """Provider that calls the mmx CLI for vision describe (local binary).
+
+    Uses a condensed prompt because mmx content moderation rejects
+    the full prompt from build_vision_prompt().
+    """
+
+    def __init__(self) -> None:
+        self._name = "mmx"
+        self._model = "MiniMax-VL"
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def model(self) -> str:
+        return self._model
+
+    def _condensed_prompt(self) -> str:
+        return (
+            "这是一张股票持仓截图。请逐行识别每只完整可见的股票。"
+            "每一行输出：证券代码、名称、成本价、持股数量、市值。"
+            "看不到完整代码的设code为null，看不到名称的设name为null。"
+            "不要猜测不完整的数据。"
+            "A股代码6位纯数字。港股代码HK+5位数字如HK03690。"
+            "只输出JSON不要其他文字。"
+            '输出JSON对象，stocks是数组：{"platform":"eastmoney","screenshot_type":"holding",'
+            '"stocks":[{"code":"HKxxxxx"或null,"name":"名称","cost":数值,"shares":数值,"market_value":数值}],"warnings":[]}'
+        )
+
+    def complete(self, request: VisionRequest) -> VisionResult:
+        import subprocess
+
+        cmd = [
+            "/opt/homebrew/bin/mmx",
+            "vision",
+            "describe",
+            "--image",
+            request.image_path,
+            "--prompt",
+            self._condensed_prompt(),
+            "--output",
+            "json",
+        ]
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=max(request.timeout_s, 120.0),
+            )
+        except FileNotFoundError:
+            return VisionResult(
+                ok=False,
+                provider=self._name,
+                model=self._model,
+                error=ProviderError(
+                    kind="transport",
+                    message="mmx CLI not found at /opt/homebrew/bin/mmx",
+                    retryable=False,
+                ),
+            )
+        except subprocess.TimeoutExpired:
+            return VisionResult(
+                ok=False,
+                provider=self._name,
+                model=self._model,
+                error=ProviderError(
+                    kind="transport",
+                    message=f"mmx CLI timed out after {request.timeout_s}s",
+                    retryable=True,
+                ),
+            )
+
+        if proc.returncode != 0:
+            stderr = proc.stderr.strip() or "(no stderr)"
+            return VisionResult(
+                ok=False,
+                provider=self._name,
+                model=self._model,
+                error=ProviderError(
+                    kind="api",
+                    message=f"mmx CLI exited code {proc.returncode}: {stderr}",
+                    retryable=True,
+                ),
+            )
+
+        stdout = proc.stdout.strip()
+        if not stdout:
+            return VisionResult(
+                ok=False,
+                provider=self._name,
+                model=self._model,
+                error=ProviderError(
+                    kind="schema_parse",
+                    message="mmx CLI returned empty output",
+                    retryable=False,
+                ),
+            )
+
+        try:
+            mmx_response = json.loads(stdout)
+        except json.JSONDecodeError as e:
+            return VisionResult(
+                ok=False,
+                provider=self._name,
+                model=self._model,
+                error=ProviderError(
+                    kind="schema_parse",
+                    message=f"mmx CLI returned non-JSON: {e}",
+                    retryable=False,
+                    raw_response=_raw_excerpt(stdout),
+                ),
+            )
+
+        content = mmx_response.get("content", "")
+        if not content:
+            return VisionResult(
+                ok=False,
+                provider=self._name,
+                model=self._model,
+                error=ProviderError(
+                    kind="schema_parse",
+                    message="mmx CLI response has no content field",
+                    retryable=False,
+                    raw_response=_raw_excerpt(stdout),
+                ),
+            )
+
+        # mmx sometimes returns a JSON array (list of stocks) instead of the
+        # expected object with platform/screenshot_type/stocks keys. Wrap it.
+        wrapped = _ensure_provider_object(content)
+        return _parse_vision_payload(wrapped, self._name, self._model)
+
+
 class StubVisionProvider:
     """Deterministic provider: returns canned JSON validated as VisionResponse."""
 
@@ -608,16 +791,23 @@ def resolve_provider_name(provider: str) -> str:
             return "kimi"
         if os.environ.get("MINIMAX_API_KEY"):
             return "minimax"
+        if _mmx_cli_available():
+            return "mmx"
         raise ValueError(
             "no API key configured for --provider auto "
-            "(set one of KIMI_API_KEY, GLM_API_KEY, MINIMAX_API_KEY)"
+            "(set one of KIMI_API_KEY, GLM_API_KEY, MINIMAX_API_KEY) "
+            "and mmx CLI not found"
         )
-    if p in ("kimi", "glm", "minimax"):
+    if p in ("kimi", "glm", "minimax", "mmx"):
         return p
     raise ValueError(f"unsupported vision provider: {provider!r}")
 
 
-def create_provider(provider: str) -> OpenAICompatibleVisionProvider:
+def _mmx_cli_available() -> bool:
+    return Path("/opt/homebrew/bin/mmx").is_file()
+
+
+def create_provider(provider: str) -> OpenAICompatibleVisionProvider | MmxCliVisionProvider:
     p = resolve_provider_name(provider)
     if p == "kimi":
         key = os.environ.get("KIMI_API_KEY", "")
@@ -651,5 +841,8 @@ def create_provider(provider: str) -> OpenAICompatibleVisionProvider:
         )
         key, base = _validate_provider_config("minimax", key, base)
         return OpenAICompatibleVisionProvider("minimax", key, base, model)
+
+    if p == "mmx":
+        return MmxCliVisionProvider()
 
     raise ValueError(f"unsupported vision provider: {p!r}")

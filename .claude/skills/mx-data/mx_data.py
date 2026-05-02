@@ -338,7 +338,7 @@ def main():
     else:
         query = " ".join(sys.argv[1:])
         # Default output to fixed directory
-        output_dir = Path("/root/.openclaw/workspace/mx_data/output")
+        output_dir = Path("/tmp/mx_data_output")
     
     # Ensure output directory exists
     output_dir.mkdir(parents=True, exist_ok=True)

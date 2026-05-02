@@ -3,6 +3,10 @@
 set -e
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# 加载 .env（供 Python daemon 读取 AI_INVESTOR_DATA_DIR 等环境变量）
+[ -f "$DIR/.env" ] && set -a && source "$DIR/.env" && set +a
+
 POLLER_PID="$DIR/.poller.pid"
 NOTIFIER_PID="$DIR/.notifier.pid"
 L2_DAEMON_PID="$DIR/.l2_daemon.pid"
@@ -113,15 +117,27 @@ _ensure_no_orphan() {
   fi
 }
 
+_resolve_data_dir() {
+  # 与 Python db.py 优先级一致: env var → src/data symlink → data/
+  if [ -n "$AI_INVESTOR_DATA_DIR" ]; then
+    echo "$AI_INVESTOR_DATA_DIR"
+  elif [ -d "$DIR/src/data" ]; then
+    echo "$DIR/src/data"
+  else
+    echo "$DIR/data"
+  fi
+}
+
 do_start() {
+  DATA_DIR=$(_resolve_data_dir)
+
   # 清理 OneDrive 同步冲突残留文件（带机器ID后缀的副本，如 -ADSKKN7X1GJJYG）
-  find "$DIR/src/data" -name '*-[A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9]*' -delete 2>/dev/null || true
+  find "$DATA_DIR" -name '*-[A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9]*' -delete 2>/dev/null || true
 
   # 检查 terminal-notifier 依赖
   _check_terminal_notifier
 
   # DB split migration (skip Python if already done)
-  DATA_DIR="$DIR/src/data"
   if [ -f "$DATA_DIR/config.db" ] && [ -f "$DATA_DIR/trading.db" ]; then
     : # already migrated
   else

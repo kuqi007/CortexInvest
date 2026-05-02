@@ -455,7 +455,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--provider",
-        choices=["auto", "kimi", "glm", "minimax"],
+        choices=["auto", "kimi", "glm", "minimax", "mmx"],
         default="auto",
     )
     parser.add_argument("--yes", action="store_true", help="With uncertain auto classification, force exit 3 instead of calling vision (same as non-interactive stdin)")
