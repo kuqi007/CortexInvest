@@ -120,7 +120,7 @@ rawTable['收盘价'] = ['1401.17', '1405', ...]  # 纯数值，用这个
 | 指标 | 计算方式 | HIGH 风险 | MEDIUM 风险 |
 |------|---------|-----------|-------------|
 | **非机构持股比例** | `1 - 机构持股比例合计` | A股>35%，港股>50% | A股25%~35%，港股35%~50% |
-| **机构持股环比变化** | `(本期 - 上期) / 上期 × 100%` | < -5pp（连续撤离） | -3pp ~ -5pp |
+| **机构持股环比变化** | `(本期 - 上期) / 上期 × 100%` | A股< -5pp，港股< -10pp | A股-3pp ~ -5pp，港股-5pp ~ -10pp |
 | **股东户数环比变化** | `(本期户数 - 上期户数) / 上期户数 × 100%` | > 30% | 15% ~ 30% |
 | **十大股东集中度** | 十大股东持股合计 | > 85% | 75% ~ 85% |
 | **控股股东持股** | 控股股东单独持股 | > 70% | 55% ~ 70% |
@@ -128,11 +128,7 @@ rawTable['收盘价'] = ['1401.17', '1405', ...]  # 纯数值，用这个
 **触发逻辑**：任一指标触发 HIGH 即 HIGH；任一指标触发 MEDIUM 时，结合其他指标综合判断。
 
 **市场差异化阈值**：
-- 非机构持股比例判断时，先识别市场类型（A股/港股），使用对应阈值
-- 港股特殊处理：
-- 机构持股环比变化：因半年报粒度，< -10pp 才触发 HIGH（允许更大波动）
-- HKSCC 持股变化单独列示，不参与上述指标计算
-
+- 非机构持股比例和机构持股环比变化的 A股/港股差异化阈值已在上表体现
 ### 4.2 十大流通股东分析
 
 分析最新一期十大流通股东构成：
@@ -160,6 +156,8 @@ rawTable['收盘价'] = ['1401.17', '1405', ...]  # 纯数值，用这个
     "non_institutional_ratio_pct": 27.45,
     "institutional_ratio_qoq_change_pp": -1.59,
     "shareholder_count_qoq_change_pct": 3.2,
+    "top10_concentration_pct": 68.0,
+    "controlling_shareholder_pct": 54.40,
     "risk_level": "LOW",
     "trigger_conditions": [],
     "top10_holders": [
@@ -315,6 +313,26 @@ else: NEUTRAL
 **冲突检测逻辑**：`technical_signal.conflicts_with_fundamentals = (technical_signal.synthesis_signal == "BEARISH" AND fundamental_signal.direction == "BUY") OR (technical_signal.synthesis_signal == "BULLISH" AND fundamental_signal.direction == "SELL")`
 
 **禁止**：技术信号不得抬高基本面止损位，不得覆盖基本面卖出信号。
+
+
+### 5.5.1 fundamental_signal 推导规则
+
+`fundamental_signal` 从估值结论得出，用于技术面冲突检测：
+
+```
+fundamental_signal.direction 从估值结论得出：
+  - 估值结论为"强烈买入/买入" → BUY
+  - 估值结论为"持有/中性" → HOLD
+  - 估值结论为"卖出/减持" → SELL
+
+fundamental_signal.conviction:
+  - 高信心（多方法一致、历史中枢明显偏离） → HIGH
+  - 中信心（单方法、偏离不大） → MEDIUM
+  - 低信心（数据不足、方法间差异大） → LOW
+
+fundamental_signal.rationale: 简要说明方向来源
+```
+
 
 ### 5.6 输出字段（valuation_result.json）
 
@@ -611,7 +629,7 @@ def calc_rsi(closes: list[float], period: int = 14) -> float | None:
     avg_loss = np.mean(losses[:period])
 
     # 后续使用 Wilder 平滑公式
-    for i in range(period, len(gains)):
+    for i in range(period + 1, len(gains)):
         avg_gain = avg_gain * (period - 1) / period + gains[i] / period
         avg_loss = avg_loss * (period - 1) / period + losses[i] / period
 
@@ -770,6 +788,7 @@ def calc_bollinger_bands(closes: list[float], period: int = 20, std_dev: float =
 ### 9.1 机构持股数据缺失
 - 若 `col_id` 列不存在：标注"数据受限，无法计算股东风险"
 - 若仅有单一报告期：无法计算环比变化，标注"数据不足"
+- 若 fundamental_signal 无法推导（如估值结论为空）：标注"基本面方向不确定，技术面冲突检测跳过"
 
 ### 9.2 股东户数数据缺失
 - 若股东户数数据不可用：跳过股东户数环比计算，不影响整体风险评级
@@ -841,6 +860,7 @@ def calc_bollinger_bands(closes: list[float], period: int = 20, std_dev: float =
 | 港股股东户数 | 港股是否有股东户数数据？ | 用腾讯测试 |
 | 主力资金流向 | "近N日 主力资金流向"是否返回有效数据？ | 用贵州茅台测试 |
 | 创业板识别 | `entityTagDTO.className` 是否可靠区分创业板/科创板？ | 检查不同股票返回的 className |
+| 季报/年报日期格式 | headName 中 "2026一季报" 的解析是否稳定 | 用多只股票测试日期提取 |
 
 ---
 

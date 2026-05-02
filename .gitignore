@@ -146,6 +146,14 @@ logs/screen_shots/
 src/data/
 .tick_monitor.pid
 
+# Runtime data (root data/)
+data/*.db
+data/*.lock
+
+# mx-data output cache
+stocks/*/*/data/
+.claude/skills/mx-data/output/
+
 # Screenshot import dry-run / eval outputs (regenerable; may contain real holdings)
 .screenshot_import_runs/
 
