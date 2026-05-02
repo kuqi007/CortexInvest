@@ -809,6 +809,21 @@ from src.analysis.shareholder_analyzer import assess_shareholder_risk
 - T1: mx_data_*近{N}日每日*.json
 - 数据范围：主板 35日（确保≥30交易日），创业板/科创板 25日
 
+**⚠️ 数据充分性要求**：
+| 指标 | 最小数据量 | 数据不足时的行为 |
+|------|-----------|----------------|
+| RSI(14) | ≥ 15 条 | 返回 None，视为中性(0分)，报告中标注 |
+| MACD(12,26,9) | ≥ 35 条 | DIF=0 且 DEA=0 → 强制归零(0分)，同时标注"⚠️ MACD 数据不足(<35条)" |
+| KDJ(9,3,3) | ≥ 10 条 | 返回默认值 {k:50,d:50,j:50}，视为中性(0分) |
+| MA(5/10/20/60) | 分别 ≥ 5/10/20/60 条 | 不足的均线记为 None；MA=None 视为中性(0分)，支撑/阻力计算时过滤 |
+| ATR(14) | ≥ 15 条 | 返回 None，无法计算止损/目标位，报告中标注 |
+| 布林带(20) | ≥ 20 条 | 返回 None，支撑位计算时跳过布林下轨 |
+| 成交量分析 | ≥ 5 条 | 正常计算 |
+
+**⚠️ T1 收集验证门**：调用 `parse_kline_ohlcv()` 后，检查返回行数：
+- 若 < 30 条：报告中显著标注"⚠️ K线数据仅 N 条（<30），技术信号精度下降，仅供参考"
+- 若 < 15 条：整个 Step 3.5 跳过，在报告中标注"技术数据不足"
+
 **Python 解析函数**（位于 `src/analysis/`）：
 ```python
 from src.analysis import parse_kline_ohlcv
@@ -821,35 +836,41 @@ from src.analysis.technical_indicators import (
 **执行步骤**：
 
 1. **解析 K 线数据** — 调用 `parse_kline_ohlcv()`，提取 OHLCV 列表
-2. **计算技术指标**（调用 `src/analysis/technical_indicators.py`）：
+2. **数据充分性检查**：
+   - 若返回行数 < 15 条：整个 Step 3.5 跳过，报告中标注"技术数据不足"
+   - 若返回行数 < 30 条：标注"⚠️ K线数据仅 N 条（<30），技术信号精度下降"
+3. **计算技术指标**（调用 `src/analysis/technical_indicators.py`）：
    - `calc_rsi(closes, 14)` — RSI(14)
-   - `calc_macd(closes)` — MACD(12,26,9)
+   - `calc_macd(closes)` — MACD(12,26,9)；**若 DIF=0 且 DEA=0，标记"⚠️ MACD 数据不足"，不参与计分或强制归零**
    - `calc_kdj(highs, lows, closes)` — KDJ(9,3,3)
-   - `calc_ma(closes)` — MA(5/10/20/60)
+   - `calc_ma(closes)` — MA(5/10/20/60)；MA60=None 时在阻力位计算中排除
    - `calc_volume_ratio(volumes)` — 成交量分析
-   - `calc_atr(highs, lows, closes, 14)` — ATR（用于止损）
-   - `calc_bollinger_bands(closes, 20)` — 布林带（用于支撑位）
-3. **综合信号评分**（5 指标计分）：
+   - `calc_atr(highs, lows, closes, 14)` — ATR（用于止损）；ATR=None 时无法计算入场价位，报告中标注
+   - `calc_bollinger_bands(closes, 20)` — 布林带（用于支撑位）；BB=None 时排除布林下轨
+4. **综合信号评分**（5 指标计分）：
    ```
    指标: [RSI方向, MACD方向, KDJ方向, MA排列, 成交量方向]
    得分: 看多=+1, 看空=-1, 中性=0
+   ⚠️ MACD 特殊规则: DIF≈0 且 DEA≈0（数据不足）→ 强制归零(0分)，同时标注"⚠️ MACD 数据不足"
    总分 = sum(各指标得分)
    if 总分 >= 3: synthesis_signal = "BULLISH"
    elif 总分 <= -3: synthesis_signal = "BEARISH"
    else: synthesis_signal = "NEUTRAL"
    ```
-4. **计算入场价位**（N = K线数据条数，通常 25-35）：
+   - MACD 强制归零而非排除，保证总分基准始终为 5，保持与原设计的一致性
+   - 标注"⚠️ MACD 数据不足"仅用于报告展示，不影响计分逻辑
+5. **计算入场价位**（N = K线数据条数）：
    ```
    近期低点 = min(收盘价[-(N-1):-(N-5)])  # 最近5日内最低（不含今日）
    近期高点 = max(收盘价[-(N-1):-(N-5)])  # 最近5日内最高（不含今日）
-   支撑位 = min(MA20, 近期低点, 布林下轨)
-   阻力位 = max(MA60, 近期高点)
-   技术止损 = 支撑位 - 2% × ATR
-   目标位 = 阻力位 + 2 × ATR  # 至少1倍ATR空间
+   支撑位 = min([v for v in [MA20, 近期低点, 布林下轨] if v is not None])
+   阻力位 = max([v for v in [MA60, 近期高点] if v is not None])  # MA60=None时排除
+   技术止损 = 支撑位 - 2% × ATR  (ATR=None时标注"止损位无法计算")
+   目标位 = 阻力位 + 2 × ATR    (ATR=None时标注"目标位无法计算")
    ```
-5. **冲突检测**：若 `technical_signal.synthesis_signal == "BEARISH"` 且基本面方向为 BUY，则 `conflicts_with_fundamentals = True`
-6. **写入 valuation_result.json** — technical_signal + fundamental_signal 字段
-7. **输出报告章节** — `## 3.5 短期技术信号参考`
+6. **冲突检测**：若 `technical_signal.synthesis_signal == "BEARISH"` 且基本面方向为 BUY，则 `conflicts_with_fundamentals = True`
+7. **写入 valuation_result.json** — technical_signal + fundamental_signal 字段（含 `data_sufficient: bool` 和 `macd_data_insufficient: bool`）
+8. **输出报告章节** — `## 3.5 短期技术信号参考`
 
 **信号有效期**：所有技术信号有效期为 5 个交易日（数据截止日 + 5）。
 
