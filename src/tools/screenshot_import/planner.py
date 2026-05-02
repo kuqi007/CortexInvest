@@ -165,9 +165,12 @@ def _reason_codes_for_row(
     if model_confidence < threshold:
         reasons.append("below_model_threshold")
     if manual_platform_after_low_confidence and row.is_holding:
-        reasons.append("manual_platform_low_confidence")
+        # If code is known from watchlist, skip — code validation matters more
+        if existing_watchlist is None or row.code not in existing_watchlist:
+            reasons.append("manual_platform_low_confidence")
     elif classification.confidence < threshold:
-        reasons.append("below_classifier_threshold")
+        if existing_watchlist is None or row.code not in existing_watchlist:
+            reasons.append("below_classifier_threshold")
     if _min_required_confidence(row) < threshold:
         reasons.append("below_field_threshold")
     fc = row.field_confidence

@@ -250,10 +250,10 @@ def test_cli_ignores_provider_code_when_classified_as_eastmoney(tmp_path, monkey
 
     assert exit_code == 0
     payload = json.loads(out.read_text(encoding="utf-8"))
-    assert payload["auto_apply"] == []
-    action = payload["needs_confirmation"][0]
-    assert action["code"] == "HK00700"
-    assert "name_only_match" in action["reason_codes"]
+    # Valid code from eastmoney is now preserved; exact watchlist match means auto-apply
+    assert len(payload["auto_apply"]) == 1
+    assert payload["auto_apply"][0]["code"] == "HK00700"
+    assert payload["auto_apply"][0]["reason_codes"] == []
 
 
 def test_cli_apply_plan_hash_mismatch_exits_5_without_client(tmp_path, monkeypatch):

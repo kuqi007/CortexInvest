@@ -372,6 +372,44 @@ def _is_known_non_stock_name(name: str) -> bool:
     return name.strip() in NON_STOCK_WATCHLIST_NAMES
 
 
+def _resolved_from_watchlist_exact(
+    name: str,
+    code: str,
+    existing_watchlist: Mapping[str, object] | None,
+) -> bool:
+    """True if `code` was resolved from `existing_watchlist` via exact name match."""
+    if existing_watchlist is None:
+        return False
+    needle = _normalized_name(_display_name_for_lookup(name))
+    if not needle:
+        return False
+    for raw_code, raw_item in existing_watchlist.items():
+        if not isinstance(raw_item, Mapping):
+            continue
+        item_name = _normalized_name(raw_item.get("name"))
+        if item_name and item_name == needle:
+            item_code = _normalize_catalog_code(str(raw_code))
+            if item_code == code:
+                return True
+    return False
+
+
+def _make_fc_high_confidence_for_watchlist_match(
+    name: float | None,
+    cost: float | None,
+    shares: float | None,
+) -> FieldConfidence:
+    """Build FieldConfidence with elevated code confidence for watchlist-resolved codes."""
+    name_conf = float(name) if name is not None else 0.85
+    code_conf = min(name_conf, 0.95)
+    return FieldConfidence(
+        code=code_conf,
+        name=name,
+        cost=cost,
+        shares=shares,
+    )
+
+
 def normalize_row(
     row: StockRow,
     source_row_index: int | None = None,
@@ -405,19 +443,35 @@ def normalize_row(
         )
         if name_code is not None and name_code != code:
             code = name_code
-            field_confidence = FieldConfidence(
-                code=min(float(row.field_confidence.code or 1.0), 0.7),
-                name=row.field_confidence.name,
-                cost=row.field_confidence.cost,
-                shares=row.field_confidence.shares,
-            )
+            if _resolved_from_watchlist_exact(row.name, name_code, existing_watchlist):
+                field_confidence = _make_fc_high_confidence_for_watchlist_match(
+                    row.field_confidence.name,
+                    row.field_confidence.cost,
+                    row.field_confidence.shares,
+                )
+            else:
+                field_confidence = FieldConfidence(
+                    code=min(float(row.field_confidence.code or 1.0), 0.7),
+                    name=row.field_confidence.name,
+                    cost=row.field_confidence.cost,
+                    shares=row.field_confidence.shares,
+                )
         elif name_code is not None and not code_from_model:
-            field_confidence = FieldConfidence(
-                code=min(float(row.field_confidence.code or 1.0), 0.7),
-                name=row.field_confidence.name,
-                cost=row.field_confidence.cost,
-                shares=row.field_confidence.shares,
-            )
+            if _resolved_from_watchlist_exact(row.name, name_code, existing_watchlist):
+                # Exact watchlist match is trustworthy; keep high confidence
+                field_confidence = _make_fc_high_confidence_for_watchlist_match(
+                    row.field_confidence.name,
+                    row.field_confidence.cost,
+                    row.field_confidence.shares,
+                )
+            else:
+                # Resolved via catalog or MX — conservative cap
+                field_confidence = FieldConfidence(
+                    code=min(float(row.field_confidence.code or 1.0), 0.7),
+                    name=row.field_confidence.name,
+                    cost=row.field_confidence.cost,
+                    shares=row.field_confidence.shares,
+                )
     base = {
         "code": code,
         "name": normalized_name if not treat_watchlist_name_as_name_only else row.name,

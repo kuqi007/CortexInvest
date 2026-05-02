@@ -107,6 +107,9 @@ def _repair_json_text(text: str) -> str:
     )
     # Trailing commas are common in markdown-ish JSON snippets.
     repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
+    # Bare `--` in value position (model shorthand for "no change") -> null
+    repaired = re.sub(r":\s*--\s*(,)", r": null\1", repaired)
+    repaired = re.sub(r":\s*--\s*([}\]])", r": null\1", repaired)
     return repaired
 
 
@@ -187,7 +190,11 @@ def _repair_provider_payload(data: dict[str, Any]) -> dict[str, Any]:
                 continue
             item.pop("pnl", None)
             item.pop("pnl_pct", None)
+            item.pop("market", None)
             item.pop("confidence", None)
+            # Normalize stock_name → name (model sometimes uses stock_name)
+            if "stock_name" in item and "name" not in item:
+                item["name"] = item.pop("stock_name")
             row_warning = item.pop("warning", None)
             if isinstance(row_warning, str) and row_warning.strip():
                 top_warnings.append(row_warning.strip())
@@ -227,6 +234,7 @@ def _repair_provider_payload(data: dict[str, Any]) -> dict[str, Any]:
                 if field_name in item:
                     item[field_name] = _coerce_optional_number(item[field_name])
             _maybe_swap_cost_and_current_price(item, data.get("platform"))
+            _maybe_swap_cost_and_shares(item)
             _lower_confidence_for_suspicious_cost(item)
             _ignore_provider_code_for_eastmoney(item, data.get("platform"))
             if item.get("is_holding") is True and (
@@ -257,30 +265,52 @@ def _coerce_optional_number(value: Any) -> Any:
         return value
     if not isinstance(value, str):
         return value
-    text = (
-        value.strip()
-        .replace(",", "")
-        .replace("，", "")
-        .replace("HKD", "")
-        .replace("人民币", "")
-        .replace("%", "")
-        .strip()
-    )
-    multiplier = 1.0
-    if text.endswith("万"):
-        multiplier = 10000.0
-        text = text[:-1].strip()
+
+    text = value.strip()
     if not text:
-        return value
+        return None
+
+    # Remove thousand separators
+    text = text.replace(",", "").replace("，", "")
+
+    # Strip known currency / unit suffixes (anywhere in the string)
+    for suffix in ("HKD", "USD", "CNY", "人民币", "港币", "港元", "美元", "%", "元", "股"):
+        text = text.replace(suffix, "")
+    text = text.strip()
+
+    # Chinese unit multipliers
+    multiplier = 1.0
+    if "亿" in text:
+        multiplier = 100_000_000.0
+        text = text.replace("亿", "").strip()
+    elif "万" in text:
+        multiplier = 10_000.0
+        text = text.replace("万", "").strip()
+
+    if not text:
+        return None
+
     try:
         return float(text) * multiplier
     except ValueError:
-        return value
+        # Fallback: extract the first numeric pattern
+        # (handles surrounding text like "约629.61元" or "持有1000股")
+        match = re.search(r"-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?", text)
+        if match:
+            try:
+                return float(match.group(0)) * multiplier
+            except ValueError:
+                return None
+        return None
 
 
 def _maybe_swap_cost_and_current_price(item: dict[str, Any], platform: str | None) -> None:
-    if platform != "ths":
-        return
+    """Swap cost<->current_price when market_value implies OCR reversal.
+
+    Uses the invariant market_value = current_price * shares (approximately).
+    If cost is closer to implied_price than current_price is, the two fields
+    are likely reversed. Platform-agnostic.
+    """
     if item.get("is_holding") is not True:
         return
     cost = item.get("cost")
@@ -296,6 +326,32 @@ def _maybe_swap_cost_and_current_price(item: dict[str, Any], platform: str | Non
     price_delta = abs(float(current_price) - implied_price)
     if cost_delta < price_delta and price_delta > 0.01:
         item["cost"], item["current_price"] = current_price, cost
+
+
+def _maybe_swap_cost_and_shares(item: dict[str, Any]) -> None:
+    """Swap cost<->shares when OCR reverses them.
+
+    Common OCR mistake: the model reads the share count into the cost field
+    and the price-per-share into the shares field. Detect by checking if cost
+    looks like a share count (large round number) and shares looks like a
+    price per share (very small, typically <= 10).
+    """
+    if item.get("is_holding") is not True:
+        return
+    cost = item.get("cost")
+    shares = item.get("shares")
+    if not isinstance(cost, int | float) or not isinstance(shares, int | float):
+        return
+    if cost <= 0 or shares <= 0:
+        return
+    # shares <= 10 is extremely unusual for a real share count
+    # (A-share min lot = 100; HK odd lots below 10 are rare)
+    # Combined with cost >= 10000 and cost > shares = strong swap signal
+    # NOTE: cost >= 10000 (not 1000) avoids false positives on high-priced
+    # stocks like Moutai (1500/share * 10 shares = 15000; ratio 150 > 100
+    # but not swapped — the values are correctly placed).
+    if cost >= 10000 and shares <= 10 and cost > shares and cost / shares > 100:
+        item["cost"], item["shares"] = shares, cost
 
 
 def _lower_confidence_for_suspicious_cost(item: dict[str, Any]) -> None:
@@ -318,6 +374,18 @@ def _lower_confidence_for_suspicious_cost(item: dict[str, Any]) -> None:
 def _ignore_provider_code_for_eastmoney(item: dict[str, Any], platform: str | None) -> None:
     if platform != "eastmoney" or not str(item.get("name") or "").strip():
         return
+    raw_code = item.get("code")
+    # Only nullify if code is missing or clearly invalid.
+    # If the model produced a valid-looking code, let it through — it may have
+    # read it from a visible element. The normalizer will validate downstream.
+    if raw_code is None:
+        return
+    code_str = str(raw_code).strip().upper().replace(" ", "")
+    valid_ashare = bool(re.fullmatch(r"\d{6}", code_str))
+    valid_hk = bool(re.fullmatch(r"HK\d{5}", code_str))
+    if valid_ashare or valid_hk:
+        return
+    # Invalid code (e.g. gibberish, non-standard length, index code) — nullify
     item["code"] = None
     fc = item.get("field_confidence")
     if isinstance(fc, dict):

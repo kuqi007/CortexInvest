@@ -385,8 +385,22 @@ def _collect_plan_codes(plan: ImportPlan) -> list[str]:
     return codes
 
 
+def _is_valid_stock_code(code: str | None) -> bool:
+    if code is None:
+        return False
+    code_str = str(code).strip().upper().replace(" ", "")
+    return bool(re.fullmatch(r"\d{6}", code_str)) or bool(
+        re.fullmatch(r"HK\d{5}", code_str)
+    )
+
+
 def _stock_for_normalize(stock: Any, platform: str) -> Any:
     if platform != "eastmoney" or not getattr(stock, "name", "").strip():
+        return stock
+    raw_code = getattr(stock, "code", None)
+    # Only strip provider codes that look invalid; valid codes pass through to
+    # the normalizer which cross-checks against watchlist/catalog.
+    if _is_valid_stock_code(raw_code):
         return stock
     field_confidence = getattr(stock, "field_confidence", None)
     if field_confidence is not None and hasattr(field_confidence, "model_copy"):

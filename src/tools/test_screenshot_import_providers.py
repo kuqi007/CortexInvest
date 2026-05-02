@@ -46,8 +46,8 @@ def test_prompt_mentions_eastmoney_two_line_layout():
     assert "持仓/可用" in prompt
     assert "现价/成本" in prompt
     assert "第一行是现价、第二行是成本价" in prompt
-    assert "东方财富持仓截图通常不显示股票代码" in prompt
-    assert "名称旁边的「沪」「深」「港」只是市场标签" in prompt
+    assert "东方财富持仓截图通常不显示完整代码" in prompt
+    assert "「沪」「深」「港」标签" in prompt
     assert "不要把市值当作成本" in prompt
     assert "普通/信用" in prompt
     assert "证券市值" in prompt
@@ -87,8 +87,7 @@ def test_watchlist_prompt_only_requires_stock_identity():
     assert "导入自选只需要能确定是哪只股票" in prompt
     assert "is_holding=false" in prompt
     assert "不要伪造股票代码" in prompt
-    assert "name-only" in prompt
-    assert "不要把 `1B0685`" in prompt
+    assert "1B0685" in prompt
     assert "禁止" in prompt
     assert "cost" in prompt
 
@@ -550,7 +549,8 @@ def test_stub_provider_lowers_confidence_for_market_value_as_cost():
     assert result.response.stocks[0].field_confidence.cost == 0.5
 
 
-def test_stub_provider_ignores_eastmoney_model_codes():
+def test_stub_provider_keeps_valid_eastmoney_model_code():
+    """Valid codes from eastmoney are now kept (before, all were nullified)."""
     body = {
         "schema_version": 1,
         "platform": "eastmoney",
@@ -579,9 +579,44 @@ def test_stub_provider_ignores_eastmoney_model_codes():
     assert result.ok is True
     assert result.response is not None
     row = result.response.stocks[0]
+    assert row.code == "HK00700"
+    assert row.field_confidence.code == 1.0
+    assert row.name == "腾讯控股"
+
+
+def test_stub_provider_nulls_invalid_eastmoney_model_code():
+    """Invalid codes from eastmoney are still nullified (gibberish, index codes)."""
+    body = {
+        "schema_version": 1,
+        "platform": "eastmoney",
+        "screenshot_type": "holding",
+        "confidence": 0.9,
+        "stocks": [
+            {
+                "code": "1B0685",
+                "name": "科创芯片",
+                "cost": "100.0",
+                "shares": "100",
+                "field_confidence": 1.0,
+            }
+        ],
+    }
+    stub = StubVisionProvider("stub", "stub-m", body)
+    req = VisionRequest(
+        image_path="/dev/null",
+        mime_type="image/png",
+        prompt="p",
+        json_schema={},
+    )
+
+    result = stub.complete(req)
+
+    assert result.ok is True
+    assert result.response is not None
+    row = result.response.stocks[0]
     assert row.code is None
     assert row.field_confidence.code is None
-    assert row.name == "腾讯控股"
+    assert row.name == "科创芯片"
 
 
 def test_stub_provider_reports_schema_error():
@@ -659,3 +694,115 @@ def test_create_provider_rejects_untrusted_base_url(monkeypatch):
 
     with pytest.raises(ValueError, match="untrusted"):
         create_provider("glm")
+
+
+class TestCoerceOptionalNumber:
+    """Parametrized tests for _coerce_optional_number."""
+
+    @pytest.mark.parametrize(
+        ("input_val", "expected"),
+        [
+            # --- Chinese unit multipliers ---
+            ("1.2万", 12000.0),
+            ("5亿", 500_000_000.0),
+            ("10.5万", 105000.0),
+            ("1亿", 100_000_000.0),
+            # --- Currency suffixes ---
+            ("HKD500.00", 500.0),
+            ("629.61USD", 629.61),
+            ("人民币100", 100.0),
+            ("100港币", 100.0),
+            ("500港元", 500.0),
+            # --- Unit markers ---
+            ("629.61元", 629.61),
+            ("持有1000股", 1000.0),
+            # --- Prefix text ---
+            ("约629.61元", 629.61),
+            ("约10.5万", 105000.0),
+            # --- Negative percentages ---
+            ("-5.101%", -5.101),
+            # --- Scientific notation ---
+            ("1E5", 100_000.0),
+            ("1.0E+5", 100_000.0),
+            # --- Empty / null / missing ---
+            ("N/A", None),
+            ("---", None),
+            ("", None),
+            (None, None),
+            # --- Integer pass-through ---
+            (42, 42),
+            # --- Single/minus dashes ---
+            ("--", None),
+            ("-", None),
+        ],
+    )
+    def test_coerce_optional_number(self, input_val, expected) -> None:
+        from src.tools.screenshot_import.providers import _coerce_optional_number
+
+        assert _coerce_optional_number(input_val) == expected
+
+
+class TestMaybeSwapCostAndShares:
+    """Tests for _maybe_swap_cost_and_shares."""
+
+    def test_normal_no_swap(self) -> None:
+        """Normal case: cost=45, shares=100 — NOT triggered."""
+        from src.tools.screenshot_import.providers import _maybe_swap_cost_and_shares
+
+        item: dict = {"is_holding": True, "cost": 45.0, "shares": 100}
+        _maybe_swap_cost_and_shares(item)
+        assert item["cost"] == 45.0
+        assert item["shares"] == 100
+
+    def test_swap_triggered(self) -> None:
+        """OCR reversed case: cost=15000, shares=5 — triggered, swapped."""
+        from src.tools.screenshot_import.providers import _maybe_swap_cost_and_shares
+
+        item: dict = {"is_holding": True, "cost": 15000.0, "shares": 5}
+        _maybe_swap_cost_and_shares(item)
+        assert item["cost"] == 5.0
+        assert item["shares"] == 15000.0
+
+    def test_moutai_high_priced_stock_not_swapped(self) -> None:
+        """Moutai-like data: cost=1500, shares=10 — NOT triggered (guard >=10000)."""
+        from src.tools.screenshot_import.providers import _maybe_swap_cost_and_shares
+
+        item: dict = {"is_holding": True, "cost": 1500.0, "shares": 10}
+        _maybe_swap_cost_and_shares(item)
+        assert item["cost"] == 1500.0
+        assert item["shares"] == 10
+
+    def test_not_holding_skips_swap(self) -> None:
+        """Watchlist items (not holding) should skip swap entirely."""
+        from src.tools.screenshot_import.providers import _maybe_swap_cost_and_shares
+
+        item: dict = {"is_holding": False, "cost": 15000.0, "shares": 5}
+        _maybe_swap_cost_and_shares(item)
+        assert item["cost"] == 15000.0
+        assert item["shares"] == 5
+
+    def test_non_numeric_fields_skip(self) -> None:
+        """Non-numeric cost/shares should not cause errors."""
+        from src.tools.screenshot_import.providers import _maybe_swap_cost_and_shares
+
+        item: dict = {"is_holding": True, "cost": "N/A", "shares": "N/A"}
+        _maybe_swap_cost_and_shares(item)
+        assert item["cost"] == "N/A"
+        assert item["shares"] == "N/A"
+
+    def test_missing_fields_skip(self) -> None:
+        """Missing cost or shares should not cause errors."""
+        from src.tools.screenshot_import.providers import _maybe_swap_cost_and_shares
+
+        item: dict = {"is_holding": True}
+        _maybe_swap_cost_and_shares(item)
+        assert "cost" not in item or item["cost"] is None
+
+    def test_non_positive_fields_skip(self) -> None:
+        """Zero or negative cost/shares should be skipped."""
+        from src.tools.screenshot_import.providers import _maybe_swap_cost_and_shares
+
+        item: dict = {"is_holding": True, "cost": 0, "shares": 5}
+        _maybe_swap_cost_and_shares(item)
+        assert item["cost"] == 0
+        assert item["shares"] == 5

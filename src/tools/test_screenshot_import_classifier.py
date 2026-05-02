@@ -196,3 +196,98 @@ def test_unknown_signal_yields_multiple_ranked_candidates(tmp_path: Path) -> Non
     assert result.platform == "unknown"
     assert len(result.candidate_platforms) >= 2
     assert result.candidate_platforms[0].confidence >= result.candidate_platforms[1].confidence
+
+
+def test_eastmoney_dark_top_bar_with_body_text_boosted_confidence(tmp_path: Path) -> None:
+    """EastMoney dark top bar with visible body text should get boosted from 0.62 to 0.75."""
+    path = tmp_path / "em_body_text.png"
+    image = Image.new("RGB", (240, 360), (240, 240, 240))
+    draw = ImageDraw.Draw(image)
+    # Dark top bar (eastmoney style)
+    draw.rectangle((0, 0, 240, 60), fill=(20, 35, 80))
+    # Body: white text rows simulating stock data
+    for y in range(100, 300, 35):
+        draw.rectangle((15, y, 225, y + 8), fill=(210, 214, 220))
+    # Some green and red text (price change columns)
+    draw.rectangle((160, 100, 225, 108), fill=(15, 220, 45))
+    draw.rectangle((160, 135, 225, 143), fill=(230, 35, 35))
+    draw.rectangle((160, 170, 225, 178), fill=(15, 220, 45))
+    image.save(path)
+
+    fp = extract_fingerprint(path)
+    result = classify_fingerprint(fp, forced_platform="auto", forced_type="auto")
+
+    assert result.platform == "eastmoney"
+    assert result.confidence >= 0.75
+    assert "body_colored_text" in result.signals
+    assert "dense_numeric_table" in result.signals
+
+
+def test_ths_dark_mid_body_red_blue_text_detected(tmp_path: Path) -> None:
+    """THS dark mode with both red and blue text in the mid-body table
+    region should detect body_colored_text via the red top bar rule."""
+    path = tmp_path / "ths_dark_mid.png"
+    image = Image.new("RGB", (240, 360), (5, 8, 16))
+    draw = ImageDraw.Draw(image)
+    # Red top bar (THS characteristic)
+    draw.rectangle((0, 0, 240, 55), fill=(210, 30, 30))
+    # Mid-body: alternating red and blue text columns (stock data)
+    for y in range(100, 300, 35):
+        draw.rectangle((20, y, 100, y + 10), fill=(220, 50, 50))
+        draw.rectangle((120, y, 220, y + 10), fill=(40, 100, 240))
+    image.save(path)
+
+    fp = extract_fingerprint(path)
+    result = classify_fingerprint(fp, forced_platform="auto", forced_type="holding")
+
+    assert result.platform == "ths"
+    assert "body_colored_text" in result.signals
+    assert "dense_numeric_table" in result.signals
+    # Should get higher confidence with body text evidence
+    assert result.confidence >= 0.78
+
+
+def test_eastmoney_dark_mid_body_green_text(tmp_path: Path) -> None:
+    """EastMoney dark mode with green text columns in mid-body should
+    get 0.82 and mid_body_signals."""
+    path = tmp_path / "em_dark_mid.png"
+    image = Image.new("RGB", (240, 360), (5, 8, 16))
+    draw = ImageDraw.Draw(image)
+    # Dark top bar
+    draw.rectangle((0, 0, 240, 55), fill=(20, 35, 80))
+    # Mid-body: green and white text columns (eastmoney characteristic)
+    for y in range(100, 300, 35):
+        draw.rectangle((20, y, 130, y + 10), fill=(210, 214, 220))
+        draw.rectangle((145, y, 225, y + 10), fill=(15, 220, 45))
+    image.save(path)
+
+    fp = extract_fingerprint(path)
+    result = classify_fingerprint(fp, forced_platform="auto", forced_type="holding")
+
+    assert result.platform == "eastmoney"
+    assert result.confidence == 0.82
+    assert "mid_body_signals" in result.signals
+    assert "dense_numeric_table" in result.signals
+
+
+def test_eastmoney_light_dark_bar_with_colored_body_text(tmp_path: Path) -> None:
+    """Light mode EastMoney with dark top bar and colored body text
+    should be detected at 0.75 with body_colored_text signal."""
+    path = tmp_path / "em_light_dark_bar.png"
+    image = Image.new("RGB", (240, 360), "white")
+    draw = ImageDraw.Draw(image)
+    # Dark top bar
+    draw.rectangle((0, 0, 240, 55), fill=(20, 35, 80))
+    # Body: green and red price text
+    for y in range(100, 300, 35):
+        draw.rectangle((20, y, 110, y + 10), fill=(40, 40, 40))
+        draw.rectangle((130, y, 225, y + 10), fill=(15, 220, 45))
+    draw.rectangle((130, 170, 225, 178), fill=(230, 35, 35))
+    image.save(path)
+
+    fp = extract_fingerprint(path)
+    result = classify_fingerprint(fp, forced_platform="auto", forced_type="watchlist")
+
+    assert result.platform == "eastmoney"
+    assert result.confidence >= 0.75
+    assert "body_colored_text" in result.signals
