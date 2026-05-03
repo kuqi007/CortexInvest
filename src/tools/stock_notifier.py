@@ -15,6 +15,7 @@ Usage:
 import fcntl
 import json
 import os
+import re
 import signal
 import sqlite3
 import sys
@@ -530,6 +531,49 @@ class DeltaAlertEngine:
         self._notified: dict[str, dict] = {}
         # portfolio: last notified total daily P&L
         self._last_portfolio_pnl: float | None = None
+        # Restore cooldown state from DB so daemon restarts don't reset cooldowns
+        self._restore_cooldown_from_db()
+
+    def _restore_cooldown_from_db(self):
+        """Restore today's big_move/threshold cooldown state from alert_events DB.
+        Prevents duplicate alerts after daemon restart."""
+        conn = None
+        try:
+            from src.sim_trading.db import get_connection
+
+            conn = get_connection()
+            today = datetime.now().strftime("%Y-%m-%d")
+            rows = conn.execute(
+                "SELECT symbol, MAX(ts) as max_ts, change_pct, display "
+                "FROM alert_events WHERE date = ? AND kind IN ('big_move', 'threshold') "
+                "GROUP BY symbol",
+                (today,),
+            ).fetchall()
+            for row in rows:
+                sym = row["symbol"]
+                if sym:
+                    ts_sec = row["max_ts"] / 1000
+                    # Parse price from display: "... → 97.70" (last number after arrow)
+                    price = 0.0
+                    display = row["display"] or ""
+                    m = re.search(r"→\s*([\d.]+)", display)
+                    if m:
+                        try:
+                            price = float(m.group(1))
+                        except (ValueError, TypeError):
+                            pass
+                    self._notified[sym] = {
+                        "price": price,
+                        "change_pct": row["change_pct"] or 0,
+                        "ts": ts_sec,
+                    }
+            if rows:
+                logger.info(f"DeltaAlertEngine restored {len(rows)} cooldown entries from DB for {today}")
+        except Exception as e:
+            logger.warning(f"DeltaAlertEngine._restore_cooldown_from_db failed: {e}")
+        finally:
+            if conn:
+                conn.close()
 
     def _reload_alerts(self):
         """从 config.db alert_rules 加载告警规则"""
@@ -1383,19 +1427,21 @@ def write_alert_events(alerts: list[dict]):
     """将告警事件写入 SQLite alert_events 表，供 web 端读取展示。
 
     单一数据源：notifier 计算，web 只读。确保 terminal 和 web 告警一致。
-    INSERT OR IGNORE 利用 UNIQUE(ts, symbol, message) 零成本去重。
+    同一批次使用统一 ts，使 UNIQUE(ts, symbol, message) 真正去重。
     """
     if not alerts:
         return
 
     from src.sim_trading.db import get_connection
 
+    # Use a single timestamp per batch so that the UNIQUE(ts, symbol, message)
+    # constraint actually deduplicates identical alerts within the same batch.
     ts_base = int(time.time() * 1000)
     t = datetime.now().strftime("%H:%M:%S")
     today = datetime.now().strftime("%Y-%m-%d")
 
     rows = []
-    for i, a in enumerate(alerts):
+    for a in alerts:
         symbol = a.get("symbol", "")
         kind = a.get("_kind", "")
         change_pct = a.get("_change_pct", 0)
@@ -1447,7 +1493,7 @@ def write_alert_events(alerts: list[dict]):
         message = a.get("_stealth", a.get("message", ""))
         rows.append(
             (
-                ts_base + i,
+                ts_base,
                 today,
                 t,
                 symbol,

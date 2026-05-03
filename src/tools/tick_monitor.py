@@ -298,7 +298,8 @@ def _ensure_tick_events_table():
 
 
 def _write_signals(alerts: list[dict]) -> bool:
-    """将触发信号直接写入 trading.db:tick_monitor_events，供 stock_notifier 消费。"""
+    """将触发信号直接写入 trading.db:tick_monitor_events，供 stock_notifier 消费。
+    带 DB 级 60s 冷却：同一 symbol+order_id 在 60 秒内不重复写入。"""
     if not alerts:
         return True
     conn = None
@@ -312,14 +313,26 @@ def _write_signals(alerts: list[dict]) -> bool:
         t = datetime.now().strftime("%H:%M:%S")
 
         rows = []
-        for i, alert in enumerate(alerts):
+        for alert in alerts:
+            symbol = alert.get("symbol", "")
+            order_id = alert.get("order_id", "")
+            # DB 级冷却: 60 秒内同一 symbol+order_id 不重复写入
+            cursor = conn.execute(
+                "SELECT 1 FROM tick_monitor_events "
+                "WHERE symbol = ? AND order_id = ? AND ts > ?",
+                (symbol, order_id, ts_base - 60000),
+            )
+            if cursor.fetchone():
+                logger.debug(f"DB cooldown active for {symbol}.{order_id}, skipping")
+                continue
+
             rows.append((
-                ts_base + i,
+                ts_base,
                 today,
                 t,
-                alert.get("symbol", ""),
+                symbol,
                 alert.get("plan_name", ""),
-                alert.get("order_id", ""),
+                order_id,
                 alert.get("side", "buy"),
                 alert.get("op", "<="),
                 alert.get("label", ""),
@@ -333,6 +346,9 @@ def _write_signals(alerts: list[dict]) -> bool:
                 alert.get("_level", 1),
             ))
 
+        if not rows:
+            return True
+
         conn.executemany(
             "INSERT OR IGNORE INTO tick_monitor_events "
             "(ts, date, time, symbol, plan_name, order_id, side, op, label, trigger_price, tick_price, tick_time, direction, volume, title, message, level) "
@@ -340,7 +356,7 @@ def _write_signals(alerts: list[dict]) -> bool:
             rows,
         )
         conn.commit()
-        logger.debug(f"Written {len(alerts)} signals to tick_monitor_events DB")
+        logger.debug(f"Written {len(rows)} signals to tick_monitor_events DB")
         return True
     except Exception as e:
         logger.warning(f"Failed to write tick_monitor_events: {e}")

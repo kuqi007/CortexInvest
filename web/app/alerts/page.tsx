@@ -173,12 +173,12 @@ function parseGapRecover(_e: AlertEvent, d: string, _sym: string, shortCode: str
 }
 
 function parseDrift(e: AlertEvent, d: string, sym: string, shortCode: string): ParsedAlert | null {
-  const isIndex = sym.startsWith("tag:");
+  const isIndex = /^tag:/i.test(sym);
   const direction = e.change_pct > 0;
   const price = d.match(/(?:现价|当前)([\d.]+)/)?.[1] || "";
   const name = d.match(/^📊\s*(.+?)(?:\([\dA-Z]+\)|\s+距)/)?.[1]?.trim() || "";
   return {
-    stockName: isIndex ? sym.replace("tag:", "") + "指数" : name,
+    stockName: isIndex ? sym.replace(/^tag:/i, "") + "指数" : name,
     stockCode: isIndex ? "" : shortCode,
     signal: direction ? `距关注涨${Math.abs(e.change_pct).toFixed(1)}%` : `距关注跌${Math.abs(e.change_pct).toFixed(1)}%`,
     signalColor: direction ? "#50fa7b" : "#ff5555",
@@ -190,7 +190,7 @@ function parseDrift(e: AlertEvent, d: string, sym: string, shortCode: string): P
 function parseMainline(_e: AlertEvent, d: string, sym: string, _shortCode: string): ParsedAlert | null {
   const isApproaching = d.includes("接近主线");
   return {
-    stockName: sym.replace("tag:", "") + "指数",
+    stockName: sym.replace(/^tag:/i, "") + "指数",
     stockCode: "",
     signal: isApproaching ? "接近主线" : "主线确认",
     signalColor: isApproaching ? "#ffb86c" : "#ff5555",
@@ -305,7 +305,7 @@ const KIND_PARSERS: Record<string, AlertParser> = {
 function parseAlert(e: AlertEvent, services?: { id: string; name?: string }[]): ParsedAlert {
   const d = e.display || "";
   const sym = e.symbol || "";
-  const shortCode = sym.startsWith("tag:") ? sym.replace("tag:", "") : sym.replace(/^(?:HK|KR)/, "");
+  const shortCode = /^tag:/i.test(sym) ? sym.replace(/^tag:/i, "") : sym.replace(/^(?:HK|KR)/, "");
 
   const parser = KIND_PARSERS[e.kind];
   if (parser) {
@@ -505,6 +505,17 @@ function signalPriority(s: string): number {
   return idx === -1 ? 99 : idx;
 }
 
+function cleanDetail(detail: string): string {
+  if (!detail) return "";
+  // Remove redundant price info (already shown in dedicated column)
+  let cleaned = detail.replace(/现价\d+(\.\d+)?\s*/g, "");
+  // Remove redundant change% info (already shown in dedicated column)
+  cleaned = cleaned.replace(/[涨跌][-+]?\d+(\.\d+)?%\s*/g, "");
+  // Remove trailing whitespace
+  cleaned = cleaned.trim();
+  return cleaned;
+}
+
 type StockGroup = {
   symbol: string;
   stockCode: string;
@@ -520,7 +531,7 @@ type StockGroup = {
 
 // Normalize stock code to consistent key — strips SH/SZ/HK/BJ prefixes and leading zeros
 function normalizeKey(code: string): string {
-  return code.replace(/^(SH|SZ|HK|BJ)/i, "").replace(/^0+/, "").toUpperCase();
+  return code.replace(/^tag:/i, "").replace(/^(SH|SZ|HK|BJ)/i, "").replace(/^0+/, "").toUpperCase();
 }
 
 function buildGroups(events: AlertEvent[], services?: { id: string; name?: string }[]): StockGroup[] {
@@ -548,7 +559,7 @@ function buildGroups(events: AlertEvent[], services?: { id: string; name?: strin
     }
     // Update with latest data
     if (parsed.price) group.price = parsed.price;
-    if (e.change_pct) group.changePct = e.change_pct;
+    if (e.change_pct != null) group.changePct = e.change_pct;
     if (parsed.stockName) group.stockName = parsed.stockName;
     if ((e.level ?? 2) < group.maxLevel) group.maxLevel = e.level ?? 2;
     if (e.time) group.latestTime = e.time;
@@ -574,119 +585,267 @@ function buildGroups(events: AlertEvent[], services?: { id: string; name?: strin
       detail: parsed.detail,
     });
   }
+  // Sort each group's timeline chronologically (oldest → newest)
+  for (const g of map.values()) {
+    g.timeline.sort((a, b) => a.time.localeCompare(b.time));
+  }
+
+  // Dedup timeline: merge alerts with identical signal+price+detail within 5min window
+  // This prevents tick_monitor spam (e.g. 35 identical alerts in 34ms) from cluttering UI
+  for (const g of map.values()) {
+    if (g.timeline.length <= 1) continue;
+    const deduped: typeof g.timeline = [];
+    for (const ev of g.timeline) {
+      const last = deduped[deduped.length - 1];
+      if (
+        last &&
+        last.signal === ev.signal &&
+        last.price === ev.price &&
+        last.detail === ev.detail &&
+        last.level === ev.level &&
+        // Within 5 minutes: compare HH:MM:SS strings (same date assumed)
+        Math.abs(
+          (parseInt(ev.time.slice(0, 2)) * 3600 + parseInt(ev.time.slice(3, 5)) * 60 + parseInt(ev.time.slice(6, 8))) -
+          (parseInt(last.time.slice(0, 2)) * 3600 + parseInt(last.time.slice(3, 5)) * 60 + parseInt(last.time.slice(6, 8)))
+        ) <= 300
+      ) {
+        // Same event within 5min — skip, keep the latest (already sorted, so last is latest)
+        continue;
+      }
+      deduped.push(ev);
+    }
+    g.timeline = deduped;
+  }
+
   // Sort: latest alert time desc (most recent activity first)
   return Array.from(map.values()).sort((a, b) => b.latestTime.localeCompare(a.latestTime));
 }
 
-// Flat stock row — all events visible at once, no expand needed
+// Flat stock row — grouped view with expand/collapse + click navigation
 function FlatStockRow({ group }: { group: StockGroup }) {
+  const [expanded, setExpanded] = useState(false);
   const isHighPriority = group.maxLevel <= 1;
   // Sort signals by priority — most important first
   const sortedSignals = [...group.signals].sort((a, b) => signalPriority(a.signal) - signalPriority(b.signal));
+  // Only show top 2 signals inline, collapse the rest
+  const visibleSignals = sortedSignals.slice(0, 2);
+  const hiddenCount = sortedSignals.length - visibleSignals.length;
+
+  // Pre-compute last time per signal to avoid repeated filter().pop() on every render
+  const lastTimeBySignal = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const t of group.timeline) {
+      map.set(t.signal, t.time); // always overwrite — timeline is chronological, so last wins
+    }
+    return map;
+  }, [group.timeline]);
 
   // Check if a signal is "critical" (stop loss, plan trigger)
   const isCritical = (s: string) =>
     s.includes("止损") || s.includes("触价") || s.includes("清仓") || s.includes("止盈");
 
+  const handleStockCodeClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (group.stockCode) {
+      window.open('/manage?symbol=' + encodeURIComponent(group.stockCode), '_blank');
+    }
+  };
+
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        padding: "5px 6px",
-        borderBottom: "1px solid #191a21",
-        background: isHighPriority ? "#44475a" : "transparent",
-        borderLeft: isHighPriority ? `3px solid ${D.yellow}` : "3px solid transparent",
-        gap: 4,
-        fontSize: 12,
-        minHeight: 36,
-      }}
-    >
-      {/* Level badge */}
-      <span style={{
-        color: LEVEL_COLORS[group.maxLevel] || D.comment,
-        flexShrink: 0,
-        width: 22,
-        fontWeight: 700,
-        fontSize: 11,
-        textAlign: "center",
-        background: `${LEVEL_COLORS[group.maxLevel] || D.comment}22`,
-        borderRadius: 3,
-        padding: "1px 0",
-      }}>
-        L{group.maxLevel}
-      </span>
-
-      {/* Stock code */}
-      <span style={{ color: D.cyan, flexShrink: 0, width: 72, fontWeight: 600, fontSize: 12 }}>
-        {group.stockCode}
-      </span>
-
-      {/* Stock name */}
-      <span style={{ color: D.fg, flexShrink: 0, width: 80, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        {group.stockName}
-      </span>
-
-      {/* Current price */}
-      <span style={{ color: D.fg, flexShrink: 0, width: 56, textAlign: "right", fontSize: 12 }}>
-        {group.price || "—"}
-      </span>
-
-      {/* Current change% */}
-      {group.changePct != null ? (
-        <span style={{ color: group.changePct > 0 ? D.red : D.green, flexShrink: 0, width: 48, textAlign: "right", fontWeight: 600, fontSize: 12 }}>
-          {group.changePct >= 0 ? "+" : ""}{group.changePct.toFixed(1)}%
+    <div style={{ borderBottom: "1px solid #191a21" }}>
+      <div
+        onClick={() => setExpanded((v) => !v)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setExpanded((v) => !v);
+          }
+        }}
+        role="button"
+        tabIndex={0}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          padding: "5px 6px",
+          background: isHighPriority ? "#44475a" : "transparent",
+          borderLeft: isHighPriority ? `3px solid ${D.yellow}` : "3px solid transparent",
+          gap: 4,
+          fontSize: 12,
+          minHeight: 36,
+          cursor: "pointer",
+        }}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLDivElement).style.background = "#2d2e38";
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLDivElement).style.background = isHighPriority ? "#44475a" : "transparent";
+        }}
+      >
+        {/* Level badge */}
+        <span style={{
+          color: LEVEL_COLORS[group.maxLevel] || D.comment,
+          flexShrink: 0,
+          width: 22,
+          fontWeight: 700,
+          fontSize: 11,
+          textAlign: "center",
+          background: `${LEVEL_COLORS[group.maxLevel] || D.comment}22`,
+          borderRadius: 3,
+          padding: "1px 0",
+        }}>
+          L{group.maxLevel}
         </span>
-      ) : (
-        <span style={{ flexShrink: 0, width: 48 }} />
-      )}
 
-      {/* Separator */}
-      <span style={{ color: D.comment, flexShrink: 0, fontSize: 10 }}>|</span>
+        {/* Stock code — clickable, navigates to detail page */}
+        <span
+          onClick={handleStockCodeClick}
+          onKeyDown={(e) => {
+            if ((e.key === "Enter" || e.key === " ") && group.stockCode) {
+              e.preventDefault();
+              e.stopPropagation();
+              window.open('/manage?symbol=' + encodeURIComponent(group.stockCode), '_blank');
+            }
+          }}
+          role="link"
+          tabIndex={group.stockCode ? 0 : -1}
+          style={{
+            color: D.cyan,
+            flexShrink: 0,
+            width: 72,
+            fontWeight: 600,
+            fontSize: 12,
+            cursor: group.stockCode ? "pointer" : "default",
+            textDecoration: group.stockCode ? "underline" : "none",
+            textDecorationColor: `${D.cyan}66`,
+          }}
+          title={group.stockCode ? "点击查看股票详情" : undefined}
+        >
+          {group.stockCode}
+        </span>
 
-      {/* All event chips — sorted by priority */}
-      <span style={{
-        flex: 1,
-        display: "flex",
-        gap: 4,
-        overflow: "hidden",
-        alignItems: "center",
-        flexWrap: "wrap",
-        padding: "2px 0",
-      }}>
-        {sortedSignals.map((chip, i) => (
-          <span
-            key={i}
-            title={`${chip.signal} × ${chip.count}${chip.price ? ` @ ${chip.price}` : ""} (最后 ${group.timeline.filter(t => t.signal === chip.signal).pop()?.time || ""})`}
-            style={{
-              background: isCritical(chip.signal) ? `${chip.color}44` : `${chip.color}18`,
-              color: chip.color,
-              border: `1px solid ${chip.color}66`,
-              borderRadius: 4,
-              padding: "2px 6px",
-              fontSize: 11,
-              fontWeight: isCritical(chip.signal) ? 700 : 600,
-              flexShrink: 0,
-              whiteSpace: "nowrap",
-              letterSpacing: 0.2,
-            }}
-          >
-            {chip.signal}
-            {chip.count > 1 && <span style={{ fontSize: 10, marginLeft: 2, opacity: 0.8 }}>×{chip.count}</span>}
-            {chip.price && <span style={{ fontSize: 10, marginLeft: 3, opacity: 0.85 }}>@{chip.price}</span>}
+        {/* Stock name */}
+        <span style={{ color: D.fg, flexShrink: 0, width: 80, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {group.stockName}
+        </span>
+
+        {/* Current price */}
+        <span style={{ color: D.fg, flexShrink: 0, width: 56, textAlign: "right", fontSize: 12 }}>
+          {group.price || "—"}
+        </span>
+
+        {/* Current change% */}
+        {group.changePct != null ? (
+          <span style={{ color: group.changePct > 0 ? D.red : group.changePct < 0 ? D.green : D.comment, flexShrink: 0, width: 48, textAlign: "right", fontWeight: 600, fontSize: 12 }}>
+            {group.changePct >= 0 ? "+" : ""}{group.changePct.toFixed(1)}%
           </span>
-        ))}
-      </span>
+        ) : (
+          <span style={{ flexShrink: 0, width: 48 }} />
+        )}
 
-      {/* Total event count */}
-      <span style={{ color: D.comment, flexShrink: 0, fontSize: 10, width: 36, textAlign: "right" }}>
-        {group.totalCount}条
-      </span>
+        {/* Separator */}
+        <span style={{ color: D.comment, flexShrink: 0, fontSize: 10 }}>|</span>
 
-      {/* Latest event time */}
-      <span style={{ color: D.comment, flexShrink: 0, fontSize: 10, width: 64, textAlign: "right" }}>
-        {group.latestTime}
-      </span>
+        {/* All event chips — sorted by priority, max 2 visible */}
+        <span style={{
+          flex: 1,
+          display: "flex",
+          gap: 4,
+          overflow: "hidden",
+          alignItems: "center",
+          flexWrap: "wrap",
+          padding: "2px 0",
+        }}>
+          {visibleSignals.map((chip, i) => (
+            <span
+              key={i}
+              title={`${chip.signal} × ${chip.count}${chip.price ? ` @ ${chip.price}` : ""} (最后 ${lastTimeBySignal.get(chip.signal) || ""})`}
+              style={{
+                background: isCritical(chip.signal) ? `${chip.color}44` : `${chip.color}18`,
+                color: chip.color,
+                border: `1px solid ${chip.color}66`,
+                borderRadius: 4,
+                padding: "2px 6px",
+                fontSize: 11,
+                fontWeight: isCritical(chip.signal) ? 700 : 600,
+                flexShrink: 0,
+                whiteSpace: "nowrap",
+                letterSpacing: 0.2,
+              }}
+            >
+              {chip.signal}
+              {chip.count > 1 && <span style={{ fontSize: 10, marginLeft: 2, opacity: 0.8 }}>×{chip.count}</span>}
+              {chip.price && <span style={{ fontSize: 10, marginLeft: 3, opacity: 0.85 }}>@{chip.price}</span>}
+            </span>
+          ))}
+          {hiddenCount > 0 && (
+            <span
+              title={sortedSignals.slice(2).map(s => `${s.signal} ×${s.count}`).join(" | ")}
+              style={{
+                color: D.comment,
+                fontSize: 11,
+                fontWeight: 600,
+                flexShrink: 0,
+                whiteSpace: "nowrap",
+                padding: "2px 4px",
+              }}
+            >
+              ...+{hiddenCount}
+            </span>
+          )}
+        </span>
+
+        {/* Total event count */}
+        <span style={{ color: D.comment, flexShrink: 0, fontSize: 10, width: 36, textAlign: "right" }}>
+          {group.totalCount}条
+        </span>
+
+        {/* Latest event time */}
+        <span style={{ color: D.comment, flexShrink: 0, fontSize: 10, width: 64, textAlign: "right" }}>
+          {group.latestTime}
+        </span>
+
+        {/* Expand indicator */}
+        <span style={{ color: D.comment, flexShrink: 0, fontSize: 10, width: 16, textAlign: "center" }}>
+          {expanded ? "▼" : "▶"}
+        </span>
+      </div>
+
+      {/* Expanded timeline — shows all individual events for this stock */}
+      {expanded && (
+        <div style={{ background: "#16171f", padding: "4px 6px 6px", borderLeft: "3px solid transparent" }}>
+          {group.timeline.map((t, i) => (
+            <div
+              key={i}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "2px 0",
+                fontSize: 11,
+                color: D.fg,
+              }}
+            >
+              <span style={{ color: D.comment, width: 64, flexShrink: 0, textAlign: "right" }}>{t.time}</span>
+              <span style={{
+                color: LEVEL_COLORS[t.level] || D.comment,
+                width: 22,
+                flexShrink: 0,
+                textAlign: "center",
+                fontWeight: 700,
+                fontSize: 10,
+                background: `${LEVEL_COLORS[t.level] || D.comment}22`,
+                borderRadius: 3,
+                padding: "1px 0",
+              }}>
+                L{t.level}
+              </span>
+              <span style={{ color: t.signalColor, fontWeight: 600, flexShrink: 0 }}>{t.signal}</span>
+              <span style={{ color: D.fg }}>现价{t.price}</span>
+              {t.detail && <span style={{ color: D.comment }}>{t.detail}</span>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -696,6 +855,7 @@ export default function AlertsPage() {
   const { status: tradingStatus } = useTradingStatus();
   const [showL3, setShowL3] = useState(false);
   const [viewMode, setViewMode] = useState<"grouped" | "detail">("grouped");
+  const [search, setSearch] = useState("");
   const [earningsAiRows, setEarningsAiRows] = useState<AiInvestmentEventApiRow[]>([]);
   const [earningsAiErr, setEarningsAiErr] = useState<string | null>(null);
 
@@ -766,11 +926,12 @@ export default function AlertsPage() {
   // 按时间倒序（最新在前），默认隐藏 L3 + 低价值 kinds
   const filtered = useMemo(() => {
     return events.filter((e) => {
-      // L1 始终显示
-      if ((e.level ?? 2) <= 1) return true;
-      // 高价值 kinds 始终显示
+      const lvl = e.level ?? 2;
+      // L1 + L2 始终显示（L2 是弹窗级别，不能过滤）
+      if (lvl <= 2) return true;
+      // L3 高价值 kinds 始终显示
       if (HIGH_VALUE_KINDS.has(e.kind)) return true;
-      // L2 + L3 需要 showL3
+      // 其余 L3 需要 showL3
       return showL3;
     });
   }, [events, showL3]);
@@ -778,6 +939,22 @@ export default function AlertsPage() {
   const groups = useMemo(() => buildGroups(filtered, services), [filtered, services]);
 
   const st = null;
+
+  // Memoized detail timeline — flattened + sorted
+  const detailEvents = useMemo(() => {
+    if (viewMode !== "detail") return [];
+    return groups
+      .flatMap(g =>
+        g.timeline.map(t => ({
+          ...t,
+          stockCode: g.stockCode,
+          stockName: g.stockName,
+          groupPrice: g.price,
+          groupChangePct: g.changePct,
+        }))
+      )
+      .sort((a, b) => b.time.localeCompare(a.time));
+  }, [groups, viewMode]);
 
   return (
     <div
@@ -866,6 +1043,56 @@ export default function AlertsPage() {
           ))}
         </div>
 
+        {/* 级别说明 — 始终可见 */}
+        <div
+          style={{
+            display: "inline-flex",
+            gap: 12,
+            background: `${D.bg}`,
+            border: `1px solid ${D.comment}33`,
+            borderRadius: 6,
+            padding: "6px 14px",
+            fontSize: 11,
+            marginBottom: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <span style={{ color: D.yellow, fontWeight: 600 }}>L1 弹窗+声音</span>
+          <span style={{ color: D.comment }}>|</span>
+          <span style={{ color: D.orange, fontWeight: 600 }}>L2 弹窗</span>
+          <span style={{ color: D.comment }}>|</span>
+          <span style={{ color: D.comment, fontWeight: 600 }}>L3 Web仅显示</span>
+        </div>
+
+        {/* ── Search box ── */}
+        <div style={{ marginBottom: 12 }}>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="搜索股票代码或名称..."
+            style={{
+              width: 240,
+              padding: "6px 12px",
+              border: `1px solid ${D.comment}44`,
+              borderRadius: 6,
+              background: `${D.comment}11`,
+              color: D.fg,
+              fontSize: 12,
+              fontFamily: "inherit",
+              outline: "none",
+            }}
+          />
+          {search && (
+            <span
+              style={{ color: D.comment, fontSize: 11, marginLeft: 8, cursor: "pointer" }}
+              onClick={() => setSearch("")}
+            >
+              清除
+            </span>
+          )}
+        </div>
+
         {fetchError && (
           <div style={{ color: D.red, marginBottom: 8, fontWeight: 500 }}>
             [ERROR] alert events fetch failed: {fetchError}
@@ -927,7 +1154,7 @@ export default function AlertsPage() {
           <div style={{ color: D.comment }}>Loading...</div>
         )}
 
-        {!loading && !fetchError && sorted.length === 0 && (
+        {!loading && !fetchError && events.length === 0 && (
           <>
             <div style={{ padding: "32px 0", textAlign: "center" }}>
               <div style={{ color: D.fg, fontSize: 16, marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
@@ -935,23 +1162,6 @@ export default function AlertsPage() {
               </div>
               <div style={{ color: D.comment, fontSize: 12, marginBottom: 12 }}>
                 上次重置: 08:00 · 每日自动清零
-              </div>
-              <div
-                style={{
-                  display: "inline-flex",
-                  gap: 12,
-                  background: `${D.bg}`,
-                  border: `1px solid ${D.comment}33`,
-                  borderRadius: 6,
-                  padding: "8px 14px",
-                  fontSize: 11,
-                }}
-              >
-                <span style={{ color: D.yellow }}>L1(弹窗+声音)</span>
-                <span style={{ color: D.comment }}>|</span>
-                <span style={{ color: D.orange }}>L2(弹窗)</span>
-                <span style={{ color: D.comment }}>|</span>
-                <span style={{ color: D.comment }}>L3(Web仅显示)</span>
               </div>
             </div>
 
@@ -976,9 +1186,39 @@ export default function AlertsPage() {
           </>
         )}
 
+        {!loading && !fetchError && events.length > 0 && sorted.length === 0 && (
+          <div style={{ padding: "32px 0", textAlign: "center", color: D.comment }}>
+            <div style={{ fontSize: 16, marginBottom: 8, color: D.fg }}>无匹配告警</div>
+            <div style={{ fontSize: 12 }}>当前过滤条件下无告警，尝试调整筛选或显示 L3 信号</div>
+          </div>
+        )}
+
+        {/* Search no results */}
+        {search && !loading && !fetchError && (
+          (viewMode === "grouped" && groups.filter((g) => {
+            const q = search.toLowerCase();
+            const nq = normalizeKey(q);
+            return (g.stockCode ?? "").toLowerCase().includes(q) ||
+              (g.stockName ?? "").toLowerCase().includes(q) ||
+              normalizeKey(g.stockCode ?? "").includes(nq);
+          }).length === 0) ||
+          (viewMode === "detail" && detailEvents.filter((ev) => {
+            const q = search.toLowerCase();
+            const nq = normalizeKey(q);
+            return (ev.stockCode ?? "").toLowerCase().includes(q) ||
+              (ev.stockName ?? "").toLowerCase().includes(q) ||
+              normalizeKey(ev.stockCode ?? "").includes(nq);
+          }).length === 0)
+        ) && (
+          <div style={{ padding: "32px 0", textAlign: "center", color: D.comment }}>
+            <div style={{ fontSize: 16, marginBottom: 8, color: D.fg }}>无搜索结果</div>
+            <div style={{ fontSize: 12 }}>未找到匹配 "{search}" 的股票</div>
+          </div>
+        )}
+
         {viewMode === "grouped" ? (
           <>
-            {/* Column header — matches FlatStockRow layout */}
+            {/* Column header */}
             <div style={{ display: "flex", alignItems: "center", padding: "2px 6px", borderBottom: `1px solid ${D.comment}44`, gap: 4, fontSize: 10, color: D.comment }}>
               <span style={{ flexShrink: 0, width: 22, textAlign: "center" }}>级别</span>
               <span style={{ flexShrink: 0, width: 72 }}>代码</span>
@@ -988,31 +1228,133 @@ export default function AlertsPage() {
               <span style={{ flex: 1, flexShrink: 0 }}>信号 (重要程度排序)</span>
               <span style={{ flexShrink: 0, width: 36, textAlign: "right" }}>条</span>
               <span style={{ flexShrink: 0, width: 64, textAlign: "right" }}>最后时间</span>
+              <span style={{ flexShrink: 0, width: 16, textAlign: "center" }}></span>
             </div>
-            {groups.map((g) => (
-              <FlatStockRow key={g.symbol || g.stockCode} group={g} />
-            ))}
+            {groups
+              .filter((g) => {
+                if (!search) return true;
+                const q = search.toLowerCase();
+                const nq = normalizeKey(q);
+                return (
+                  (g.stockCode ?? "").toLowerCase().includes(q) ||
+                  (g.stockName ?? "").toLowerCase().includes(q) ||
+                  normalizeKey(g.stockCode ?? "").includes(nq)
+                );
+              })
+              .map((g) => (
+                <FlatStockRow key={g.symbol || g.stockCode} group={g} />
+              ))}
           </>
         ) : (
           <>
-            {/* Detail view — same flat stock rows but sorted by event time */}
+            {/* Detail view */}
             <div style={{ display: "flex", alignItems: "center", padding: "2px 6px", borderBottom: `1px solid ${D.comment}44`, gap: 4, fontSize: 10, color: D.comment }}>
+              <span style={{ flexShrink: 0, width: 64 }}>时间</span>
               <span style={{ flexShrink: 0, width: 22, textAlign: "center" }}>级别</span>
               <span style={{ flexShrink: 0, width: 72 }}>代码</span>
               <span style={{ flexShrink: 0, width: 80 }}>名称</span>
               <span style={{ flexShrink: 0, width: 56, textAlign: "right" }}>现价</span>
               <span style={{ flexShrink: 0, width: 48, textAlign: "right" }}>涨跌</span>
-              <span style={{ flex: 1, flexShrink: 0 }}>信号 (时间排序)</span>
-              <span style={{ flexShrink: 0, width: 36, textAlign: "right" }}>条</span>
-              <span style={{ flexShrink: 0, width: 64, textAlign: "right" }}>最后时间</span>
+              <span style={{ flex: 1, flexShrink: 0 }}>信号</span>
+              <span style={{ flexShrink: 0, flex: 0.8 }}>详情</span>
             </div>
-            {/* Detail view also uses flat stock rows — all events visible per stock */}
-            {groups
-              .slice()
-              .sort((a, b) => b.latestTime.localeCompare(a.latestTime))
-              .map((g) => (
-                <FlatStockRow key={`detail-${g.symbol || g.stockCode}`} group={g} />
-              ))}
+            {detailEvents
+              .filter((ev) => {
+                if (!search) return true;
+                const q = search.toLowerCase();
+                const nq = normalizeKey(q);
+                return (
+                  (ev.stockCode ?? "").toLowerCase().includes(q) ||
+                  (ev.stockName ?? "").toLowerCase().includes(q) ||
+                  normalizeKey(ev.stockCode ?? "").includes(nq)
+                );
+              })
+              .map((ev, i) => {
+                return (
+                  <div
+                  key={`${ev.stockCode}-${ev.time}-${i}`}
+                  className="alert-detail-row"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    padding: "5px 6px",
+                    borderBottom: "1px solid #191a21",
+                    gap: 4,
+                    fontSize: 12,
+                    minHeight: 32,
+                  }}
+                >
+                  {/* Time */}
+                  <span style={{ color: D.comment, flexShrink: 0, width: 64, fontSize: 11 }}>
+                    {ev.time}
+                  </span>
+                  {/* Level */}
+                  <span style={{
+                    color: LEVEL_COLORS[ev.level] || D.comment,
+                    flexShrink: 0,
+                    width: 22,
+                    fontWeight: 700,
+                    fontSize: 10,
+                    textAlign: "center",
+                    background: `${LEVEL_COLORS[ev.level] || D.comment}22`,
+                    borderRadius: 3,
+                    padding: "1px 0",
+                  }}>
+                    L{ev.level}
+                  </span>
+                  {/* Stock code — clickable */}
+                  <span
+                    onClick={() => {
+                      if (ev.stockCode) {
+                        window.open('/manage?symbol=' + encodeURIComponent(ev.stockCode), '_blank');
+                      }
+                    }}
+                    style={{
+                      color: D.cyan,
+                      flexShrink: 0,
+                      width: 72,
+                      fontWeight: 600,
+                      fontSize: 12,
+                      cursor: ev.stockCode ? "pointer" : "default",
+                      textDecoration: ev.stockCode ? "underline" : "none",
+                      textDecorationColor: `${D.cyan}66`,
+                    }}
+                    title={ev.stockCode ? "点击查看股票详情" : undefined}
+                  >
+                    {ev.stockCode}
+                  </span>
+                  {/* Stock name */}
+                  <span style={{ color: D.fg, flexShrink: 0, width: 80, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {ev.stockName}
+                  </span>
+                  {/* Price */}
+                  <span style={{ color: D.fg, flexShrink: 0, width: 56, textAlign: "right", fontSize: 12 }}>
+                    {ev.price || ev.groupPrice || "—"}
+                  </span>
+                  {/* Change% — neutral for 0% */}
+                  {(() => {
+                    const pct = ev.changePct ?? ev.groupChangePct;
+                    if (pct == null) return <span style={{ flexShrink: 0, width: 48 }} />;
+                    let color: string = D.comment;
+                    if (pct > 0) color = D.red;
+                    else if (pct < 0) color = D.green;
+                    return (
+                      <span style={{ color, flexShrink: 0, width: 48, textAlign: "right", fontWeight: 600, fontSize: 12 }}>
+                        {pct >= 0 ? "+" : ""}{pct.toFixed(1)}%
+                      </span>
+                    );
+                  })()}
+                  {/* Signal */}
+                  <span style={{ color: ev.signalColor, fontWeight: 600, flex: 1, fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {ev.signal}
+                  </span>
+                  {/* Detail — cleaned */}
+                  <span style={{ color: D.comment, flex: 0.8, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={ev.detail}>
+                    {cleanDetail(ev.detail)}
+                  </span>
+                </div>
+              );
+            })}
           </>
         )}
 
