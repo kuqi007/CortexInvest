@@ -15,9 +15,10 @@ function resolveDataDir(): string {
 
   try {
     const fs = require("fs") as typeof import("fs");
-    if (fs.existsSync(srcDataPath)) return srcDataPath;
+    const stat = fs.lstatSync(srcDataPath);
+    if (stat.isSymbolicLink()) return srcDataPath;
   } catch {
-    // fs not available (edge runtime) — assume src/data
+    // src/data does not exist or fs not available — fall back
   }
   return repoDataPath;
 }

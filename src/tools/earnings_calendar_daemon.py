@@ -31,7 +31,7 @@ from src.sim_trading.db import get_connection, init_db
 
 logger = setup_logger("earnings_calendar_daemon")
 
-LOCK_FILE = PROJECT_ROOT / "data" / ".earnings_calendar_daemon.lock"
+LOCK_FILE = PROJECT_ROOT / "run" / ".earnings_calendar_daemon.lock"
 CHECK_INTERVAL_SEC = 1800   # 30 分钟（交易时段）
 LONG_CHECK_INTERVAL_SEC = 7200  # 2 小时（非交易时段）
 DAEMON_MODE = True

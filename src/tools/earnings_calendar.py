@@ -49,7 +49,7 @@ logger = setup_logger("earnings_calendar")
 # stocks and can take ~170 seconds with no network timeout. Set to 120s to allow most
 # valid responses while preventing indefinite blocking of the main thread.
 AKSHARE_FULL_SCAN_TIMEOUT = 120  # seconds
-LOCK_FILE = PROJECT_ROOT / "data" / ".earnings_calendar.lock"
+LOCK_FILE = PROJECT_ROOT / "run" / ".earnings_calendar.lock"
 
 # ── 数据缓存路径 ──
 from src.sim_trading.db import DATA_DIR, TRADING_DB_PATH

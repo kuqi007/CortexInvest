@@ -38,7 +38,8 @@ logger = setup_logger("stock_notifier")
 # Config is read from config.db only.
 from src.utils.config_reader import read_monitor_config
 
-ARCHIVE_DIR = PROJECT_ROOT / "src" / "data" / "archive"
+from src.sim_trading.db import DATA_DIR
+ARCHIVE_DIR = DATA_DIR / "archive"
 
 # ── Poll intervals ──
 TRADING_CHECK_SEC = 3  # mtime check interval during trading hours

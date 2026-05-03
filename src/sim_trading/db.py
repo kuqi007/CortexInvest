@@ -24,7 +24,9 @@ else:
     # Fallback (2): original symlink path — preserve existing behaviour on
     # machines where the OneDrive symlink src/data is live and readable
     _symlink_data_dir = PROJECT_ROOT / "src" / "data"
-    DATA_DIR = _symlink_data_dir if _symlink_data_dir.exists() else PROJECT_ROOT / "data"
+    # src/data must be a symlink to be treated as the data dir.
+    # If it's a regular directory, the symlink was lost — fall back to repo/data.
+    DATA_DIR = _symlink_data_dir if _symlink_data_dir.is_symlink() else PROJECT_ROOT / "data"
 CONFIG_DB_PATH = DATA_DIR / "config.db"
 TRADING_DB_PATH = DATA_DIR / "trading.db"
 LEGACY_DB_PATH = DATA_DIR / "sim_trading.db"
