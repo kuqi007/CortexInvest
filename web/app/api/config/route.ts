@@ -3,6 +3,7 @@ import Database from "better-sqlite3";
 import { randomUUID } from "crypto";
 import { openConfigDb, openTradingDb } from "../../lib/db";
 import { buildAuditEventV2, insertConfigAuditOutbox, makeActor, recordDbChangeBestEffort } from "../../lib/audit";
+import { triggerAuditFlush } from "../../lib/auditFlush";
 
 import type { WatchEntry, MonitorConfig } from "../../types";
 import { EM_UT } from "../../theme";
@@ -1114,5 +1115,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, message: String(e) }, { status: 500 });
   } finally {
     db.close();
+    triggerAuditFlush();
   }
 }
