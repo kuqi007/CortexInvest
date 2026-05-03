@@ -9,6 +9,26 @@ import {
   quoteTrustLabel,
 } from "../lib/data-trust";
 
+function getTimeUntilNextOpen(): string {
+  const now = new Date();
+  const currentHour = now.getHours();
+  const currentMinute = now.getMinutes();
+
+  let target = new Date(now);
+  if (currentHour < 9 || (currentHour === 9 && currentMinute < 30)) {
+    target.setHours(9, 30, 0, 0);
+  } else {
+    target.setDate(target.getDate() + 1);
+    target.setHours(9, 30, 0, 0);
+  }
+
+  const diffMs = target.getTime() - now.getTime();
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+
+  return `${diffHours}h${diffMinutes.toString().padStart(2, "0")}m`;
+}
+
 function pillStyle(fg: string, bg: string, border: string): CSSProperties {
   return {
     fontSize: 11,
@@ -137,14 +157,22 @@ export function DataTrustBar({
         <span style={{ color: D.fg, fontFamily: "JetBrains Mono, monospace" }}>
           last {lastClock}
         </span>
-        <span style={{ color: ts > 0 ? D.comment : D.red }}>
-          age {ts > 0 ? formatAgeZh(ageMs) : "—"}
-        </span>
-        <span style={{ color: D.comment }}>源 SQLite</span>
-        <span style={{ color: D.comment }}>轮询 {Math.round(pollMs / 1000)}s</span>
-        <span style={{ color: D.comment }} title="metrics fetch counter (E2E waits for refresh #1+)">
-          refresh #{tick}
-        </span>
+        {trust === "CLOSED" || trust === "CLOSED_STALE" ? (
+          <span style={{ color: D.comment }}>
+            收盘快照 · 距下次开盘还有 {getTimeUntilNextOpen()}
+          </span>
+        ) : (
+          <>
+            <span style={{ color: ts > 0 ? D.comment : D.red }}>
+              age {ts > 0 ? formatAgeZh(ageMs) : "—"}
+            </span>
+            <span style={{ color: D.comment }}>数据源</span>
+            <span style={{ color: D.comment }}>刷新间隔 {Math.round(pollMs / 1000)}s</span>
+            <span style={{ color: D.comment }} title="metrics fetch counter (E2E waits for refresh #1+)">
+              已刷新 {tick} 次
+            </span>
+          </>
+        )}
         {dataRuntimeHint ? (
           <span
             title="服务端 AI_INVESTOR_DATA_DIR 指向隔离目录"

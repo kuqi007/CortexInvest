@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { D } from "../theme";
 import { AppTabs } from "../components/AppTabs";
 import { AppTitleBar } from "../components/AppTitleBar";
@@ -140,6 +140,83 @@ function NewsCard({ news }: { news: MorningBriefing["global_news"] }) {
   );
 }
 
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode; fallback: React.ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error: any, info: any) {
+    console.error("DailyPage render error:", error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback;
+    }
+    return this.props.children;
+  }
+}
+
+function LoadingSkeleton() {
+  return (
+    <div style={{ padding: "20px 0" }}>
+      {[1, 2, 3].map((i) => (
+        <div
+          key={i}
+          style={{
+            marginBottom: 16,
+            borderRadius: 6,
+            border: `1px solid ${D.comment}22`,
+            padding: 16,
+            background: "#21222c",
+          }}
+        >
+          <div
+            style={{
+              height: 16,
+              width: "30%",
+              background: `${D.comment}33`,
+              borderRadius: 4,
+              marginBottom: 12,
+            }}
+          />
+          <div
+            style={{
+              height: 10,
+              width: "90%",
+              background: `${D.comment}22`,
+              borderRadius: 3,
+              marginBottom: 8,
+            }}
+          />
+          <div
+            style={{
+              height: 10,
+              width: "70%",
+              background: `${D.comment}22`,
+              borderRadius: 3,
+              marginBottom: 8,
+            }}
+          />
+          <div
+            style={{
+              height: 10,
+              width: "50%",
+              background: `${D.comment}22`,
+              borderRadius: 3,
+            }}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function DailyPage() {
   const [data, setData] = useState<DailySummary | null>(null);
   const [closeEvent, setCloseEvent] = useState<CloseEvent | null>(null);
@@ -147,14 +224,15 @@ export default function DailyPage() {
   const [summaryOpen, setSummaryOpen] = useState(true);
   const [closeOpen, setCloseOpen] = useState(true);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
       const res = await fetch("/api/summary", { cache: "no-store" });
       const json = await res.json();
       if (json.data) setData(json.data);
-    } catch {
-      // non-critical
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "加载日报失败");
     }
   }, []);
 
@@ -163,8 +241,8 @@ export default function DailyPage() {
       const res = await fetch("/api/close-events", { cache: "no-store" });
       const json = await res.json();
       if (json.data) setCloseEvent(json.data);
-    } catch {
-      // non-critical
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "加载收盘简报失败");
     } finally {
       setLoading(false);
     }
@@ -191,6 +269,7 @@ export default function DailyPage() {
 
   return (
     <div
+      suppressHydrationWarning
       style={{
         height: "100vh",
         display: "flex",
@@ -207,10 +286,24 @@ export default function DailyPage() {
 
       <div style={{ flex: 1, overflow: "auto", padding: "16px 20px", lineHeight: 1.6 }}>
         {loading ? (
-          <div style={{ color: D.comment }}>Loading...</div>
+          <LoadingSkeleton />
         ) : (
-          <>
-            {/* 1. Daily Summary Card - 信号日报 (最上面) */}
+          <ErrorBoundary
+            fallback={
+              <div style={{ padding: "40px 20px", textAlign: "center", color: D.comment }}>
+                <div style={{ fontSize: 24, marginBottom: 12, color: D.orange }}>!</div>
+                <div style={{ fontSize: 14, marginBottom: 8 }}>页面加载遇到问题</div>
+                <div style={{ fontSize: 12 }}>请刷新页面重试</div>
+              </div>
+            }
+          >
+            <>
+              {error && (
+                <div style={{ color: D.red, padding: "12px 16px", marginBottom: 16, border: `1px solid ${D.red}44`, borderRadius: 6, background: "rgba(255, 85, 85, 0.08)" }}>
+                  <span style={{ color: D.orange }}>[ERROR]</span> {error}
+                </div>
+              )}
+              {/* 1. Daily Summary Card - 信号日报 (最上面) */}
             {report && (
               <div
                 style={{
@@ -374,7 +467,7 @@ export default function DailyPage() {
               </div>
             )}
 
-            {!morning && !report && !closeEvent && (
+            {!loading && !morning && !report && !closeEvent && (
               <div style={{ color: D.comment, padding: "20px 0" }}>
                 # 暂无数据
                 <br />
@@ -382,6 +475,7 @@ export default function DailyPage() {
               </div>
             )}
           </>
+          </ErrorBoundary>
         )}
       </div>
     </div>
