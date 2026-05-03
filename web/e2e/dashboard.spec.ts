@@ -156,13 +156,11 @@ test.describe("Dashboard 新增功能", () => {
   });
 
   test("Market turnover显示", async ({ page }) => {
-    const shLabel = page.locator("text=SH").first();
-    if (await shLabel.isVisible()) {
-      await expect(shLabel).toBeVisible();
-      const szLabel = page.locator("text=SZ").first();
-      await expect(szLabel).toBeVisible();
-      const turnover = page.locator("text=成交").first();
-      await expect(turnover).toBeVisible();
+    const marketBar = page.locator('text="SH "').first();
+    if (await marketBar.isVisible()) {
+      await expect(marketBar).toBeVisible();
+      await expect(page.locator('text="SZ "').first()).toBeVisible();
+      await expect(page.locator("text=成交").first()).toBeVisible();
     }
   });
 });
