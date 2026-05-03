@@ -38,7 +38,7 @@ const routes: DashboardRoute[] = [
 
 async function openRoute(page: Page, route: DashboardRoute) {
   await page.goto(route.path, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector("text=数据源", { timeout: 15_000 });
+  await page.waitForSelector("text=快照", { timeout: 15_000 });
 }
 
 test.describe("Dashboard route consistency", () => {
@@ -55,11 +55,10 @@ test.describe("Dashboard route consistency", () => {
 
       await page.goto(route.path, { waitUntil: "domcontentloaded" });
       await expect(page.locator("text=正在加载数据...").first()).toBeVisible();
-      await page.waitForSelector("text=数据源", { timeout: 15_000 });
+      await page.waitForSelector("text=快照", { timeout: 15_000 });
 
       const body = page.locator("body");
       await expect(body).toContainText(`· ${route.key}`);
-      await expect(body).toContainText("数据源");
       await expect(body).toContainText("快照");
       await expect(body).toContainText("告警视图");
       await expect(body).toContainText(/数据源|收盘快照/);

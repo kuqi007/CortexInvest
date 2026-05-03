@@ -4,7 +4,7 @@ test.describe("Dashboard (首页)", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/", { waitUntil: "domcontentloaded" });
     // 等数据加载完成：数据源出现表示 metrics 已加载
-    await page.waitForSelector("text=数据源", { timeout: 15_000 });
+    await page.waitForSelector("text=快照", { timeout: 15_000 });
   });
 
   test("页面正常加载，标题栏和 Tab 栏可见", async ({ page }) => {
@@ -28,7 +28,7 @@ test.describe("Dashboard (首页)", () => {
 
   test("自选 section 可见且可折叠", async ({ page }) => {
     await page.goto("/watching", { waitUntil: "domcontentloaded" });
-    await page.waitForSelector("text=数据源", { timeout: 15_000 });
+    await page.waitForSelector("text=快照", { timeout: 15_000 });
     const sec = page.locator("text=自选:股票").first();
     if (await sec.isVisible()) {
       await sec.click();
@@ -77,7 +77,7 @@ test.describe("Dashboard (首页)", () => {
 test.describe("Dashboard 新增功能", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await page.waitForSelector("text=数据源", { timeout: 15_000 });
+    await page.waitForSelector("text=快照", { timeout: 15_000 });
   });
 
   test("搜索框可见且可输入", async ({ page }) => {
@@ -250,7 +250,7 @@ test.describe("Dashboard 新增功能", () => {
   test.describe("主力列 HK/A股 tab 切换", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await page.waitForSelector("text=数据源", { timeout: 15_000 });
+    await page.waitForSelector("text=快照", { timeout: 15_000 });
   });
 
   test("A股 tab 不显示主力列表头", async ({ page }) => {
@@ -276,7 +276,7 @@ test.describe("Dashboard 新增功能", () => {
     if (await hkTab.isVisible()) {
       await hkTab.click();
       await page.waitForTimeout(2000);
-      await page.waitForSelector("text=数据源", { timeout: 15_000 });
+      await page.waitForSelector("text=快照", { timeout: 15_000 });
     }
 
     // Verify "主力" header IS visible in HK tab
@@ -287,7 +287,7 @@ test.describe("Dashboard 新增功能", () => {
     if (await aShareTab.isVisible()) {
       await aShareTab.click();
       await page.waitForTimeout(2000);
-      await page.waitForSelector("text=数据源", { timeout: 15_000 });
+      await page.waitForSelector("text=快照", { timeout: 15_000 });
     }
 
     // Verify "主力" header is NOT visible again on A-share tab
