@@ -63,6 +63,10 @@ type AiInvestmentEventApiRow = {
   recommendation_json?: string | null;
   notify_status: string;
   created_at: string;
+  /** Pre-parsed metrics_json to avoid repeated JSON.parse on every render */
+  _parsedMetrics?: {
+    pre_earnings?: { verdict?: string; score?: number };
+  } | null;
 };
 
 const KIND_LABELS: Record<string, { label: string; color: string }> = {
@@ -488,7 +492,7 @@ type TimelineEvent = { time: string; level: number; signal: string; signalColor:
 
 // Priority order for signal display — most important first
 const SIGNAL_PRIORITY = [
-  "止损", "移动止损", "硬止损",
+  "移动止损", "硬止损", "止损",
   "分批建仓", "建仓", "加仓",
   "均线多排", "均线空排", "MACD金叉", "MACD死叉",
   "突破买入", "反弹买入",
@@ -582,7 +586,7 @@ function FlatStockRow({ group }: { group: StockGroup }) {
 
   // Check if a signal is "critical" (stop loss, plan trigger)
   const isCritical = (s: string) =>
-    s.includes("止损") || s.includes("硬止损") || s.includes("止损") || s.includes("触价") || s.includes("清仓") || s.includes("止盈");
+    s.includes("止损") || s.includes("触价") || s.includes("清仓") || s.includes("止盈");
 
   return (
     <div
@@ -687,13 +691,8 @@ function FlatStockRow({ group }: { group: StockGroup }) {
   );
 }
 
-// Legacy — kept for detail view compatibility
-function GroupedRow({ group, expanded, onToggle }: { group: StockGroup; expanded: boolean; onToggle: () => void }) {
-  return <FlatStockRow group={group} />;
-}
-
 export default function AlertsPage() {
-  const { alertEvents: events, loading, fetchError, services } = useMetrics();
+  const { alertEvents: events, loading, fetchError, services, tick } = useMetrics();
   const { status: tradingStatus } = useTradingStatus();
   const [showL3, setShowL3] = useState(false);
   const [viewMode, setViewMode] = useState<"grouped" | "detail">("grouped");
@@ -702,6 +701,7 @@ export default function AlertsPage() {
 
   useEffect(() => {
     let cancelled = false;
+    // Retry on mount and whenever the metrics tick refreshes (covers error recovery)
     fetch("/api/ai-investment-events?limit=40")
       .then((r) => {
         if (!r.ok) {
@@ -713,8 +713,22 @@ export default function AlertsPage() {
         if (cancelled) {
           return;
         }
-        const rows = body.data ?? [];
-        setEarningsAiRows(rows.filter((x) => (x.event_type ?? "").startsWith("earnings")));
+        const rows = (body.data ?? []).filter((x) =>
+          (x.event_type ?? "").startsWith("earnings")
+        );
+        // Pre-parse metrics_json to avoid repeated JSON.parse on every render
+        const parsedRows = rows.map((row) => {
+          if (!row.metrics_json) return { ...row, _parsedMetrics: null };
+          try {
+            const m = JSON.parse(row.metrics_json) as {
+              pre_earnings?: { verdict?: string; score?: number };
+            };
+            return { ...row, _parsedMetrics: m };
+          } catch {
+            return { ...row, _parsedMetrics: null };
+          }
+        });
+        setEarningsAiRows(parsedRows);
         setEarningsAiErr(null);
       })
       .catch(() => {
@@ -725,7 +739,7 @@ export default function AlertsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [tick]);
 
   // Level counts (memoized to avoid re-filtering on every render)
   const { l1Count, l2Count, l3Count } = useMemo(() => {
@@ -802,6 +816,56 @@ export default function AlertsPage() {
           lineHeight: 1.6,
         }}
       >
+        {/* ── Statistics cards (always visible) ── */}
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            marginBottom: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          {[
+            { label: "L1 告警", count: l1Count, color: D.yellow, desc: "弹窗+声音" },
+            { label: "L2 告警", count: l2Count, color: D.orange, desc: "弹窗" },
+            { label: "L3 信号", count: l3Count, color: D.comment, desc: "Web仅显示" },
+            { label: "监控标的", count: services?.length ?? 0, color: D.cyan, desc: "总股票数" },
+          ].map((card) => (
+            <div
+              key={card.label}
+              style={{
+                background: `${card.color}11`,
+                border: `1px solid ${card.color}33`,
+                borderRadius: 6,
+                padding: "8px 14px",
+                minWidth: 100,
+                display: "flex",
+                alignItems: "baseline",
+                gap: 8,
+              }}
+            >
+              <span
+                style={{
+                  color: card.color,
+                  fontWeight: 700,
+                  fontSize: 18,
+                  lineHeight: 1,
+                }}
+              >
+                {card.count}
+              </span>
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                <span style={{ color: D.fg, fontSize: 11, fontWeight: 600 }}>
+                  {card.label}
+                </span>
+                <span style={{ color: D.comment, fontSize: 10 }}>
+                  {card.desc}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+
         {fetchError && (
           <div style={{ color: D.red, marginBottom: 8, fontWeight: 500 }}>
             [ERROR] alert events fetch failed: {fetchError}
@@ -844,24 +908,13 @@ export default function AlertsPage() {
                 <div style={{ color: D.fg, marginTop: 2 }}>{row.title}</div>
                 <div style={{ color: D.comment, marginTop: 2 }}>{row.summary}</div>
                 {(() => {
-                  try {
-                    const raw = row.metrics_json;
-                    if (!raw) {
-                      return null;
-                    }
-                    const m = JSON.parse(raw) as {
-                      pre_earnings?: { verdict?: string; score?: number };
-                    };
-                    const pe = m.pre_earnings;
-                    if (pe?.verdict !== undefined && pe.score !== undefined) {
-                      return (
-                        <div style={{ color: D.orange, marginTop: 4, fontSize: 10 }}>
-                          预判 {pe.verdict} · 评分 {pe.score}
-                        </div>
-                      );
-                    }
-                  } catch {
-                    /* ignore */
+                  const pe = row._parsedMetrics?.pre_earnings;
+                  if (pe?.verdict !== undefined && pe.score !== undefined) {
+                    return (
+                      <div style={{ color: D.orange, marginTop: 4, fontSize: 10 }}>
+                        预判 {pe.verdict} · 评分 {pe.score}
+                      </div>
+                    );
                   }
                   return null;
                 })()}
@@ -875,9 +928,52 @@ export default function AlertsPage() {
         )}
 
         {!loading && !fetchError && sorted.length === 0 && (
-          <div style={{ color: D.comment, padding: "16px 0" }}>
-            # No alert events today. Events reset daily at 08:00.
-          </div>
+          <>
+            <div style={{ padding: "32px 0", textAlign: "center" }}>
+              <div style={{ color: D.fg, fontSize: 16, marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                <span>今日暂无新告警</span>
+              </div>
+              <div style={{ color: D.comment, fontSize: 12, marginBottom: 12 }}>
+                上次重置: 08:00 · 每日自动清零
+              </div>
+              <div
+                style={{
+                  display: "inline-flex",
+                  gap: 12,
+                  background: `${D.bg}`,
+                  border: `1px solid ${D.comment}33`,
+                  borderRadius: 6,
+                  padding: "8px 14px",
+                  fontSize: 11,
+                }}
+              >
+                <span style={{ color: D.yellow }}>L1(弹窗+声音)</span>
+                <span style={{ color: D.comment }}>|</span>
+                <span style={{ color: D.orange }}>L2(弹窗)</span>
+                <span style={{ color: D.comment }}>|</span>
+                <span style={{ color: D.comment }}>L3(Web仅显示)</span>
+              </div>
+            </div>
+
+            {/* 7-day trend placeholder */}
+            <div
+              style={{
+                marginTop: 16,
+                padding: "16px 20px",
+                border: `1px dashed ${D.comment}33`,
+                borderRadius: 6,
+                background: `${D.comment}08`,
+                color: D.comment,
+                fontSize: 12,
+                textAlign: "center",
+              }}
+            >
+              <div style={{ fontSize: 14, marginBottom: 6, color: D.fg }}>
+                最近7天告警趋势
+              </div>
+              <div>历史数据回顾功能开发中</div>
+            </div>
+          </>
         )}
 
         {viewMode === "grouped" ? (

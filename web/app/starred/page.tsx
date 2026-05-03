@@ -105,7 +105,10 @@ function StarredPage() {
         setAddCode(""); setAddCost(""); setAddShares(""); setAddType("watching");
         refresh();
       }
-    } catch { /* ignore */ }
+    } catch (e) {
+      console.error("添加失败:", e);
+      alert("添加失败，请检查网络或代码格式");
+    }
   }
 
   function switchTab(tab: MarketTab) {
@@ -358,9 +361,11 @@ function StarredPage() {
         <MarketSwitch activeTab={activeTab} onTabChange={switchTab} />
         
         {/* Market Summary Bar */}
-        <div style={{ marginBottom: 6 }}>
-          <MarketSummaryBar marketTurnover={marketTurnover ?? {} as any} market={activeTab === 'A' ? 'A' : 'HK'} />
-        </div>
+        {marketTurnover && (
+          <div style={{ marginBottom: 6 }}>
+            <MarketSummaryBar marketTurnover={marketTurnover} market={activeTab === 'A' ? 'A' : 'HK'} />
+          </div>
+        )}
 
         {loading && (
           <MetricsLoadingBlock />

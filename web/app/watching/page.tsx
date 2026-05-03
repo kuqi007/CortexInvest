@@ -60,7 +60,7 @@ function WatchingContent() {
   const [watchStockOpen, setWatchStockOpen] = useState(true);
   const [watchETFOpen, setWatchETFOpen] = useState(true);
   const [hiddenOpen, setHiddenOpen] = useState(false);
-  type SortKey = keyof Service;
+  type SortKey = "price" | "change" | "chgAmt" | "volRatio" | "turnover" | "amount" | "mainNetInflow" | "mainNetInflowPct";
   type SortState = { key: SortKey | null; asc: boolean };
   const [watchSort, setWatchSort] = useState<SortState>({ key: null, asc: false });
   const { logs, addLogs, clearLogs } = useLogEntries();
@@ -68,6 +68,27 @@ function WatchingContent() {
   const [drawerSymbol, setDrawerSymbol] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [addCode, setAddCode] = useState("");
+
+  type QuickFilterKey = "up5" | "down3" | "vol2" | "turn5" | "abnormal";
+  const QUICK_FILTERS: { key: QuickFilterKey; label: string; test: (s: Service) => boolean }[] = [
+    { key: "up5", label: "涨幅>5%", test: (s) => s.change > 5 },
+    { key: "down3", label: "跌幅>3%", test: (s) => s.change < -3 },
+    { key: "vol2", label: "量比>2", test: (s) => s.volRatio > 2 },
+    { key: "turn5", label: "换手>5%", test: (s) => s.turnover > 5 },
+    { key: "abnormal", label: "异动", test: (s) => s.change > 5 || s.change < -5 || s.volRatio > 2 || s.turnover > 5 },
+  ];
+  const [quickFilters, setQuickFilters] = useState<Set<QuickFilterKey>>(new Set());
+  function toggleQuickFilter(key: QuickFilterKey) {
+    setQuickFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+  function clearQuickFilters() {
+    setQuickFilters(new Set());
+  }
 
   async function handleAdd() {
     const code = addCode.trim();
@@ -84,7 +105,10 @@ function WatchingContent() {
         setAddCode("");
         refresh();
       }
-    } catch { /* ignore */ }
+    } catch (e) {
+      console.error("添加失败:", e);
+      alert("添加失败，请检查网络或代码格式");
+    }
   }
 
   const allTags = useMemo(
@@ -115,7 +139,8 @@ function WatchingContent() {
     );
   }
   function derivedVal(s: Service, key: SortKey): number {
-    return (s[key] as number | null | undefined) ?? -Infinity;
+    const v = s[key as keyof Service];
+    return typeof v === "number" ? v : -Infinity;
   }
   function applySortList(list: Service[]): Service[] {
     const pinned = (s: Service) => s.pin_order ?? 0;
@@ -144,11 +169,17 @@ function WatchingContent() {
       s.id.toLowerCase().includes(q) || (s.alias || s.name).toLowerCase().includes(q)
     );
   }, [tagFiltered, search]);
-  const pinnedList = useMemo(() => applySortList(searchFiltered.filter((s) => !s.hidden && (s.star || (s.pin_order ?? 0) > 0))), [searchFiltered, watchSort]);
+  const quickFiltered = useMemo(() => {
+    if (quickFilters.size === 0) return searchFiltered;
+    return searchFiltered.filter((s) =>
+      QUICK_FILTERS.some((f) => quickFilters.has(f.key) && f.test(s))
+    );
+  }, [searchFiltered, quickFilters]);
+  const pinnedList = useMemo(() => applySortList(quickFiltered.filter((s) => !s.hidden && (s.star || (s.pin_order ?? 0) > 0))), [quickFiltered, watchSort]);
   const pinnedIds = useMemo(() => new Set(pinnedList.map((s) => s.id)), [pinnedList]);
-  const watchStock = useMemo(() => applySortList(searchFiltered.filter((s) => !s.hidden && !isETF(s) && !pinnedIds.has(s.id))), [searchFiltered, watchSort, pinnedIds]);
-  const watchETF = useMemo(() => applySortList(searchFiltered.filter((s) => !s.hidden && isETF(s) && !pinnedIds.has(s.id))), [searchFiltered, watchSort, pinnedIds]);
-  const hiddenList = useMemo(() => applySortList(searchFiltered.filter((s) => s.hidden)), [searchFiltered, watchSort]);
+  const watchStock = useMemo(() => applySortList(quickFiltered.filter((s) => !s.hidden && !isETF(s) && !pinnedIds.has(s.id))), [quickFiltered, watchSort, pinnedIds]);
+  const watchETF = useMemo(() => applySortList(quickFiltered.filter((s) => !s.hidden && isETF(s) && !pinnedIds.has(s.id))), [quickFiltered, watchSort, pinnedIds]);
+  const hiddenList = useMemo(() => applySortList(quickFiltered.filter((s) => s.hidden)), [quickFiltered, watchSort]);
 
   function WatchRow({ s }: { s: Service }) {
     const sign = s.change > 0 ? "+" : "";
@@ -236,9 +267,11 @@ function WatchingContent() {
         <div style={{ height: 8 }} />
         <MarketSwitch activeTab={activeTab} onTabChange={switchTab} />
         {/* 大盘摘要区 */}
-        <div style={{ marginBottom: 6 }}>
-          <MarketSummaryBar marketTurnover={marketTurnover ?? {} as any} market={activeTab === 'A' ? 'A' : 'HK'} />
-        </div>
+        {marketTurnover && (
+          <div style={{ marginBottom: 6 }}>
+            <MarketSummaryBar marketTurnover={marketTurnover} market={activeTab === 'A' ? 'A' : 'HK'} />
+          </div>
+        )}
 
         {loading && (
           <MetricsLoadingBlock />
@@ -289,9 +322,49 @@ function WatchingContent() {
             />
             <FetchErrorBanner fetchError={fetchError} ts={ts} />
 
+            {/* quick filter toolbar */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
+              {QUICK_FILTERS.map((f) => {
+                const active = quickFilters.has(f.key);
+                return (
+                  <button
+                    key={f.key}
+                    onClick={() => toggleQuickFilter(f.key)}
+                    style={{
+                      fontSize: 12,
+                      padding: "3px 10px",
+                      borderRadius: 4,
+                      border: `1px solid ${active ? D.cyan : D.currentLine}`,
+                      background: active ? `${D.cyan}15` : "transparent",
+                      color: active ? D.cyan : D.comment,
+                      cursor: "pointer",
+                      fontFamily: "'JetBrains Mono', monospace",
+                    }}
+                  >
+                    {f.label}
+                  </button>
+                );
+              })}
+              <button
+                onClick={clearQuickFilters}
+                style={{
+                  fontSize: 12,
+                  padding: "3px 10px",
+                  borderRadius: 4,
+                  border: `1px solid ${D.currentLine}`,
+                  background: "transparent",
+                  color: D.comment,
+                  cursor: "pointer",
+                  fontFamily: "'JetBrains Mono', monospace",
+                }}
+              >
+                全部
+              </button>
+            </div>
+
             <div style={{ color: D.comment, marginBottom: 6 }}>
               节点: <span style={{ color: D.purple }}>{tabServices.length}</span>{"  "}
-              可见:<span style={{ color: D.fg }}>{watchStock.length + watchETF.length}</span>{"  "}
+              可见:<span style={{ color: D.fg }}>{watchStock.length + watchETF.length}</span>{quickFilters.size > 0 && <span style={{ color: D.yellow }}> (筛选中)</span>}{"  "}
               隐藏:<span style={{ color: D.comment }}>{hiddenList.length}</span>
             </div>
 

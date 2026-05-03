@@ -33,7 +33,7 @@ export const portfolioColumns: StockTableColumn<string>[] = [
 
 export const watchingColumns: StockTableColumn<string>[] = [
   { label: "标记", width: "9ch" },
-  { key: "id", label: "代码", width: "10ch", sortable: true },
+  { key: "id", label: "代码", width: "10ch" },
   { label: "名称", width: "10ch" },
   { key: "price", label: "现价", width: "10ch", alignRight: true, sortable: true, padWidth: 9 },
   { key: "change", label: "涨跌幅", width: "9ch", alignRight: true, sortable: true, padWidth: 8 },

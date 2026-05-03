@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useId } from "react";
 import { D } from "../theme";
 import { AppTabs } from "../components/AppTabs";
 import { AppTitleBar } from "../components/AppTitleBar";
@@ -349,7 +349,49 @@ function SummaryBar({ s }: { s: Summary }) {
   );
 }
 
+function StatsCards({ data }: { data: SimData }) {
+  const { live, summary } = data;
+  const pfVal = typeof live.profit_factor === "string" ? live.profit_factor : live.profit_factor.toFixed(2);
+  const winColor = live.win_rate > 0.5 ? D.cyan : live.win_rate > 0.3 ? D.orange : D.red;
+  const pfColor = typeof live.profit_factor === "string" || live.profit_factor > 1.5 ? D.cyan : live.profit_factor > 1 ? D.orange : D.red;
+  const sharpeColor = summary.sharpe_ratio > 1 ? D.purple : summary.sharpe_ratio > 0 ? D.orange : D.red;
+
+  const cards = [
+    { label: "今日盈亏", value: `${live.today_pnl >= 0 ? "+" : ""}${numFmt(live.today_pnl)}`, color: pnlColor(live.today_pnl) },
+    { label: "总盈亏", value: `${live.total_pnl >= 0 ? "+" : ""}${numFmt(live.total_pnl)}`, color: pnlColor(live.total_pnl) },
+    { label: "胜率", value: live.total_trades > 0 ? `${(live.win_rate * 100).toFixed(0)}%` : "-", sub: `${live.total_trades}笔交易`, color: winColor },
+    { label: "盈亏比", value: live.total_trades > 0 ? pfVal : "-", color: pfColor },
+    { label: "夏普比率", value: summary.sharpe_ratio.toFixed(2), color: sharpeColor },
+    { label: "最大回撤", value: `-${(summary.max_drawdown_pct * 100).toFixed(2)}%`, color: D.red },
+  ];
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 16 }}>
+      {cards.map((card) => (
+        <div
+          key={card.label}
+          style={{
+            border: `1px solid ${card.color}30`,
+            borderRadius: 6,
+            padding: "12px 16px",
+            background: `${card.color}08`,
+          }}
+        >
+          <div style={{ color: D.comment, fontSize: 11, marginBottom: 4 }}>{card.label}</div>
+          <div style={{ color: card.color, fontSize: 22, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>
+            {card.value}
+          </div>
+          {card.sub && (
+            <div style={{ color: D.comment, fontSize: 11, marginTop: 2 }}>{card.sub}</div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function EquityCurve({ data, initialCapital }: { data: DailyPnl[]; initialCapital: number }) {
+  const gradId = useId();
   if (data.length < 2) {
     return (
       <div style={{ color: D.comment, padding: "8px 0" }}>
@@ -395,7 +437,7 @@ function EquityCurve({ data, initialCapital }: { data: DailyPnl[]; initialCapita
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: "block" }}>
         <defs>
-          <linearGradient id="eqGrad" x1="0" y1="0" x2="0" y2="1">
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={lineColor} stopOpacity={0.25} />
             <stop offset="100%" stopColor={lineColor} stopOpacity={0.03} />
           </linearGradient>
@@ -431,7 +473,7 @@ function EquityCurve({ data, initialCapital }: { data: DailyPnl[]; initialCapita
           初始
         </text>
         {/* 填充 */}
-        <path d={areaPath} fill="url(#eqGrad)" />
+        <path d={areaPath} fill={`url(#${gradId})`} />
         {/* 折线 */}
         <path d={linePath} fill="none" stroke={lineColor} strokeWidth={1.5} />
         {/* 数据点 */}
@@ -1359,6 +1401,9 @@ export default function SimPage() {
 
         {!loading && data && (
           <>
+            {/* ── 统计卡片 ── */}
+            <StatsCards data={data} />
+
             {/* ── 实时摘要（总盈亏/收益率/胜率一目了然） ── */}
             <LiveSummaryBar live={data.live} ts={lastUpdate} />
 

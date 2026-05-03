@@ -98,7 +98,10 @@ function Home() {
         setAddCode(""); setAddCost(""); setAddShares("");
         refresh();
       }
-    } catch { /* ignore */ }
+    } catch (e) {
+      console.error("添加失败:", e);
+      alert("添加失败，请检查网络或代码格式");
+    }
   }
 
   // Filter alerts by active market tab (HK symbols start with "HK", rest are A-share)
@@ -384,9 +387,11 @@ function Home() {
         <MarketSwitch activeTab={activeTab} onTabChange={switchTab} />
 
         {/* 大盘摘要区 */}
-        <div style={{ marginBottom: 6 }}>
-          <MarketSummaryBar marketTurnover={marketTurnover ?? {} as any} market={activeTab === 'A' ? 'A' : 'HK'} />
-        </div>
+        {marketTurnover && (
+          <div style={{ marginBottom: 6 }}>
+            <MarketSummaryBar marketTurnover={marketTurnover} market={activeTab === 'A' ? 'A' : 'HK'} />
+          </div>
+        )}
 
         {loading && (
           <MetricsLoadingBlock blink />
@@ -479,21 +484,21 @@ function Home() {
         {tabHoldings.length > 0 && (
           <div style={{ color: D.comment, marginBottom: 6 }}>
             可用:<span style={{ color: D.fg }}>{fmtMoney(avail, { sign: "negativeOnly" })}</span>
-            <span style={{ color: D.comment }}>{activeTab === "HK" ? "HK$" : "¥"}</span>
+            <span style={{ color: D.comment }}>{activeTab === "HK" ? "HKD" : "CNY"}</span>
             {"  "}
             总市值:<span style={{ color: D.fg }}>{fmtMoney(tabPosition, { sign: "negativeOnly" })}</span>
-            <span style={{ color: D.comment }}>{activeTab === "HK" ? "HK$" : "¥"}</span>
+            <span style={{ color: D.comment }}>{activeTab === "HK" ? "HKD" : "CNY"}</span>
             {"  "}
             总资产:<span style={{ color: D.fg }}>{fmtMoney(totalAssets, { sign: "negativeOnly" })}</span>
-            <span style={{ color: D.comment }}>{activeTab === "HK" ? "HK$" : "¥"}</span>
+            <span style={{ color: D.comment }}>{activeTab === "HK" ? "HKD" : "CNY"}</span>
             {"  "}
             盈亏:<span style={{ color: chgColor(tabPnl) }}>{fmtMoney(tabPnl)}</span>
-            <span style={{ color: D.comment }}>{activeTab === "HK" ? "HK$" : "¥"}</span>
+            <span style={{ color: D.comment }}>{activeTab === "HK" ? "HKD" : "CNY"}</span>
             {"  "}
             收益率:<span style={{ color: chgColor(tabReturnPct) }}>{tabReturnPct >= 0 ? "+" : ""}{tabReturnPct.toFixed(1)}%</span>
             {"  "}
             今日:<span style={{ color: chgColor(tabTodayPnl) }}>{fmtMoney(tabTodayPnl)}</span>
-            <span style={{ color: D.comment }}>{activeTab === "HK" ? "HK$" : "¥"}</span>
+            <span style={{ color: D.comment }}>{activeTab === "HK" ? "HKD" : "CNY"}</span>
           </div>
         )}
 

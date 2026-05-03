@@ -27,7 +27,6 @@ export function useAlerts(
   marketTab?: string,
 ) {
   const lastSeenTs = useRef<number>(0);
-  const displayedCount = useRef<number>(0);
   const prevTab = useRef<string | undefined>(marketTab);
 
   useEffect(() => {
@@ -42,7 +41,6 @@ export function useAlerts(
 
     if (!alertEvents || alertEvents.length === 0) {
       lastSeenTs.current = 0;
-      displayedCount.current = 0;
       return;
     }
 
@@ -71,7 +69,6 @@ export function useAlerts(
       });
     }
 
-    displayedCount.current += toShow.length;
     addLogs(entries);
   }, [alertEvents, addLogs, marketTab]);
 }

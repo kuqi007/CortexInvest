@@ -40,7 +40,7 @@ function dbPath(envName: string, defaultPath: string) {
 export const CONFIG_DB_PATH = dbPath("AI_INVESTOR_CONFIG_DB_PATH", join(DATA_DIR, "config.db"));
 export const TRADING_DB_PATH = dbPath("AI_INVESTOR_TRADING_DB_PATH", join(DATA_DIR, "trading.db"));
 
-// Backward compat — remove after all routes migrated
+/** @deprecated Use TRADING_DB_PATH instead. Kept for backward compat during migration. */
 export const SIM_DB_PATH = TRADING_DB_PATH;
 
 export function openConfigDb(readonly = false) {
