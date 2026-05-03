@@ -618,7 +618,8 @@ def main():
         # TODO: 干跑模式下 mock feishu_send
 
     # Daemon singleton lock
-    lock_path = f"/tmp/tick_monitor.{os.getuid()}.lock"
+    (PROJECT_ROOT / "run").mkdir(parents=True, exist_ok=True)
+    lock_path = str(PROJECT_ROOT / "run" / "tick_monitor.lock")
     lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR)
     try:
         import fcntl

@@ -3947,7 +3947,8 @@ class AlertClusterer:
 
 
 if __name__ == "__main__":
-    lock_path = f"/tmp/stock_notifier.{os.getuid()}.lock"
+    (PROJECT_ROOT / "run").mkdir(parents=True, exist_ok=True)
+    lock_path = str(PROJECT_ROOT / "run" / "stock_notifier.lock")
     lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR)
     try:
         fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
