@@ -85,6 +85,7 @@ src/crawler/*.ts
 
 # pid files (stored in run/)
 run/
+web/.web.pid
 
 # browser state (runtime)
 browser-state*.json
