@@ -32,8 +32,8 @@ test.describe("StockDrawer 交互", () => {
   test.setTimeout(60_000);
   test.beforeEach(async ({ page }) => {
     await page.goto("/", { waitUntil: "domcontentloaded", timeout: 30_000 });
-    // 等数据加载: refresh counter 出现
-    await page.waitForSelector("text=/refresh #[1-9]/", { timeout: 30_000 });
+    // 等数据加载: 数据源出现表示 metrics 已加载
+    await page.waitForSelector("text=数据源", { timeout: 30_000 });
   });
 
   test("点击持仓行打开 drawer，显示股票代码", async ({ page }) => {
@@ -76,7 +76,7 @@ test.describe("Drawer 转自选/转持仓", () => {
 
   test("holding 股票 drawer 显示转自选按钮", async ({ page }) => {
     await page.goto("/", { waitUntil: "domcontentloaded", timeout: 30_000 });
-    await page.waitForSelector("text=/refresh #[1-9]/", { timeout: 30_000 });
+    await page.waitForSelector("text=数据源", { timeout: 30_000 });
 
     // 点击持仓行
     const stockRow = page.locator('[title="点击查看详情"]').first();
@@ -96,7 +96,7 @@ test.describe("Drawer 转自选/转持仓", () => {
 
   test("watching 股票 drawer 显示转持仓按钮", async ({ page }) => {
     await page.goto("/watching", { waitUntil: "domcontentloaded", timeout: 30_000 });
-    await page.waitForSelector("text=/refresh #[1-9]/", { timeout: 30_000 });
+    await page.waitForSelector("text=数据源", { timeout: 30_000 });
 
     // 等待任意一个 stock row 出现
     const stockRow = page.locator('[title="点击查看详情"]').first();

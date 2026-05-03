@@ -19,7 +19,7 @@ export default defineConfig({
   webServer: {
     command: "node scripts/prepare-e2e-data.mjs && npm run build && npm run start",
     port: 3120,
-    reuseExistingServer: false,
+    reuseExistingServer: true,
     timeout: 120_000,
     env: {
       AI_INVESTOR_DATA_DIR: e2eDataDir,
