@@ -1,8 +1,0 @@
-金融数据查询结果说明
-========================================
-查询内容: 东阳光投资收益 公允价值变动收益
-数据文件路径: /Users/zhuqiqi/Documents/development/aiSpace/ai-investor/东阳光_分析数据/mx_data_东阳光投资收益_公允价值变动收益.xlsx
-描述文件路径: /Users/zhuqiqi/Documents/development/aiSpace/ai-investor/东阳光_分析数据/mx_data_东阳光投资收益_公允价值变动收益_description.txt
-数据行数: 6
-表数量: 3
-Sheet 列表: 东阳光(600673.SH)的公允价值变动收益, 东阳光(600673.SH)投资收益, 东阳光(600673.SH)投资收益

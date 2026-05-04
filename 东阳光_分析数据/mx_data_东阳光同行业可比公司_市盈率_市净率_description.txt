@@ -1,8 +1,0 @@
-金融数据查询结果说明
-========================================
-查询内容: 东阳光同行业可比公司 市盈率 市净率
-数据文件路径: /Users/zhuqiqi/Documents/development/aiSpace/ai-investor/东阳光_分析数据/mx_data_东阳光同行业可比公司_市盈率_市净率.xlsx
-描述文件路径: /Users/zhuqiqi/Documents/development/aiSpace/ai-investor/东阳光_分析数据/mx_data_东阳光同行业可比公司_市盈率_市净率_description.txt
-数据行数: 11
-表数量: 2
-Sheet 列表: 天宸股份(600620.SH)等的市净率(PB,MRQ)(按最近公告日)、市盈率(TTM), 东阳光(600673.SH)同业公司
