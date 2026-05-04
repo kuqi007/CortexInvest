@@ -21,13 +21,16 @@ from pathlib import Path
 
 import requests
 
+# yfinance for macro indicators (gold, copper, VIX, treasury, FX)
+import yfinance as yf  # type: ignore
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 # 东方财富 push API 公开 token（所有 quant 库共用）
 EM_UT = "fa5fd1943c7b386f172d6893dbfba10b"
 
-from src.sim_trading.db import init_db, get_connection, get_config_connection
+from src.sim_trading.db import init_db, init_macro_tables, get_connection, get_config_connection
 from src.tools.futu_enricher import FutuL2Enricher
 from src.tools.stock_monitor import (
     fetch_realtime_eastmoney,
@@ -47,6 +50,10 @@ _futu_enricher = FutuL2Enricher()
 
 # 确保数据库 schema 包含所有表（包括新增的 market_amo_history）
 init_db()
+
+# ── Macro indicators (5min cool-down) ──
+_MACRO_LAST_RUN = 0
+_MACRO_INTERVAL = 300  # 5 minutes
 
 
 def _write_price_snapshots(
@@ -997,7 +1004,144 @@ def poll_once() -> bool:
 
     now = datetime.now().strftime("%H:%M:%S")
     logger.info(f"[{now}] 已更新 {len(services)} 只标的 -> trading.db")
+
+    # Macro indicators (5-min cooldown, never blocks main flow)
+    _poll_macro_once(ts, date_str)
+
     return True
+
+
+def _poll_macro_once(ts: int, date_str: str) -> None:
+    """宏观指标轮询 — 北向资金/黄金/铜/VIX/美债/汇率。
+
+    5 分钟冷却，所有异常 catch 住，绝不阻塞个股行情主流程。
+    """
+    global _MACRO_LAST_RUN
+    now = time.time()
+    if now - _MACRO_LAST_RUN < _MACRO_INTERVAL:
+        return
+    _MACRO_LAST_RUN = now
+
+    conn = None
+    try:
+        conn = get_connection()
+        # Load previous record for change_pct calculation
+        prev = conn.execute(
+            "SELECT gold_price, copper_price, usd_cnh, tungsten_price FROM macro_indicators ORDER BY ts DESC LIMIT 1"
+        ).fetchone()
+        prev_gold = prev["gold_price"] if prev else None
+        prev_copper = prev["copper_price"] if prev else None
+        prev_cnh = prev["usd_cnh"] if prev else None
+        prev_tungsten = prev["tungsten_price"] if prev else None
+
+        row: dict[str, any] = {"ts": ts, "date": date_str}
+
+        # 1. 北向资金 (akshare) — lazy import to avoid startup cost
+        try:
+            import akshare as ak
+
+            df = ak.stock_hsgt_hist_em(symbol="北向资金", period="实时")
+            if df is not None and not df.empty:
+                latest = df.iloc[-1]
+                row["northbound_net"] = float(latest.get("净流入", 0) or 0)
+                row["northbound_total"] = float(latest.get("成交额", 0) or 0)
+        except Exception as e:
+            logger.warning(f"Macro northbound failed: {e}")
+
+        # 2. 黄金 (yfinance)
+        try:
+            info = yf.Ticker("GC=F").info
+            price = info.get("regularMarketPrice") or info.get("previousClose")
+            if price:
+                row["gold_price"] = round(float(price), 2)
+                if prev_gold and prev_gold > 0:
+                    row["gold_change_pct"] = round((price - prev_gold) / prev_gold * 100, 2)
+        except Exception as e:
+            logger.warning(f"Macro gold failed: {e}")
+
+        # 3. 铜 (yfinance)
+        try:
+            info = yf.Ticker("HG=F").info
+            price = info.get("regularMarketPrice") or info.get("previousClose")
+            if price:
+                row["copper_price"] = round(float(price), 3)
+                if prev_copper and prev_copper > 0:
+                    row["copper_change_pct"] = round((price - prev_copper) / prev_copper * 100, 2)
+        except Exception as e:
+            logger.warning(f"Macro copper failed: {e}")
+
+        # 4. VIX (yfinance)
+        try:
+            info = yf.Ticker("^VIX").info
+            price = info.get("regularMarketPrice")
+            if price:
+                row["vix"] = round(float(price), 2)
+        except Exception as e:
+            logger.warning(f"Macro VIX failed: {e}")
+
+        # 5. 10Y 美债收益率 (yfinance) — ^TNX 返回的是收益率×10（即 45 表示 4.5%）
+        try:
+            info = yf.Ticker("^TNX").info
+            price = info.get("regularMarketPrice")
+            if price:
+                row["ty10y"] = round(float(price) / 10, 2)
+        except Exception as e:
+            logger.warning(f"Macro TNX failed: {e}")
+
+        # 6. 离岸人民币 (yfinance)
+        try:
+            info = yf.Ticker("USDCNH=X").info
+            price = info.get("regularMarketPrice")
+            if price:
+                row["usd_cnh"] = round(float(price), 4)
+                if prev_cnh and prev_cnh > 0:
+                    row["usd_cnh_change_pct"] = round((price - prev_cnh) / prev_cnh * 100, 2)
+        except Exception as e:
+            logger.warning(f"Macro USDCNH failed: {e}")
+
+        # 7. 钨价 (中钨在线网页抓取 — 65%黑钨精矿均价)
+        try:
+            import re
+            import requests
+
+            resp = requests.get(
+                "http://news.chinatungsten.com/cn/tungsten-product-news/",
+                timeout=10,
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+            resp.raise_for_status()
+            html = resp.text
+            # 匹配 "65%黑钨精矿价格报XX.X万元/标吨" 或 "65%黑钨精矿均价XX.X万元/标吨"
+            m = re.search(
+                r"65%黑钨精矿(?:价格报|均价)\s*([0-9]+(?:\.[0-9]+)?)\s*万元/标吨",
+                html,
+            )
+            if m:
+                price = float(m.group(1))
+                row["tungsten_price"] = round(price, 2)
+                if prev_tungsten and prev_tungsten > 0:
+                    row["tungsten_change_pct"] = round((price - prev_tungsten) / prev_tungsten * 100, 2)
+        except Exception as e:
+            logger.warning(f"Macro tungsten failed: {e}")
+
+        # Write to DB (only if at least one field was populated beyond ts/date)
+        if len(row) > 2:
+            cols = ", ".join(row.keys())
+            placeholders = ", ".join(["?"] * len(row))
+            conn.execute(
+                f"INSERT OR REPLACE INTO macro_indicators ({cols}) VALUES ({placeholders})",
+                list(row.values()),
+            )
+            conn.commit()
+            logger.info(f"Macro updated: {', '.join([k for k in row if k not in ('ts', 'date')])}")
+    except Exception as e:
+        logger.warning(f"Macro poll overall failed: {e}")
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def main():

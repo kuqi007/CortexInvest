@@ -1051,16 +1051,45 @@ def init_trading_db() -> None:
     conn.close()
 
 
+def init_macro_tables() -> None:
+    """Create macro_indicators table for Macro Monitor."""
+    conn = get_connection()
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS macro_indicators (
+            ts INTEGER PRIMARY KEY,
+            date TEXT NOT NULL,
+            northbound_net REAL,
+            northbound_total REAL,
+            gold_price REAL,
+            gold_change_pct REAL,
+            copper_price REAL,
+            copper_change_pct REAL,
+            vix REAL,
+            ty10y REAL,
+            usd_cnh REAL,
+            usd_cnh_change_pct REAL,
+            tungsten_price REAL,
+            tungsten_change_pct REAL
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
 def init_db() -> None:
     """Backward compatible init for existing tests. Initializes both."""
     init_config_db()
     init_trading_db()
+    init_macro_tables()
 
 
 def init_all_dbs() -> None:
     """Explicitly initialize both databases (used in main)."""
     init_config_db()
     init_trading_db()
+    init_macro_tables()
 
 
 if __name__ == "__main__":
