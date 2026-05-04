@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ReactNode } from "react";
 
-export type AppTabKey = "holdings" | "watching" | "starred" | "alerts" | "daily" | "sim" | "sector" | "manage";
+export type AppTabKey = "holdings" | "watching" | "starred" | "alerts" | "daily" | "sim" | "sector" | "manage" | "macro";
 
 type TabItem = { key: AppTabKey; label: string; href: string };
 
@@ -11,6 +11,7 @@ const TAB_ITEMS: TabItem[] = [
   { key: "watching", label: "watching", href: "/watching" },
   { key: "alerts", label: "alerts", href: "/alerts" },
   { key: "daily", label: "daily", href: "/daily" },
+  { key: "macro", label: "macro", href: "/macro" },
   { key: "sim", label: "sim", href: "/sim" },
   { key: "sector", label: "sector", href: "/sector" },
   { key: "manage", label: "manage", href: "/manage" },
@@ -42,7 +43,7 @@ export function AppTabs({ active, rightSlot }: { active: AppTabKey; rightSlot?: 
           <Link key={t.key} href={t.href} style={{ textDecoration: "none" }}>
             <div
               style={{
-                padding: "5px 16px",
+                padding: "5px 12px",
                 background: isActive ? C.bg : C.tabBg,
                 color: isActive ? C.fg : C.comment,
                 borderRight: "1px solid #191a21",
@@ -50,13 +51,11 @@ export function AppTabs({ active, rightSlot }: { active: AppTabKey; rightSlot?: 
                 display: "flex",
                 alignItems: "center",
                 gap: 6,
-                minWidth: 130,
                 cursor: "pointer",
               }}
             >
               <span style={{ fontSize: 8, color: isActive ? C.green : "#555" }}>{isActive ? "✱" : "●"}</span>
               <span>{t.label}</span>
-              <span style={{ marginLeft: "auto", color: C.comment, fontSize: 10 }}>⌘{i + 1}</span>
             </div>
           </Link>
         );

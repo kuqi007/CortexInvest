@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { D } from "../theme";
-import { AppTitleBar } from "../components/AppTitleBar";
+import { AppTabs } from "../components/AppTabs";
 
 /* ── Types ─────────────────────────────────────────────── */
 
@@ -46,9 +46,24 @@ function fmtInt(n: number | null): string {
 
 function changeColor(v: number | null): string {
   if (v === null || v === undefined || Number.isNaN(v)) return D.comment;
-  if (v > 0) return D.red;   // 涨 = red
-  if (v < 0) return D.green; // 跌 = green
-  return D.comment;
+  if (v > 0) return D.red;
+  if (v < 0) return D.green;
+  return D.fg; // 0% → white for contrast
+}
+
+function priceColor(v: number | null): string {
+  return changeColor(v);
+}
+
+function changeAbs(changePct: number | null, price: number | null): string {
+  if (changePct === null || changePct === undefined || Number.isNaN(changePct) || price === null || price === undefined || Number.isNaN(price)) return "—";
+  const abs = Math.abs(price * changePct / 100);
+  return `${changePct >= 0 ? "+" : "-"}${fmtNum(abs, 2)}`;
+}
+
+function fmtChangePct(v: number | null): string {
+  if (v === null || v === undefined || Number.isNaN(v)) return "—";
+  return `${v >= 0 ? "+" : ""}${fmtNum(v, 2)}%`;
 }
 
 function changeSign(v: number | null): string {
@@ -57,59 +72,128 @@ function changeSign(v: number | null): string {
   return "";
 }
 
-/* ── Card Component ────────────────────────────────────── */
+/* ── Sparkline helper ──────────────────────────────────── */
+
+function Sparkline({ data, color, labels }: { data: number[]; color: string; labels?: string[] }) {
+  if (!data || data.length < 2) return null;
+  const w = 120;
+  const h = 32;
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  const range = max - min || 1;
+  const coords = data.map((v, i) => {
+    const x = (i / (data.length - 1)) * w;
+    const y = h - ((v - min) / range) * h;
+    return { x, y, v };
+  });
+  const points = coords.map((c) => `${c.x},${c.y}`).join(" ");
+  return (
+    <svg width={w} height={h} style={{ opacity: 0.75 }} role="img" aria-label="近N日价格走势">
+      <polyline
+        fill="none"
+        stroke={color}
+        strokeWidth={2}
+        points={points}
+      />
+      {/* Data points with tooltip */}
+      {coords.map((c, i) => (
+        <circle
+          key={i}
+          cx={c.x}
+          cy={c.y}
+          r={2}
+          fill={color}
+          opacity={0.6}
+        >
+          <title>{labels?.[i] ?? `第${i + 1}日: ${c.v}`}</title>
+        </circle>
+      ))}
+      {/* End dot marker */}
+      {coords.length > 0 && (
+        <circle
+          cx={coords[coords.length - 1].x}
+          cy={coords[coords.length - 1].y}
+          r={3}
+          fill={color}
+          stroke={D.bg}
+          strokeWidth={1}
+        />
+      )}
+    </svg>
+  );
+}
+
+/* ── Card Component (Futu-style) ──────────────────────── */
 
 function MacroCard({
-  label,
-  value,
-  unit,
-  change,
-  alertBorder,
-  alertBg,
+  name,
+  price,
+  priceColor,
+  changeAbs,
+  changePct,
+  sparklineData,
 }: {
-  label: string;
-  value: string;
-  unit: string;
-  change: number | null;
-  alertBorder?: string;
-  alertBg?: string;
+  name: string;
+  price: string;
+  priceColor: string;
+  changeAbs: string;
+  changePct: string;
+  sparklineData?: number[];
 }) {
-  const borderColor = alertBorder || "transparent";
-  const bgColor = alertBg || D.bg;
-
+  const [hovered, setHovered] = useState(false);
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      // placeholder: could expand to detail view
+    }
+  };
   return (
     <div
+      tabIndex={0}
+      role="button"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onKeyDown={handleKeyDown}
       style={{
-        width: 200,
-        minWidth: 200,
-        padding: "16px 14px",
-        borderRadius: 8,
-        background: bgColor,
-        border: `2px solid ${borderColor}`,
+        padding: "16px",
+        borderRadius: 16,
+        background: D.currentLine,
         display: "flex",
         flexDirection: "column",
-        gap: 6,
+        gap: 8,
         fontFamily: "JetBrains Mono, monospace",
+        cursor: "default",
+        transform: hovered ? "translateY(-2px)" : "translateY(0)",
+        boxShadow: hovered
+          ? "0 8px 24px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.04)"
+          : "0 2px 8px rgba(0,0,0,0.2)",
+        transition: "transform 0.2s, box-shadow 0.2s",
+        outline: "none",
       }}
     >
-      <span style={{ fontSize: 11, color: D.comment, fontWeight: 500 }}>
-        {label}
+      {/* Name */}
+      <span style={{ fontSize: 13, color: "#a0a0b0", fontWeight: 400 }}>
+        {name}
       </span>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-        <span style={{ fontSize: 24, color: D.fg, fontWeight: 700 }}>
-          {value}
-        </span>
-        {unit && unit !== "—" && (
-          <span style={{ fontSize: 11, color: D.comment }}>{unit}</span>
+
+      {/* Price */}
+      <span style={{ fontSize: 26, color: priceColor, fontWeight: 700, lineHeight: 1.2 }}>
+        {price}
+      </span>
+
+      {/* Change row */}
+      <span style={{ fontSize: 12, color: priceColor, fontWeight: 500 }}>
+        {changeAbs} {changePct}
+      </span>
+
+      {/* Sparkline or placeholder */}
+      <div style={{ height: 32, marginTop: 2 }}>
+        {sparklineData && sparklineData.length >= 2 ? (
+          <Sparkline data={sparklineData} color={priceColor} />
+        ) : (
+          <div style={{ width: "100%", height: "100%" }} />
         )}
       </div>
-      {change !== null && change !== undefined && !Number.isNaN(change) ? (
-        <span style={{ fontSize: 13, color: changeColor(change), fontWeight: 600 }}>
-          {changeSign(change)}{fmtNum(change, 2)}%
-        </span>
-      ) : (
-        <span style={{ fontSize: 13, color: D.comment }}>—</span>
-      )}
     </div>
   );
 }
@@ -164,7 +248,7 @@ export default function MacroPage() {
     data?.northbound_net !== undefined &&
     !Number.isNaN(data.northbound_net) &&
     data.northbound_net < -50
-      ? { border: D.red, bg: "rgba(255, 85, 85, 0.06)" }
+      ? { color: D.red }
       : undefined;
 
   const goldAlert =
@@ -172,7 +256,7 @@ export default function MacroPage() {
     data?.gold_change_pct !== undefined &&
     !Number.isNaN(data.gold_change_pct) &&
     Math.abs(data.gold_change_pct) > 2
-      ? { border: D.orange, bg: "rgba(255, 184, 108, 0.06)" }
+      ? { color: D.orange }
       : undefined;
 
   const copperAlert =
@@ -180,7 +264,7 @@ export default function MacroPage() {
     data?.copper_change_pct !== undefined &&
     !Number.isNaN(data.copper_change_pct) &&
     Math.abs(data.copper_change_pct) > 3
-      ? { border: D.red, bg: "rgba(255, 85, 85, 0.06)" }
+      ? { color: D.red }
       : undefined;
 
   const vixAlert =
@@ -188,7 +272,7 @@ export default function MacroPage() {
     data?.vix !== undefined &&
     !Number.isNaN(data.vix) &&
     data.vix > 25
-      ? { border: D.red, bg: "rgba(255, 85, 85, 0.06)" }
+      ? { color: D.red }
       : undefined;
 
   const ty10yAlert =
@@ -196,7 +280,7 @@ export default function MacroPage() {
     data?.ty10y !== undefined &&
     !Number.isNaN(data.ty10y) &&
     data.ty10y > 4.5
-      ? { border: D.orange, bg: "rgba(255, 184, 108, 0.06)" }
+      ? { color: D.orange }
       : undefined;
 
   const fxAlert =
@@ -204,7 +288,7 @@ export default function MacroPage() {
     data?.usd_cnh_change_pct !== undefined &&
     !Number.isNaN(data.usd_cnh_change_pct) &&
     data.usd_cnh_change_pct < -0.5
-      ? { border: D.orange, bg: "rgba(255, 184, 108, 0.06)" }
+      ? { color: D.orange }
       : undefined;
 
   const tungstenAlert =
@@ -212,7 +296,7 @@ export default function MacroPage() {
     data?.tungsten_change_pct !== undefined &&
     !Number.isNaN(data.tungsten_change_pct) &&
     Math.abs(data.tungsten_change_pct) > 2
-      ? { border: D.orange, bg: "rgba(255, 184, 108, 0.06)" }
+      ? { color: D.orange }
       : undefined;
 
   /* ── Derived values ────────────────────────────────── */
@@ -247,7 +331,7 @@ export default function MacroPage() {
         flexDirection: "column",
       }}
     >
-      <AppTitleBar title="macro — 宏观指标" />
+      <AppTabs active="macro" />
 
       {/* Status bar */}
       <div
@@ -284,15 +368,14 @@ export default function MacroPage() {
         )}
       </div>
 
-      {/* Cards grid */}
+      {/* Cards grid — Futu style */}
       <div
         style={{
-          padding: "16px",
+          padding: "20px",
           display: "flex",
-          flexWrap: "wrap",
-          gap: 12,
+          flexDirection: "column",
+          gap: 24,
           flex: 1,
-          alignContent: "flex-start",
         }}
       >
         {loading ? (
@@ -309,75 +392,97 @@ export default function MacroPage() {
           </div>
         ) : (
           <>
-            {/* 1. 北向资金 */}
-            <MacroCard
-              label="北向净流入"
-              value={fmtNum(data?.northbound_net ?? null, 2)}
-              unit="亿元"
-              change={null}
-              alertBorder={northboundAlert?.border}
-              alertBg={northboundAlert?.bg}
-            />
+            {/* ── Section: 大宗商品 ───────────────────────── */}
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: D.fg, marginBottom: 12 }}>
+                大宗商品
+              </div>
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+                gap: 12,
+              }}>
+                <MacroCard
+                  name="COMEX黄金"
+                  price={fmtNum(data?.gold_price ?? null, 2)}
+                  priceColor={priceColor(data?.gold_change_pct ?? null)}
+                  changeAbs={changeAbs(data?.gold_change_pct ?? null, data?.gold_price ?? null)}
+                  changePct={fmtChangePct(data?.gold_change_pct ?? null)}
+                  sparklineData={history.map(h => h.gold_price).filter(Boolean) as number[]}
+                />
+                <MacroCard
+                  name="LME铜"
+                  price={fmtNum(data?.copper_price ?? null, 2)}
+                  priceColor={priceColor(data?.copper_change_pct ?? null)}
+                  changeAbs={changeAbs(data?.copper_change_pct ?? null, data?.copper_price ?? null)}
+                  changePct={fmtChangePct(data?.copper_change_pct ?? null)}
+                  sparklineData={history.map(h => h.copper_price).filter(Boolean) as number[]}
+                />
+                <MacroCard
+                  name="65%黑钨精矿"
+                  price={fmtNum(data?.tungsten_price ?? null, 2)}
+                  priceColor={priceColor(data?.tungsten_change_pct ?? null)}
+                  changeAbs={changeAbs(data?.tungsten_change_pct ?? null, data?.tungsten_price ?? null)}
+                  changePct={fmtChangePct(data?.tungsten_change_pct ?? null)}
+                  sparklineData={history.map(h => h.tungsten_price).filter(Boolean) as number[]}
+                />
+              </div>
+            </div>
 
-            {/* 2. 黄金 */}
-            <MacroCard
-              label="COMEX黄金"
-              value={fmtNum(data?.gold_price ?? null, 2)}
-              unit="USD"
-              change={data?.gold_change_pct ?? null}
-              alertBorder={goldAlert?.border}
-              alertBg={goldAlert?.bg}
-            />
+            {/* ── Section: 风险指标 ───────────────────────── */}
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: D.fg, marginBottom: 12 }}>
+                风险指标
+              </div>
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+                gap: 12,
+              }}>
+                <MacroCard
+                  name="VIX恐慌指数"
+                  price={fmtNum(data?.vix ?? null, 2)}
+                  priceColor={D.fg}
+                  changeAbs="—"
+                  changePct="—"
+                />
+                <MacroCard
+                  name="美债10Y收益率"
+                  price={fmtNum(data?.ty10y ?? null, 3)}
+                  priceColor={D.fg}
+                  changeAbs="—"
+                  changePct="—"
+                />
+              </div>
+            </div>
 
-            {/* 3. 铜 */}
-            <MacroCard
-              label="LME铜"
-              value={fmtNum(data?.copper_price ?? null, 2)}
-              unit="USD"
-              change={data?.copper_change_pct ?? null}
-              alertBorder={copperAlert?.border}
-              alertBg={copperAlert?.bg}
-            />
-
-            {/* 4. VIX */}
-            <MacroCard
-              label="VIX恐慌指数"
-              value={fmtNum(data?.vix ?? null, 2)}
-              unit=""
-              change={null}
-              alertBorder={vixAlert?.border}
-              alertBg={vixAlert?.bg}
-            />
-
-            {/* 5. 汇率 */}
-            <MacroCard
-              label="离岸人民币"
-              value={fmtNum(data?.usd_cnh ?? null, 4)}
-              unit=""
-              change={data?.usd_cnh_change_pct ?? null}
-              alertBorder={fxAlert?.border}
-              alertBg={fxAlert?.bg}
-            />
-
-            {/* 6. 钨价 */}
-            <MacroCard
-              label="65%黑钨精矿"
-              value={fmtNum(data?.tungsten_price ?? null, 2)}
-              unit="万元/标吨"
-              change={data?.tungsten_change_pct ?? null}
-              alertBorder={tungstenAlert?.border}
-              alertBg={tungstenAlert?.bg}
-            />
-
-            {/* ty10y 副指标 — 显示在北向卡片旁边但不单独成卡 */}
-            <MacroCard
-              label="美债10Y"
-              value={fmtNum(data?.ty10y ?? null, 3)}
-              unit=""
-              change={null}
-              alertBorder={ty10yAlert?.border}
-              alertBg={ty10yAlert?.bg}
-            />
+            {/* ── Section: 资金流动 ───────────────────────── */}
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: D.fg, marginBottom: 12 }}>
+                资金流动
+              </div>
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+                gap: 12,
+              }}>
+                <MacroCard
+                  name="北向净流入"
+                  price={fmtNum(data?.northbound_net ?? null, 2)}
+                  priceColor={data?.northbound_net != null && data.northbound_net > 0 ? D.red : data?.northbound_net != null && data.northbound_net < 0 ? D.green : D.fg}
+                  changeAbs="—"
+                  changePct="—"
+                />
+                <MacroCard
+                  name="离岸人民币"
+                  price={fmtNum(data?.usd_cnh ?? null, 4)}
+                  priceColor={priceColor(data?.usd_cnh_change_pct ?? null)}
+                  changeAbs={changeAbs(data?.usd_cnh_change_pct ?? null, data?.usd_cnh ?? null)}
+                  changePct={fmtChangePct(data?.usd_cnh_change_pct ?? null)}
+                  sparklineData={history.map(h => h.usd_cnh).filter(Boolean) as number[]}
+                />
+              </div>
+            </div>
           </>
         )}
       </div>
