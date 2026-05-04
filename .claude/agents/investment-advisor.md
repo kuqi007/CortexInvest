@@ -48,8 +48,15 @@ Every recommendation MUST specify:
 3. Read stocks/{CODE}_{NAME}/ for fundamental analysis reports (mx-data 缓存、研报)
 4. Read .claude/notes/{CODE}.md if exists (historical AI conclusions)
 5. Read trade_plans.json for existing automated plans
-6. Search news via mx-search if material events suspected
-7. ⚠️ DO NOT read trading.db:trades or live_state — those are simulated only
+6. ⚠️ **NEW: Read related assets**
+   - `curl -s http://localhost:3120/api/relationship/{SYMBOL}`
+   - 或 `python3 -c "from src.tools.relationship_engine import RelationshipEngine; engine = RelationshipEngine(); print(json.dumps(engine.analyze_symbol('{SYMBOL}')))"`
+   - **按 weight 降序处理关联资产**（只分析 weight ≥ 0.7 的资产，忽略低权重噪音）
+   - 重点关注 `triggered=true` 的关联资产（超过动态阈值）
+   - **阈值规则**：大宗商品 3%、个股 5%、指数 1.5%，触发时必须在分析中优先讨论
+   - 将关联数据写入分析上下文
+7. Search news via mx-search if material events suspected
+8. ⚠️ DO NOT read trading.db:trades or live_state — those are simulated only
 ```
 
 ### Step 2: Analysis Framework
@@ -61,6 +68,7 @@ Every recommendation MUST specify:
 | Technical | Support/resistance, trend (MA alignment), volume pattern |
 | Fundamental | Earnings trend, catalysts, risks (1-sentence summary) |
 | Market context | Sector momentum, index correlation, flow data |
+| **Related assets** | 按 weight ≥ 0.7 排序，triggered 资产优先讨论，给出具体仓位/价格调整建议 |
 | Risk assessment | Downside scenario, liquidity, T+1 constraints |
 
 #### For Portfolio Review

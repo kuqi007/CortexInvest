@@ -101,6 +101,29 @@ CREATE INDEX IF NOT EXISTS idx_pcl_ts ON position_change_log(ts);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_pcl_unique
     ON position_change_log(symbol, ts, source, shares_from, shares_to, cost_from, cost_to);
 
+-- 股票关联资产关系表
+CREATE TABLE IF NOT EXISTS stock_relationships (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    related_type TEXT NOT NULL CHECK (related_type IN ('commodity','peer_stock','currency','index','sector')),
+    related_code TEXT NOT NULL,
+    related_name TEXT,
+    data_source TEXT NOT NULL,
+    field_path TEXT,
+    influence TEXT DEFAULT 'positive' CHECK (influence IN ('positive','negative','neutral','complex')),
+    weight REAL DEFAULT 1.0,
+    threshold_pct REAL,
+    volatility_preset TEXT DEFAULT 'commodity' CHECK (volatility_preset IN ('commodity','stock','index','crypto')),
+    is_active INTEGER DEFAULT 1,
+    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+    UNIQUE(symbol, related_code)
+);
+CREATE INDEX IF NOT EXISTS idx_rel_symbol ON stock_relationships(symbol);
+CREATE INDEX IF NOT EXISTS idx_rel_related ON stock_relationships(related_code, related_type);
+CREATE INDEX IF NOT EXISTS idx_rel_active ON stock_relationships(is_active);
+CREATE INDEX IF NOT EXISTS idx_rel_symbol_active_weight ON stock_relationships(symbol, is_active, weight);
+
 CREATE TABLE IF NOT EXISTS poller_leader_lease (
     name TEXT PRIMARY KEY,
     holder_id TEXT NOT NULL,
