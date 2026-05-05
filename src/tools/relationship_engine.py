@@ -268,15 +268,23 @@ class RelationshipEngine:
     def get_relationships(self, symbol: str) -> List[Relationship]:
         self._ensure_initialized()
         assert self._conn is not None
-        rows = self._conn.execute(
-            """SELECT symbol, related_type, related_code, related_name,
-                      data_source, field_path, influence, weight,
-                      threshold_pct, volatility_preset
-               FROM stock_relationships
-               WHERE symbol=? AND is_active=1
-               ORDER BY weight DESC""",
-            (symbol,),
-        ).fetchall()
+        # Try exact match first, then fallback to common suffixes for A-share/HK/US
+        suffixes = ["", ".SH", ".SZ", ".BJ", ".HK", ".US"]
+        for suffix in suffixes:
+            candidate = symbol if suffix == "" else (symbol + suffix if "." not in symbol else symbol)
+            if suffix != "" and "." in symbol:
+                continue  # Already has suffix, skip redundant tries
+            rows = self._conn.execute(
+                """SELECT symbol, related_type, related_code, related_name,
+                          data_source, field_path, influence, weight,
+                          threshold_pct, volatility_preset
+                   FROM stock_relationships
+                   WHERE symbol=? AND is_active=1
+                   ORDER BY weight DESC""",
+                (candidate,),
+            ).fetchall()
+            if rows:
+                break
         return [
             Relationship(
                 symbol=r["symbol"],
