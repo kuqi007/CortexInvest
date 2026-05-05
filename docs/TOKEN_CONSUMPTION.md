@@ -31,21 +31,32 @@ CortexInvest 是一个 **LLM 密集型应用**，基于真实生产数据，月�
 
 | 套餐 | 开通时间 | 价格 | 已用比例 | 状态 |
 |------|----------|------|----------|------|
-| **Kimi Code Allegretto** | 2026-04-24 | ¥199 | **89%** | ⚠️ 即将耗尽 |
+| **Kimi Code Allegretto** | 2026-04-24 | ¥199 | **88.71%** | ⚠️ 即将耗尽 |
 
 > **关键发现**：
-> - Kimi Code 套餐 12 天内消耗 89%，日均消耗约 **15%**
-> - 预计 1-2 天内将完全耗尽
+> - Kimi Code 套餐 12 天内消耗 88.71%，日均消耗约 **15%**
+> - 下次自动续费：2026-05-24
 > - 反映出代码生成和复杂推理任务的高频需求
 
-> **三平台合计**: 2,228.10M+ tokens (22.28 亿) + Kimi Code 高频使用
+#### 4. Cursor 平台（2026-04 月度）
+
+| 指标 | 数值 |
+|------|------|
+| **时间范围** | Apr 01 - Apr 30 |
+| **总请求数** | 500 requests |
+| **按需消费** | US$44.44 |
+| **包含请求数** | 500 requests |
+| **使用模型** | gpt-5.4-medium, composer-2, agent_review, gpt-5.3-codex, gemini-3.1-pro-preview |
+
+> **四平台合计**: 2,228.10M+ tokens + Kimi Code 高频使用 + Cursor 500 requests
 > 
 > 数据来源：
-> - 智谱 AI 开放平台历史累计用量
-> - MiniMax 开放平台 2026-04 月度账单
-> - Moonshot Kimi Code 套餐用量
+> - 智谱 AI 开放平台历史累计用量（截图：`img/zhipu.png`）
+> - MiniMax 开放平台 2026-04 月度账单（截图：`img/minimax.png`）
+> - Moonshot Kimi Code 套餐用量（截图：`img/kimi.png`）
+> - Cursor 月度用量（截图：`img/cursorpng.png`）
 > 
-> 说明：本项目为**超重度 LLM 用户**，月均消耗超 15 亿 tokens，且增长迅速
+> 说明：本项目为**超重度 LLM 用户**，跨四平台月均消耗超 15 亿 tokens + 500+ requests
 
 ---
 
@@ -88,10 +99,19 @@ CortexInvest 是一个 **LLM 密集型应用**，基于真实生产数据，月�
 | **Zhipu** | GLM-5-Turbo | 12.26M | 0.6% | ~409K | ~$0.61 |
 | **Zhipu** | GLM-4.5-Air | 8.42M | 0.4% | ~281K | ~$0.42 |
 | **Zhipu** | 其他 | 3.20M | 0.1% | ~107K | ~$0.16 |
-| **Moonshot** | Kimi Code | Allegretto 套餐 | 89% 已用 | 高频代码生成 | ¥199/12天 |
+| **Moonshot** | Kimi Code | Allegretto 套餐 | 88.71% 已用 | 高频代码生成 | ¥199/12天 |
+| **Cursor** | gpt-5.4-medium/composer-2 | 500 requests | 100% | AI 编程助手 | US$44.44/月 |
 | **TOTAL** | | **2,226.50M+** | **100%** | **~74.2M+** | **~$111/day+** |
 
-**Monthly Cost**: ~$3,330+ (基于双平台实际用量 + Kimi Code 套餐)
+**Monthly Cost**: ~$3,375+ (基于四平台实际用量)
+
+| 平台 | 月度成本 | 说明 |
+|------|----------|------|
+| **MiniMax** | ~$2,280 | 1,522M tokens |
+| **智谱** | ~$1,050 | 705.61M tokens |
+| **Kimi Code** | ~$30 | Allegretto 套餐 |
+| **Cursor** | ~$45 | 500 requests |
+| **四平台合计** | **~$3,405** | **当前总成本** |
 
 ### 未来规划（接入 MiMo 后）
 
@@ -233,9 +253,10 @@ Total:                530K
 | Provider | Monthly Cost | Usage | Notes |
 |----------|-------------|-------|-------|
 | **MiniMax (Current)** | ~$2,280 | 1,522M/月 | M2.7 为主 |
-| **智谱 (Current)** | ~$1,050 | 30M/月 | GLM-5.1 为主 |
+| **智谱 (Current)** | ~$1,050 | 705.61M累计 | GLM-5.1 为主 |
 | **Kimi Code** | ~$30 | Allegretto 套餐 | 12 天用完 |
-| **三平台合计** | **~$3,360** | **1,550M+/月** | **当前总成本** |
+| **Cursor** | ~$45 | 500 requests | AI 编程助手 |
+| **四平台合计** | **~$3,405** | **1,550M+/月** | **当前总成本** |
 | **MiMo Ultra** | **~$600** | 2,000M/月 | **节省 82%** |
 | **MiMo Custom** | ~$900 | 3,000M/月 | 容量 2x，成本仍低 73% |
 
@@ -326,9 +347,10 @@ Actual measurements show our estimates are within ±10% of actual token counts.
 | 2026-05-05 | Added risk assessment | +30K/day |
 | 2026-05-05 | Updated with Zhipu usage data | 705.61M total |
 | 2026-05-05 | Added MiniMax 4月账单 | +1,522.49M/month |
-| 2026-05-05 | Added Kimi Code usage | Allegretto 89% used |
+| 2026-05-05 | Added Kimi Code usage | Allegretto 88.71% used |
+| 2026-05-05 | Added Cursor usage | 500 requests |
 
 **Current Baseline**: ~51.7M+ tokens/day (基于 MiniMax 实际账单)
-**三平台累计**: 2,228.10M+ tokens (22.28 亿+)
+**四平台累计**: 2,228.10M+ tokens + 500 requests
 **月均消耗**: ~1,550M+ tokens (15.5 亿+/月)
 **紧急状态**: Kimi Code 套餐即将耗尽（1-2 天内）
