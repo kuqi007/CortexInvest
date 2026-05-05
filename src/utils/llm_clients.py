@@ -1,3 +1,4 @@
+import json
 import os
 import time
 import backoff
@@ -7,7 +8,6 @@ from openai import OpenAI
 from google import genai
 from src.utils.logging_config import setup_logger, SUCCESS_ICON, ERROR_ICON, WAIT_ICON
 
-# 设置日志记录
 logger = setup_logger('llm_clients')
 
 
@@ -564,8 +564,170 @@ class OpenAICompatibleClient(LLMClient):
             return None
 
 
+class MiMoClient(LLMClient):
+    """Xiaomi MiMo API 客户端 (OpenAI Compatible)
+
+    支持 MiMo V2.5 系列模型：
+    - mimo-v2.5-chat: 通用对话模型
+    - mimo-v2.5-reasoning: 推理模型
+    - mimo-v2.5-vision: 多模态模型
+
+    特性:
+    - OpenAI 兼容 API 格式
+    - 中文金融文本优化
+    - 支持 function calling
+    - 支持 SSE streaming
+    - 256K 上下文窗口
+
+    使用示例:
+        client = MiMoClient(api_key="your_key", model="mimo-v2.5-chat")
+        response = client.get_completion([{"role": "user", "content": "分析茅台股票"}])
+    """
+
+    def __init__(self, api_key=None, model=None):
+        self.api_key = api_key or os.getenv("MIMO_API_KEY")
+        self.model = model or os.getenv("MIMO_MODEL", "mimo-v2.5-chat")
+        self.base_url = os.getenv("MIMO_BASE_URL", "https://api.mimo.xiaomi.com/v1")
+
+        if not self.api_key:
+            logger.error(f"{ERROR_ICON} 未找到 MIMO_API_KEY 环境变量")
+            raise ValueError(
+                "MIMO_API_KEY not found in environment variables. "
+                "Get your key from https://platform.xiaomimimo.com"
+            )
+
+        self.client = OpenAI(
+            base_url=self.base_url,
+            api_key=self.api_key
+        )
+        logger.info(f"{SUCCESS_ICON} MiMo 客户端初始化成功 "
+                    f"(model={self.model}, base_url={self.base_url})")
+
+    def get_completion(self, messages, max_retries=3, initial_retry_delay=1, **kwargs):
+        """获取 MiMo 模型回答"""
+        try:
+            for attempt in range(max_retries):
+                try:
+                    logger.info(f"{WAIT_ICON} 正在调用 MiMo API (model={self.model})...")
+
+                    response = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=messages,
+                        **kwargs
+                    )
+
+                    result = response.choices[0].message.content
+                    logger.info(f"{SUCCESS_ICON} MiMo API 调用成功")
+                    return result
+
+                except Exception as e:
+                    error_str = str(e)
+                    logger.error(
+                        f"{ERROR_ICON} 尝试 {attempt + 1}/{max_retries} 失败: {error_str}"
+                    )
+                    if attempt < max_retries - 1:
+                        retry_delay = initial_retry_delay * (2 ** attempt)
+                        logger.info(f"{WAIT_ICON} 等待 {retry_delay} 秒后重试...")
+                        time.sleep(retry_delay)
+                    else:
+                        return None
+
+        except Exception as e:
+            logger.error(f"{ERROR_ICON} MiMo get_completion 发生错误: {str(e)}")
+            return None
+
+    def get_completion_with_tools(self, messages, tools, tool_handlers, **kwargs):
+        """MiMo 支持 function calling"""
+        try:
+            logger.info(f"{WAIT_ICON} 调用 MiMo function calling...")
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+                **kwargs
+            )
+
+            message = response.choices[0].message
+
+            # 处理 tool calls
+            if message.tool_calls:
+                for tool_call in message.tool_calls:
+                    tool_name = tool_call.function.name
+                    tool_args = json.loads(tool_call.function.arguments)
+
+                    if tool_name in tool_handlers:
+                        handler = tool_handlers[tool_name]
+                        result = handler(**tool_args)
+
+                        # 添加 tool response 到 messages
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": str(result)
+                        })
+
+                # 获取最终回答
+                final_response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages
+                )
+                return final_response.choices[0].message.content
+
+            return message.content
+
+        except Exception as e:
+            logger.error(f"{ERROR_ICON} MiMo function calling 失败: {str(e)}")
+            return None
+
+    def get_completion_stream(self, messages, on_chunk=None, **kwargs):
+        """MiMo 支持 SSE streaming"""
+        try:
+            logger.info(f"{WAIT_ICON} 调用 MiMo streaming...")
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                stream=True,
+                **kwargs
+            )
+
+            full_text = ""
+            for chunk in response:
+                if chunk.choices and chunk.choices[0].delta:
+                    delta = chunk.choices[0].delta
+                    token = delta.content
+                    if token:
+                        full_text += token
+                        if on_chunk:
+                            on_chunk(token)
+
+            logger.info(f"{SUCCESS_ICON} MiMo streaming 完成，共 {len(full_text)} 字符")
+            return full_text
+
+        except Exception as e:
+            logger.error(f"{ERROR_ICON} MiMo streaming 失败: {str(e)}")
+            return None
+
+
 class LLMClientFactory:
-    """LLM 客户端工厂类"""
+    """LLM 客户端工厂类
+
+    支持多种 LLM 后端：
+    - Gemini (Google)
+    - OpenAI Compatible (OpenAI / Kimi / 其他)
+    - MiMo (Xiaomi) - 中文金融优化
+
+    使用示例:
+        # 自动选择
+        client = LLMClientFactory.create_client()
+
+        # 指定模型
+        client = LLMClientFactory.create_client("mimo")
+        client = LLMClientFactory.create_client("gemini")
+        client = LLMClientFactory.create_client("openai_compatible")
+    """
 
     @staticmethod
     def create_client(client_type="auto", **kwargs):
@@ -573,7 +735,7 @@ class LLMClientFactory:
         创建 LLM 客户端
 
         Args:
-            client_type: 客户端类型 ("auto", "gemini", "openai_compatible")
+            client_type: 客户端类型 ("auto", "gemini", "openai_compatible", "mimo")
             **kwargs: 特定客户端的配置参数
 
         Returns:
@@ -581,14 +743,20 @@ class LLMClientFactory:
         """
         # 如果设置为 auto，自动检测可用的客户端
         if client_type == "auto":
-            # 优先级：KIMI_* > OPENAI_COMPATIBLE_* > Gemini
+            # 优先级：MiMo > Kimi > OpenAI > Gemini
+            mimo_key = os.getenv("MIMO_API_KEY", "")
             kimi_key = os.getenv("KIMI_API_KEY", "")
             openai_key = os.getenv("OPENAI_COMPATIBLE_API_KEY", "")
             gemini_key = os.getenv("GEMINI_API_KEY", "")
 
-            # Kimi: 如果 KIMI_API_KEY 存在且不是占位符文本
             is_placeholder = lambda s: s.startswith("your_") or s.startswith("sk-your")
-            if kimi_key and not is_placeholder(kimi_key):
+
+            if mimo_key and not is_placeholder(mimo_key):
+                client_type = "mimo"
+                kwargs.setdefault("api_key", mimo_key)
+                kwargs.setdefault("model", os.getenv("MIMO_MODEL", "mimo-v2.5-chat"))
+                logger.info(f"{SUCCESS_ICON} 自动选择 MiMo API (Xiaomi)")
+            elif kimi_key and not is_placeholder(kimi_key):
                 client_type = "openai_compatible"
                 kwargs.setdefault("api_key", kimi_key)
                 kwargs.setdefault("base_url", os.getenv("KIMI_BASE_URL"))
@@ -604,7 +772,7 @@ class LLMClientFactory:
                 # 没有任何有效 key，报错而非静默降级
                 raise ValueError(
                     "No valid LLM API key found. Set one of: "
-                    "KIMI_API_KEY, OPENAI_COMPATIBLE_API_KEY, GEMINI_API_KEY"
+                    "MIMO_API_KEY, KIMI_API_KEY, OPENAI_COMPATIBLE_API_KEY, GEMINI_API_KEY"
                 )
 
         if client_type == "gemini":
@@ -616,6 +784,11 @@ class LLMClientFactory:
             return OpenAICompatibleClient(
                 api_key=kwargs.get("api_key"),
                 base_url=kwargs.get("base_url"),
+                model=kwargs.get("model")
+            )
+        elif client_type == "mimo":
+            return MiMoClient(
+                api_key=kwargs.get("api_key"),
                 model=kwargs.get("model")
             )
         else:

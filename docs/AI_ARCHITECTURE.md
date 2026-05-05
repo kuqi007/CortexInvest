@@ -1,4 +1,4 @@
-# 🤖 AI Agent Architecture
+# 🤖 AI Architecture & Multi-Agent Design
 
 ## Overview
 

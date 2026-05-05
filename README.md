@@ -2,27 +2,59 @@
 
 # 🧠 CortexInvest
 
-### AI-Powered Market Intelligence System
+### AI-Powered Market Intelligence System with Multi-Agent Architecture
 
-*A股/港股实时监控系统*
+*基于大语言模型(LLM)的 A股/港股智能投研系统*
 
 <img src="https://img.shields.io/badge/Python-3.9+-blue.svg?style=for-the-badge&logo=python&logoColor=white">
 <img src="https://img.shields.io/badge/Next.js-15-black?style=for-the-badge&logo=next.js&logoColor=white">
-<img src="https://img.shields.io/badge/Futu-OpenD-green?style=for-the-badge">
-<img src="https://img.shields.io/badge/Simulated-Trading-orange?style=for-the-badge">
+<img src="https://img.shields.io/badge/LLM-Gemini%20%7C%20OpenAI%20%7C%20Kimi-orange?style=for-the-badge">
+<img src="https://img.shields.io/badge/AI%20Agent-Multi--Agent-purple?style=for-the-badge">
+<img src="https://img.shields.io/badge/Token%20Plan-Ready-green?style=for-the-badge">
 
-一个功能完整的 A股/港股实时监控与模拟交易系统。
+**核心亮点**: 多 Agent 协作 · LLM 驱动的市场分析 · 智能日报生成 · 模型路由抽象层
 
 </div>
 
 ---
 
-## ⚠️ 免责声明
+## 🤖 AI 架构概览
 
-**本项目仅用于个人学习和研究目的，不构成任何投资建议。**
-- 所有交易信号和告警仅供参考
-- 模拟交易盈亏不代表真实交易结果
-- 投资有风险，入市需谨慎
+CortexInvest 是一个**以 LLM 为核心**的智能投研系统，采用 **Multi-Agent 架构**：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Multi-Agent 协作层                        │
+├─────────────┬─────────────┬──────────────┬──────────────────┤
+│  DataAgent  │ AlertAgent  │  TradeAgent  │   SummaryAgent   │
+│  (数据获取)  │  (告警分析)  │  (交易决策)   │  (日报生成)      │
+├─────────────┼─────────────┼──────────────┼──────────────────┤
+│             │             │              │                  │
+│  ┌──────────┴─────────────┴──────────────┴──────────────┐  │
+│  │              LLM Client Abstraction Layer              │  │
+│  │         (Gemini / OpenAI / Kimi / MiMo Ready)         │  │
+│  └────────────────────────────────────────────────────────┘  │
+│                              │                                │
+│              ┌───────────────┼───────────────┐                │
+│              ▼               ▼               ▼                │
+│         ┌─────────┐    ┌─────────┐    ┌─────────┐           │
+│         │ Gemini  │    │ OpenAI  │    │  MiMo   │           │
+│         │ 1.5/2.0 │    │ GPT-4   │    │ V2.5    │           │
+│         └─────────┘    └─────────┘    └─────────┘           │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### LLM 应用场景
+
+| 模块 | LLM 应用 | Token 消耗/次 | 频率 |
+|------|---------|--------------|------|
+| **Daily Summary** | 盘后综合分析生成 | ~50K | 每日 |
+| **Morning Briefing** | 早间市场简报 | ~30K | 每日 |
+| **Stock Analysis** | 个股深度分析 | ~20K | 按需 |
+| **Signal Interpret** | 交易信号解读 | ~10K | 实时 |
+| **Risk Assessment** | 风险评估报告 | ~15K | 每日 |
+
+**日均 Token 消耗**: ~100K-200K tokens
 
 ---
 
@@ -38,11 +70,14 @@ uv sync --all-extras
 cd web && npm install
 ```
 
-### 2. 配置环境变量
+### 2. 配置 LLM API Keys
 
 ```bash
 cp .env.example .env
-# 编辑 .env 填入必要的 API keys
+# 编辑 .env 填入 LLM API keys:
+# - GEMINI_API_KEY (Google Gemini)
+# - OPENAI_COMPATIBLE_API_KEY (OpenAI/Kimi)
+# - MIMO_API_KEY (Xiaomi MiMo - 预留接口)
 ```
 
 ### 3. 一键启动监控服务
@@ -130,6 +165,32 @@ cp .env.example .env
 
 ---
 
+## 🤖 LLM 集成架构
+
+### 多模型支持
+
+```python
+# src/utils/llm_clients.py
+from src.utils.llm_clients import LLMClientFactory
+
+# 支持多种 LLM 后端
+client = LLMClientFactory.create("gemini")      # Google Gemini
+client = LLMClientFactory.create("openai")      # OpenAI GPT-4
+client = LLMClientFactory.create("kimi")        # Moonshot Kimi
+client = LLMClientFactory.create("mimo")        # Xiaomi MiMo (预留)
+```
+
+### AI 功能模块
+
+| 模块 | 文件 | 功能描述 |
+|------|------|---------|
+| **LLM Client** | `src/utils/llm_clients.py` | 多模型抽象层，支持 Gemini/OpenAI/Kimi/MiMo |
+| **Daily Summary** | `src/tools/daily_summary_generator.py` | LLM 驱动的盘后综合分析 |
+| **Morning Brief** | `src/tools/daily_summary_generator.py` | LLM 生成早间市场简报 |
+| **Signal Analysis** | `src/tools/l2_strategy_engine.py` | AI 信号解读与风险评估 |
+
+---
+
 ## 📁 项目结构
 
 ```
@@ -142,7 +203,7 @@ cp .env.example .env
 │   │   ├── l2_strategy_daemon.py      # L2 策略守护
 │   │   ├── l2_strategy_engine.py      # L2 策略引擎
 │   │   ├── sector_index_engine.py     # 板块指数
-│   │   └── daily_summary_generator.py # 日报生成
+│   │   └── daily_summary_generator.py # LLM 日报生成
 │   ├── sim_trading/           # 模拟交易系统
 │   │   ├── realtime_engine.py         # 实时引擎 (v3)
 │   │   ├── broker.py                  # Broker 抽象
@@ -155,6 +216,7 @@ cp .env.example .env
 │   │   ├── audit/*.jsonl            # mutation 审计（outbox flush 落盘）
 │   │   └── archive/                 # 历史归档快照（可选）
 │   └── utils/                 # 工具函数
+│       └── llm_clients.py             # LLM 多模型客户端抽象层
 ├── web/                       # Next.js 监控面板
 │   ├── app/
 │   │   ├── page.tsx           # Holdings 页面
@@ -165,6 +227,10 @@ cp .env.example .env
 │   │   ├── manage/page.tsx    # Manage 页面
 │   │   └── api/               # API routes
 │   └── package.json
+├── docs/                      # 技术文档
+│   ├── AI_ARCHITECTURE.md     # AI 架构文档
+│   ├── TOKEN_CONSUMPTION.md   # Token 消耗统计
+│   └── ...
 ├── logs/                      # 日志目录
 └── pyproject.toml
 ```
@@ -192,7 +258,7 @@ uv run python -m src.sim_trading.replay_runner
 # 板块指数计算
 uv run python -m src.tools.sector_index_engine
 
-# 生成早间简报/日报
+# 生成早间简报/日报 (LLM 驱动)
 uv run python -c "from src.tools.daily_summary_generator import generate_morning_briefing; generate_morning_briefing()"
 uv run python -c "from src.tools.daily_summary_generator import generate_daily_summary; generate_daily_summary()"
 ```
@@ -229,8 +295,26 @@ node web/screenshots/test_full_checkup.mjs
 
 ## 📚 相关文档
 
+- [AI_ARCHITECTURE.md](./docs/AI_ARCHITECTURE.md) - AI 架构与 Multi-Agent 设计
+- [TOKEN_CONSUMPTION.md](./docs/TOKEN_CONSUMPTION.md) - LLM Token 消耗统计
 - [CLAUDE.md](./CLAUDE.md) - AI 开发入口文档（架构索引 + 命令速查）
 - [docs/](./docs/) - 分领域详细文档（ARCHITECTURE / SIM_TRADING / MONITORING / SECTOR / API / DATABASE）
+
+---
+
+## 🎯 MiMo 接入计划
+
+本项目已预留 **Xiaomi MiMo** 接入接口：
+
+- ✅ 多模型抽象层 (`llm_clients.py`)
+- ✅ OpenAI 兼容 API 格式支持
+- 🔄 MiMo V2.5 模型适配（待接入）
+- 🔄 中文金融文本优化（待测试）
+
+**预期收益**：
+- 降低 60% 以上的 LLM API 成本
+- 提升中文金融文本理解准确率
+- 支持更长上下文窗口（128K+）
 
 ---
 

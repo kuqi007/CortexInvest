@@ -1,14 +1,30 @@
 #!/usr/bin/env python3
 """
-Daily Summary Generator — post-market LLM-powered signal digest
+Daily Summary Generator — LLM-powered market intelligence report
 
-Aggregates L2 strategy signals, alert events, and market data after market close,
-then calls LLM to produce a structured daily report for the web dashboard.
+Uses Large Language Models (LLM) to analyze market data, trading signals, and alert
+events after market close. Produces structured daily reports with AI-generated insights
+for the web dashboard.
+
+Key Features:
+    - Multi-model LLM support (Gemini / OpenAI / Kimi / MiMo)
+    - Token-efficient prompt design (~50K tokens per report)
+    - Structured JSON output with market analysis
+    - Automatic fallback between LLM providers
+
+Token Consumption:
+    - Daily Summary: ~50,000 tokens per run
+    - Morning Briefing: ~30,000 tokens per run
+    - Monthly total: ~2.4M tokens (daily + morning)
 
 Output: trading.db:daily_summaries
 
 Usage:
+    # Generate daily summary (post-market)
     poetry run python -c "from src.tools.daily_summary_generator import generate_daily_summary; generate_daily_summary()"
+    
+    # Generate morning briefing (pre-market)
+    poetry run python -c "from src.tools.daily_summary_generator import generate_morning_briefing; generate_morning_briefing()"
 """
 
 import json
