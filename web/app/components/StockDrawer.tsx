@@ -1464,7 +1464,8 @@ function RelatedAssetsSection({ symbol }: { symbol: string }) {
   useEffect(() => {
     if (!symbol) return;
     setLoading(true);
-    fetch(`/api/relationship/${encodeURIComponent(symbol)}`)
+    const ctrl = new AbortController();
+    fetch(`/api/relationship/${encodeURIComponent(symbol)}`, { signal: ctrl.signal })
       .then((r) => r.json())
       .then((d) => {
         if (d.relationships && Array.isArray(d.relationships)) {
@@ -1475,6 +1476,7 @@ function RelatedAssetsSection({ symbol }: { symbol: string }) {
       })
       .catch(() => setData(null))
       .finally(() => setLoading(false));
+    return () => ctrl.abort();
   }, [symbol]);
 
   if (loading) {

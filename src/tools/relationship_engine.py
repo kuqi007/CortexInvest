@@ -3,6 +3,7 @@
 """
 
 import json
+import logging
 import os
 import sqlite3
 import time
@@ -10,6 +11,8 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Any
+
+logger = logging.getLogger(__name__)
 
 # ── DB 路径统一（复用 db.py 逻辑，消除硬编码不一致）───────────────────
 try:
@@ -150,8 +153,8 @@ class _MacroApiSource:
                 with urllib.request.urlopen(MACRO_API, timeout=3) as r:
                     raw = json.loads(r.read())
                 self.cache.set("macro_api", raw, CACHE_TTL["macro"])
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Macro API fetch failed: {e}")
         data = raw.get("data", {})
         result: Dict[str, Any] = {"raw": raw}
         if len(fields) >= 1:
@@ -183,8 +186,8 @@ class _AkshareSource:
                     }
                     self.cache.set(cache_key, result, CACHE_TTL["stock"])
                     return result
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"akshare fetch failed for {code}: {e}")
 
         return {"error": f"akshare fetch failed for {code}"}
 
@@ -216,8 +219,8 @@ class _YFinanceSource:
                 result = {"current": today, "change_pct": None}
                 self.cache.set(cache_key, result, CACHE_TTL["stock"])
                 return result
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"yfinance fetch failed for {code}: {e}")
 
         return {"error": f"yfinance fetch failed for {code}"}
 
@@ -268,12 +271,24 @@ class RelationshipEngine:
     def get_relationships(self, symbol: str) -> List[Relationship]:
         self._ensure_initialized()
         assert self._conn is not None
-        # Try exact match first, then fallback to common suffixes for A-share/HK/US
-        suffixes = ["", ".SH", ".SZ", ".BJ", ".HK", ".US"]
-        for suffix in suffixes:
-            candidate = symbol if suffix == "" else (symbol + suffix if "." not in symbol else symbol)
-            if suffix != "" and "." in symbol:
-                continue  # Already has suffix, skip redundant tries
+
+        # Normalize symbol: HK03858 -> 03858.HK, SH600519 -> 600519.SH, etc.
+        normalized = symbol
+        for prefix in ["HK", "SH", "SZ", "BJ", "US"]:
+            if symbol.startswith(prefix) and "." not in symbol:
+                normalized = symbol[len(prefix):] + "." + prefix
+                break
+
+        candidates = [normalized]
+        # Also try raw symbol and common suffixes for backward compat
+        if normalized != symbol:
+            candidates.append(symbol)
+        for suffix in [".SH", ".SZ", ".BJ", ".HK", ".US"]:
+            if not normalized.endswith(suffix) and normalized + suffix not in candidates:
+                candidates.append(normalized + suffix)
+
+        rows = []
+        for candidate in candidates:
             rows = self._conn.execute(
                 """SELECT symbol, related_type, related_code, related_name,
                           data_source, field_path, influence, weight,
@@ -285,6 +300,7 @@ class RelationshipEngine:
             ).fetchall()
             if rows:
                 break
+
         return [
             Relationship(
                 symbol=r["symbol"],

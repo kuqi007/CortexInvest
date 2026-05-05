@@ -8,8 +8,27 @@ const CONFIG_DB = path.join(ROOT, "src", "data", "config.db");
 /**
  * 异步执行 Python 分析，spawn 不经过 shell，彻底消除注入风险
  */
+interface RelationshipData {
+  symbol: string;
+  relationships: Array<{
+    type: string;
+    name: string;
+    code: string;
+    current: number | null;
+    change_pct: number | null;
+    triggered: boolean;
+    influence: string;
+    weight: number;
+    threshold: number;
+    error?: string | null;
+  }>;
+  triggered_count: number;
+  summary: string;
+  error?: string;
+}
+
 function analyzeSymbolAsync(symbol: string): Promise<{
-  data?: any;
+  data?: RelationshipData;
   error?: string;
   stderr?: string;
 }> {
