@@ -1304,6 +1304,9 @@ export function StockDrawer({
             )}
           </section>
 
+          {/* Section: 关联资产 */}
+          <RelatedAssetsSection symbol={symbol!} />
+
           {/* Section: 技术指标 */}
           {symbol && !symbol.startsWith("KR") && (
             <div style={{ borderTop: `1px solid ${D.currentLine}`, marginTop: 8, paddingTop: 16 }}>
@@ -1440,7 +1443,146 @@ export function StockDrawer({
   );
 }
 
-/* ── ChangeHistorySection ── */
+/* ── RelatedAssetsSection ── */
+interface RelatedAsset {
+  type: string;
+  name: string;
+  code: string;
+  current: number | null;
+  change_pct: number | null;
+  triggered: boolean;
+  influence: string;
+  weight: number;
+  threshold: number;
+  error?: string | null;
+}
+
+function RelatedAssetsSection({ symbol }: { symbol: string }) {
+  const [data, setData] = useState<{ relationships: RelatedAsset[]; triggered_count: number } | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!symbol) return;
+    setLoading(true);
+    fetch(`/api/relationship/${encodeURIComponent(symbol)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.relationships && Array.isArray(d.relationships)) {
+          setData({ relationships: d.relationships, triggered_count: d.triggered_count });
+        } else {
+          setData(null);
+        }
+      })
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  }, [symbol]);
+
+  if (loading) {
+    return (
+      <div style={{ color: D.comment, fontSize: 11, padding: "4px 0" }}>关联资产加载中...</div>
+    );
+  }
+
+  if (!data || data.relationships.length === 0) {
+    return null; // 无关联资产时不显示整个区域
+  }
+
+  return (
+    <div style={{ borderTop: `1px solid ${D.currentLine}`, marginTop: 8, paddingTop: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+        <div style={{ color: D.comment, fontSize: 11, textTransform: "uppercase", letterSpacing: 1 }}>
+          关联资产
+        </div>
+        {data.triggered_count > 0 && (
+          <span style={{
+            fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 3,
+            background: D.orange, color: D.bg,
+          }}>
+            {data.triggered_count} 项异动
+          </span>
+        )}
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {data.relationships.map((rel) => {
+          const hasValue = rel.current != null;
+          const hasChange = rel.change_pct != null;
+          const isUp = hasChange && rel.change_pct! > 0;
+          const isDown = hasChange && rel.change_pct! < 0;
+          const changeColor = isUp ? D.red : isDown ? D.green : D.comment;
+          const triggeredBg = rel.triggered ? "rgba(255, 184, 108, 0.08)" : "transparent";
+          const triggeredBorder = rel.triggered ? `1px solid ${D.orange}` : `1px solid ${D.currentLine}`;
+
+          return (
+            <div key={rel.code} style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "6px 10px",
+              borderRadius: 4,
+              background: triggeredBg,
+              border: triggeredBorder,
+              fontSize: 12,
+            }}>
+              {/* 类型标签 */}
+              <span style={{
+                fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 2,
+                background: D.currentLine, color: D.comment,
+                textTransform: "uppercase", letterSpacing: 0.5,
+                whiteSpace: "nowrap",
+              }}>
+                {rel.type === "commodity" ? "商品" : rel.type === "peer_stock" ? "对标" : rel.type === "index" ? "指数" : rel.type === "currency" ? "汇率" : rel.type}
+              </span>
+
+              {/* 名称 */}
+              <span style={{ color: D.fg, fontWeight: 600, minWidth: 80 }}>{rel.name}</span>
+
+              {/* 当前值 */}
+              <span style={{ color: D.fg, fontFamily: "JetBrains Mono, monospace", minWidth: 60, textAlign: "right" }}>
+                {hasValue ? rel.current!.toFixed(2) : "—"}
+              </span>
+
+              {/* 涨跌幅 pill */}
+              {hasChange && (
+                <span style={{
+                  fontSize: 11, fontWeight: 700, padding: "1px 6px", borderRadius: 8,
+                  background: isUp ? "rgba(255,85,85,0.12)" : isDown ? "rgba(80,250,123,0.12)" : D.currentLine,
+                  color: changeColor,
+                  fontFamily: "JetBrains Mono, monospace",
+                  whiteSpace: "nowrap",
+                }}>
+                  {isUp ? "▲" : isDown ? "▼" : "—"} {Math.abs(rel.change_pct!).toFixed(2)}%
+                </span>
+              )}
+
+              {/* 权重 */}
+              <span style={{ color: D.comment, fontSize: 10, marginLeft: "auto", fontFamily: "JetBrains Mono, monospace" }}>
+                w{rel.weight.toFixed(2)}
+              </span>
+
+              {/* 触发标记 */}
+              {rel.triggered && (
+                <span style={{
+                  fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 2,
+                  background: D.orange, color: D.bg,
+                }}>
+                  超阈值
+                </span>
+              )}
+
+              {/* 错误提示 */}
+              {rel.error && (
+                <span style={{ color: D.red, fontSize: 10, marginLeft: 4 }} title={rel.error}>
+                  !
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 function ChangeHistorySection({ symbol }: { symbol: string }) {
   const [expanded, setExpanded] = useState(false);
   const [logs, setLogs] = useState<ChangeLogEntry[]>([]);
