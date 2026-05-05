@@ -1,6 +1,10 @@
 <div align="center">
 
-# 📈 A股/港股实时监控系统
+# 🧠 CortexInvest
+
+### AI-Powered Market Intelligence System
+
+*A股/港股实时监控系统*
 
 <img src="https://img.shields.io/badge/Python-3.9+-blue.svg?style=for-the-badge&logo=python&logoColor=white">
 <img src="https://img.shields.io/badge/Next.js-15-black?style=for-the-badge&logo=next.js&logoColor=white">
