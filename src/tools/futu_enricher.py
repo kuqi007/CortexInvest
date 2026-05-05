@@ -333,7 +333,7 @@ class FutuL2Enricher:
                 except json.JSONDecodeError:
                     continue
                 cf = info.get("capital_flow")
-                if cf and cf.get("main_net_inflow") is not None:
+                if cf and cf.get("main_net_inflow") is not None and cf["main_net_inflow"] != 0:
                     result[row["code"]] = {
                         "mainNetInflow": cf["main_net_inflow"],
                         "retailNetInflow": 0,  # session 不拆分散户，用 0 占位

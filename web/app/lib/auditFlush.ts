@@ -1,6 +1,3 @@
-import { spawn } from "child_process";
-import { dirname, resolve } from "path";
-
 let lastFlushTs = 0;
 const MIN_FLUSH_INTERVAL_MS = 5_000;
 
@@ -10,13 +7,13 @@ function resolveDataDir(): string | undefined {
   }
   const configDbPath = process.env.AI_INVESTOR_CONFIG_DB_PATH;
   if (configDbPath) {
-    return dirname(configDbPath);
+    return eval("require")("path").dirname(configDbPath);
   }
   return undefined;
 }
 
 function resolveProjectRoot(): string {
-  return resolve(process.cwd(), "..");
+  return eval("require")("path").resolve(process.cwd(), "..");
 }
 
 export function triggerAuditFlush(): void {
@@ -34,7 +31,7 @@ export function triggerAuditFlush(): void {
     env.AI_INVESTOR_DATA_DIR = dataDir;
   }
 
-  const proc = spawn("uv", ["run", "python", "src/tools/audit_flush.py"], {
+  const proc = eval("require")("child_process").spawn("uv", ["run", "python", "src/tools/audit_flush.py"], {
     cwd: projectRoot,
     env,
     detached: true,
@@ -60,7 +57,7 @@ export function triggerAuditFlush(): void {
   }, KILL_TIMEOUT_MS);
   killTimer.unref();
 
-  proc.on("exit", (code) => {
+  proc.on("exit", (code: number | null) => {
     clearTimeout(killTimer);
     if (code !== 0 && code !== null) {
       console.warn(
@@ -70,7 +67,7 @@ export function triggerAuditFlush(): void {
     }
   });
 
-  proc.on("error", (err) => {
+  proc.on("error", (err: Error) => {
     clearTimeout(killTimer);
     console.warn("[auditFlush] spawn failed:", err.message);
   });

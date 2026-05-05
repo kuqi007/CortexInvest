@@ -48,6 +48,10 @@ logger = setup_logger("market_data_poller")
 # Futu L2 增强器 — 全局单例，懒连接，失败不影响主流程
 _futu_enricher = FutuL2Enricher()
 
+# 港股主力资金内存缓存：上一轮非零值，L2 限频时复用，避免额外 DB 查询
+_hk_inflow_cache: dict[str, tuple[float | None, float | None]] = {}
+_hk_inflow_cache_date: str = ""
+
 # 确保数据库 schema 包含所有表（包括新增的 market_amo_history）
 init_db()
 
@@ -65,6 +69,11 @@ def _write_price_snapshots(
     """
     if not services:
         return
+    # 新交易日清空主力资金缓存
+    global _hk_inflow_cache_date
+    if date_str != _hk_inflow_cache_date:
+        _hk_inflow_cache_date = date_str
+        _hk_inflow_cache.clear()
     conn = get_connection()
     try:
         cur = conn.cursor()
@@ -86,6 +95,15 @@ def _write_price_snapshots(
                     if row:
                         turnover = row["turnover"] or 0
                         vol_ratio = row["vol_ratio"] or 0
+
+            # 港股主力资金：L2 限频时 enricher 不返回数据，
+            # 从内存缓存复用上一轮非零值，不查 DB
+            main_inflow = svc.get("mainNetInflow")
+            main_inflow_pct = svc.get("mainNetInflowPct")
+            if main_inflow:
+                _hk_inflow_cache[code] = (main_inflow, main_inflow_pct)
+            elif code.startswith("HK") and code in _hk_inflow_cache:
+                main_inflow, main_inflow_pct = _hk_inflow_cache[code]
 
             cur.execute(
                 """
@@ -114,8 +132,8 @@ def _write_price_snapshots(
                     svc.get("prevClose"),
                     svc.get("amo1"),
                     svc.get("amo2"),
-                    svc.get("mainNetInflow"),
-                    svc.get("mainNetInflowPct"),
+                    main_inflow,
+                    main_inflow_pct,
                 ),
             )
         conn.commit()
